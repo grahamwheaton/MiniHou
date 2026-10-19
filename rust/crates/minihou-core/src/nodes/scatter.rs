@@ -1,6 +1,6 @@
 //! `scatter` (`minihou/nodes/scatter.py`): area-weighted point scattering on surfaces, or rejection sampling in volumes.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use super::{np_random::Rng, Inputs, NodeSpec, GEO};
 use crate::error::{Error, Result};
@@ -340,7 +340,18 @@ fn scatter_surface_with_options(geo: &Geometry, count: usize, seed: i64, density
     if let Some(p) = options {
         let iterations = p.i("relax_iterations")?;
         if iterations < 0 || iterations > 100 { return Err(Error::new("scatter: relax_iterations must be between 0 and 100")); }
-        if iterations > 0 { relax_samples(&mut out_pos, &mut samples, &triangles, geo, iterations as usize, p.f("scale_radii_by")?, p.f("max_relax_radius")?, p.b("use_geometric_normals")?)?; }
+        if iterations > 0 {
+            relax_samples(&mut out_pos, &mut samples, &triangles, geo, iterations as usize, p.f("scale_radii_by")?, p.f("max_relax_radius")?, p.b("use_geometric_normals")?)?;
+            for (i, &(ti, _)) in samples.iter().enumerate() {
+                let tri = &triangles[ti];
+                out_prim[i] = tri.prim;
+                let e1 = [0,1,2].map(|k| tri.b[k]-tri.a[k]);
+                let e2 = [0,1,2].map(|k| tri.c[k]-tri.a[k]);
+                let normal = cross(e1, e2);
+                let length = dot(normal, normal).sqrt().max(1e-20);
+                for k in 0..3 { out_n[3*i+k] = (normal[k]/length) as f32; }
+            }
+        }
     }
     let mut res = Geometry::points_only(out_pos)?;
     res.point.insert("N".into(), Arc::new(Attr::f32(3, out_n)));
@@ -380,10 +391,23 @@ fn relax_samples(pos: &mut [f32], samples: &mut [(usize, [f64; 3])], tris: &[Tri
         0.5 * dot(cross(e1,e2), cross(e1,e2)).sqrt()
     }).sum();
     let radius = (0.537 * (area / n as f64).sqrt() * scale).min(if max_radius > 0.0 { max_radius } else { f64::INFINITY });
+    // Shared source edges let points repel and travel between triangulated faces.
+    let mut edge_tris: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
+    for (ti, tri) in tris.iter().enumerate() {
+        for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+            let (lo, hi) = (tri.points[a].min(tri.points[b]), tri.points[a].max(tri.points[b]));
+            edge_tris.entry((lo, hi)).or_default().push(ti);
+        }
+    }
+    let mut neighbours: Vec<Vec<usize>> = (0..tris.len()).map(|i| vec![i]).collect();
+    for touching in edge_tris.values() {
+        for &i in touching { neighbours[i].extend(touching.iter().copied()); }
+    }
+    for adjacent in &mut neighbours { adjacent.sort_unstable(); adjacent.dedup(); }
     for _ in 0..iterations {
         let mut delta = vec![[0.0;3]; n];
         for i in 0..n { for j in i+1..n {
-            if samples[i].0 != samples[j].0 { continue; }
+            if !neighbours[samples[i].0].contains(&samples[j].0) { continue; }
             let mut d = [pos[3*i] as f64-pos[3*j] as f64,pos[3*i+1] as f64-pos[3*j+1] as f64,pos[3*i+2] as f64-pos[3*j+2] as f64];
             if let Some(normals) = &source_normals {
                 if normals.len() >= 3*n {
@@ -399,19 +423,30 @@ fn relax_samples(pos: &mut [f32], samples: &mut [(usize, [f64; 3])], tris: &[Tri
             }
         }}
         for i in 0..n {
-            let tri = &tris[samples[i].0];
-            let e1 = [tri.b[0]-tri.a[0],tri.b[1]-tri.a[1],tri.b[2]-tri.a[2]];
-            let e2 = [tri.c[0]-tri.a[0],tri.c[1]-tri.a[1],tri.c[2]-tri.a[2]];
-            let v = [pos[3*i] as f64+delta[i][0]-tri.a[0],pos[3*i+1] as f64+delta[i][1]-tri.a[1],pos[3*i+2] as f64+delta[i][2]-tri.a[2]];
-            let (aa,ab,bb) = (dot(e1,e1),dot(e1,e2),dot(e2,e2));
-            let det = aa*bb-ab*ab;
-            if det <= 1e-20 { continue; }
-            let mut u = (dot(v,e1)*bb-dot(v,e2)*ab)/det;
-            let mut w = (dot(v,e2)*aa-dot(v,e1)*ab)/det;
-            u = u.max(0.0); w = w.max(0.0);
-            if u+w > 1.0 { let sum = u+w; u /= sum; w /= sum; }
-            samples[i].1 = [1.0-u-w,u,w];
-            for k in 0..3 { pos[3*i+k] = (tri.a[k]+u*e1[k]+w*e2[k]) as f32; }
+            let target = [0,1,2].map(|k| pos[3*i+k] as f64 + delta[i][k]);
+            let mut best = None;
+            for &ti in &neighbours[samples[i].0] {
+                let tri = &tris[ti];
+                let e1 = [0,1,2].map(|k| tri.b[k]-tri.a[k]);
+                let e2 = [0,1,2].map(|k| tri.c[k]-tri.a[k]);
+                let v = [0,1,2].map(|k| target[k]-tri.a[k]);
+                let (aa,ab,bb) = (dot(e1,e1),dot(e1,e2),dot(e2,e2));
+                let det = aa*bb-ab*ab;
+                if det <= 1e-20 { continue; }
+                let mut u = (dot(v,e1)*bb-dot(v,e2)*ab)/det;
+                let mut w = (dot(v,e2)*aa-dot(v,e1)*ab)/det;
+                u = u.max(0.0); w = w.max(0.0);
+                if u+w > 1.0 { let sum = u+w; u /= sum; w /= sum; }
+                let projected = [0,1,2].map(|k| tri.a[k]+u*e1[k]+w*e2[k]);
+                let distance = (0..3).map(|k| (target[k]-projected[k]).powi(2)).sum::<f64>();
+                if best.as_ref().is_none_or(|(d, ..): &(f64, usize, [f64; 3], [f64; 3])| distance < *d) {
+                    best = Some((distance, ti, [1.0-u-w,u,w], projected));
+                }
+            }
+            if let Some((_, ti, weights, projected)) = best {
+                samples[i] = (ti, weights);
+                for k in 0..3 { pos[3*i+k] = projected[k] as f32; }
+            }
         }
     }
     Ok(())
@@ -679,6 +714,23 @@ pub(super) fn scatter_volume(geo: &Geometry, count: usize, seed: i64) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relaxation_repels_across_shared_primitive_edge() {
+        let g = Geometry::from_arrays(
+            vec![0.,0.,0., 1.,0.,0., 0.,1.,0., 1.,1.,0.],
+            vec![0,1,2, 1,3,2], vec![0,3,6], None,
+        ).unwrap();
+        let tris = [
+            Tri { a:[0.,0.,0.], b:[1.,0.,0.], c:[0.,1.,0.], prim:0, points:[0,1,2], vertices:[0,1,2], physical_area:0.5, texture_area:0.5 },
+            Tri { a:[1.,0.,0.], b:[1.,1.,0.], c:[0.,1.,0.], prim:1, points:[1,3,2], vertices:[3,4,5], physical_area:0.5, texture_area:0.5 },
+        ];
+        let mut pos = vec![0.49,0.49,0., 0.51,0.51,0.];
+        let mut samples = vec![(0, [0.02,0.49,0.49]), (1, [0.49,0.02,0.49])];
+        relax_samples(&mut pos, &mut samples, &tris, &g, 1, 1.0, 0.0, true).unwrap();
+        let separation = ((pos[0]-pos[3]).powi(2)+(pos[1]-pos[4]).powi(2)).sqrt();
+        assert!(separation > 0.04, "shared-edge samples should repel: {separation}");
+    }
     use std::sync::Arc;
 
     #[test]
