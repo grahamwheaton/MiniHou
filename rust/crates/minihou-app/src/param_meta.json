@@ -7431,8 +7431,63 @@
   },
   "density_attribute": {
    "default": "",
-   "doc": "Optional point float attribute controlling each surface sample's acceptance probability; empty disables density.",
+   "doc": "Optional point, vertex, primitive, or detail scalar attribute controlling density; empty disables density.",
    "kind": "str"
+  },
+  "density_scale": {
+   "default": 1.0,
+   "doc": "Multiplier for the point density.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "detail_as_detail": {
+   "default": "",
+   "doc": "Detail attributes to retain as detail attributes.",
+   "kind": "str"
+  },
+  "detail_attributes": {
+   "default": "",
+   "doc": "Detail attributes to copy onto output points.",
+   "kind": "str"
+  },
+  "force_total_count": {
+   "default": false,
+   "doc": "Keep the requested total count when scattering by density.",
+   "kind": "bool"
+  },
+  "generate": {
+   "default": "by_count",
+   "doc": "Choose count, density, primitive count, or texture space generation.",
+   "kind": "enum",
+   "options": [
+    "by_count",
+    "by_area",
+    "by_density",
+    "count_per_primitive",
+    "in_texture_space"
+   ]
+  },
+  "global_seed": {
+   "default": 0,
+   "doc": "Additional global random seed.",
+   "kind": "int"
+  },
+  "group": {
+   "default": "",
+   "doc": "Primitive group to scatter on; empty selects all primitives.",
+   "kind": "str"
+  },
+  "max_point_limit": {
+   "default": 1000000,
+   "doc": "Maximum number of generated points.",
+   "kind": "int",
+   "min": 0
+  },
+  "max_relax_radius": {
+   "default": 0.0,
+   "doc": "Maximum relaxation radius; zero uses an automatic limit.",
+   "kind": "float",
+   "min": 0.0
   },
   "mode": {
    "default": "surface",
@@ -7443,10 +7498,123 @@
     "volume"
    ]
   },
+  "output_density_attribute": {
+   "default": false,
+   "doc": "Output Density at each generated point.",
+   "kind": "bool"
+  },
+  "output_density_attribute_name": {
+   "default": "density",
+   "doc": "Attribute name for Density at each generated point.",
+   "kind": "str"
+  },
+  "output_id_attribute": {
+   "default": false,
+   "doc": "Output Stable generated point identifier.",
+   "kind": "bool"
+  },
+  "output_id_attribute_name": {
+   "default": "id",
+   "doc": "Attribute name for Stable generated point identifier.",
+   "kind": "str"
+  },
+  "output_radius_and_density_in_texture_space": {
+   "default": false,
+   "doc": "Use texture coordinates for radius and density output.",
+   "kind": "bool"
+  },
+  "output_radius_attribute": {
+   "default": false,
+   "doc": "Output Radius at each generated point.",
+   "kind": "bool"
+  },
+  "output_radius_attribute_name": {
+   "default": "pscale",
+   "doc": "Attribute name for Radius at each generated point.",
+   "kind": "str"
+  },
+  "override_prim_area": {
+   "default": 0.0,
+   "doc": "Area used per primitive instead of its measured area; zero uses measured area.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "point_attributes": {
+   "default": "*",
+   "doc": "Point attributes to interpolate; * selects all.",
+   "kind": "str"
+  },
+  "prim_num_attribute": {
+   "default": false,
+   "doc": "Output Source primitive number.",
+   "kind": "bool"
+  },
+  "prim_num_attribute_name": {
+   "default": "sourceprim",
+   "doc": "Attribute name for Source primitive number.",
+   "kind": "str"
+  },
+  "prim_uvw_attribute": {
+   "default": false,
+   "doc": "Output Source primitive coordinates.",
+   "kind": "bool"
+  },
+  "prim_uvw_attribute_name": {
+   "default": "sourceprimuv",
+   "doc": "Attribute name for Source primitive coordinates.",
+   "kind": "str"
+  },
+  "primitive_attributes": {
+   "default": "",
+   "doc": "Primitive attributes to copy onto output points.",
+   "kind": "str"
+  },
+  "primitive_seed_attribute": {
+   "default": "",
+   "doc": "Primitive integer attribute used to seed each primitive.",
+   "kind": "str"
+  },
+  "randomize_point_order": {
+   "default": false,
+   "doc": "Shuffle the generated point order.",
+   "kind": "bool"
+  },
+  "relax_iterations": {
+   "default": 0,
+   "doc": "Number of repulsion passes to reduce clumping.",
+   "kind": "int",
+   "min": 0
+  },
+  "scale_radii_by": {
+   "default": 1.0,
+   "doc": "Scale the radii used for relaxation and radius output.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "scatter_on_voxels_independently": {
+   "default": false,
+   "doc": "Sample each volume voxel independently.",
+   "kind": "bool"
+  },
   "seed": {
    "default": 0,
    "doc": "",
    "kind": "int"
+  },
+  "use_area_for_2d_volumes": {
+   "default": true,
+   "doc": "Treat single-layer volumes using area density.",
+   "kind": "bool"
+  },
+  "use_geometric_normals": {
+   "default": false,
+   "doc": "Use face normals for relaxation.",
+   "kind": "bool"
+  },
+  "vertex_attributes": {
+   "default": "N uv*",
+   "doc": "Vertex attributes to interpolate onto output points.",
+   "kind": "str"
   }
  },
  "scatteralign": {

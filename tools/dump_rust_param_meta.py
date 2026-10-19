@@ -435,7 +435,43 @@ def meta() -> dict:
     add("copy_point_attributes", "bool", True, "Copy source point attributes to generated points.")
     add("point_attributes", "str", "*", "Space-separated source point attributes to copy; * copies all. Float attributes interpolate, integers use the dominant vertex.")
     out["scatteralign"] = sa
-    out["scatter"]["density_attribute"] = {"kind": "str", "default": "", "doc": "Optional point float attribute controlling each surface sample's acceptance probability; empty disables density."}
+    out["scatter"]["density_attribute"] = {"kind": "str", "default": "", "doc": "Optional point, vertex, primitive, or detail scalar attribute controlling density; empty disables density."}
+    sc = out["scatter"]
+    def scatter_param(name, kind, default, doc, **extra):
+        sc[name] = {"kind": kind, "default": default, "doc": doc, **extra}
+    scatter_param("group", "str", "", "Primitive group to scatter on; empty selects all primitives.")
+    scatter_param("generate", "enum", "by_count", "Choose count, density, primitive count, or texture space generation.", options=["by_count", "by_area", "by_density", "count_per_primitive", "in_texture_space"])
+    scatter_param("scatter_on_voxels_independently", "bool", False, "Sample each volume voxel independently.")
+    scatter_param("force_total_count", "bool", False, "Keep the requested total count when scattering by density.")
+    scatter_param("density_scale", "float", 1.0, "Multiplier for the point density.", min=0.0)
+    scatter_param("override_prim_area", "float", 0.0, "Area used per primitive instead of its measured area; zero uses measured area.", min=0.0)
+    scatter_param("use_area_for_2d_volumes", "bool", True, "Treat single-layer volumes using area density.")
+    scatter_param("max_point_limit", "int", 1000000, "Maximum number of generated points.", min=0)
+    scatter_param("global_seed", "int", 0, "Additional global random seed.")
+    scatter_param("primitive_seed_attribute", "str", "", "Primitive integer attribute used to seed each primitive.")
+    scatter_param("randomize_point_order", "bool", False, "Shuffle the generated point order.")
+    scatter_param("relax_iterations", "int", 0, "Number of repulsion passes to reduce clumping.", min=0)
+    scatter_param("use_geometric_normals", "bool", False, "Use face normals for relaxation.")
+    scatter_param("scale_radii_by", "float", 1.0, "Scale the radii used for relaxation and radius output.", min=0.0)
+    scatter_param("max_relax_radius", "float", 0.0, "Maximum relaxation radius; zero uses an automatic limit.", min=0.0)
+    for enabled, name, default_name, doc in [
+        ("prim_num_attribute", "prim_num_attribute_name", "sourceprim", "Source primitive number."),
+        ("prim_uvw_attribute", "prim_uvw_attribute_name", "sourceprimuv", "Source primitive coordinates."),
+        ("output_density_attribute", "output_density_attribute_name", "density", "Density at each generated point."),
+        ("output_radius_attribute", "output_radius_attribute_name", "pscale", "Radius at each generated point."),
+        ("output_id_attribute", "output_id_attribute_name", "id", "Stable generated point identifier."),
+    ]:
+        scatter_param(enabled, "bool", False, "Output " + doc)
+        scatter_param(name, "str", default_name, "Attribute name for " + doc)
+    scatter_param("output_radius_and_density_in_texture_space", "bool", False, "Use texture coordinates for radius and density output.")
+    for name, default, doc in [
+        ("point_attributes", "*", "Point attributes to interpolate; * selects all."),
+        ("vertex_attributes", "N uv*", "Vertex attributes to interpolate onto output points."),
+        ("primitive_attributes", "", "Primitive attributes to copy onto output points."),
+        ("detail_attributes", "", "Detail attributes to copy onto output points."),
+        ("detail_as_detail", "", "Detail attributes to retain as detail attributes."),
+    ]:
+        scatter_param(name, "str", default, doc)
     # Rust-only native instances for Copy to Points (nodes/packed.rs); off keeps the Python-identical copy.
     out["copy_to_points"]["pack_instances"] = {"kind": "bool", "default": True, "doc": "Output native instances (one point per copy referencing the shared source, with its transform) instead of copying the source geometry; Unpack converts them to real geometry."}
     for node_id, params in package_meta().items():

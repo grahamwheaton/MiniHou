@@ -15,6 +15,37 @@ pub const SCATTER: NodeSpec = NodeSpec {
         "seed": 0;
         "mode": "surface";
         "density_attribute": "";
+        "group": "";
+        "generate": "by_count";
+        "scatter_on_voxels_independently": false;
+        "force_total_count": false;
+        "density_scale": 1.0;
+        "override_prim_area": 0.0;
+        "use_area_for_2d_volumes": true;
+        "max_point_limit": 1000000;
+        "global_seed": 0;
+        "primitive_seed_attribute": "";
+        "randomize_point_order": false;
+        "relax_iterations": 0;
+        "use_geometric_normals": false;
+        "scale_radii_by": 1.0;
+        "max_relax_radius": 0.0;
+        "prim_num_attribute": false;
+        "prim_num_attribute_name": "sourceprim";
+        "prim_uvw_attribute": false;
+        "prim_uvw_attribute_name": "sourceprimuv";
+        "output_density_attribute": false;
+        "output_density_attribute_name": "density";
+        "output_radius_attribute": false;
+        "output_radius_attribute_name": "pscale";
+        "output_id_attribute": false;
+        "output_id_attribute_name": "id";
+        "output_radius_and_density_in_texture_space": false;
+        "point_attributes": "*";
+        "vertex_attributes": "N uv*";
+        "primitive_attributes": "";
+        "detail_attributes": "";
+        "detail_as_detail": "";
     ),
     cook: scatter,
 };
