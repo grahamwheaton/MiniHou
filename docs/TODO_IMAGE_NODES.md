@@ -1,8 +1,3 @@
-## PRIORITY (bumped 2026-10-19): silhouette outline and darker object orange
-
-- Silhouette outline: when an object is selected, show only its silhouette outline in orange, not internal faces and edges (screenshot 86).
-- Darker orange for object selection, distinct from the point, edge and face selection colours.
-
 # QUEUE (ordered, highest priority first)
 
 1. **Viewport select arrow on group and element fields** (purple highlight). Shared widget, see below.
@@ -227,16 +222,6 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 
 For nodes with output groups, show an "Output Groups" section like Houdini: one row per output group, with a checkbox (enable that group), a label (for example "Point Fillet Polygons") and a group-name field (for example `pointfilletpolys`). The name field is greyed when the checkbox is off. Applies to every node with output groups, for example polyfillet and similar nodes.
 
-## Bug: purple group arrow clears selection, then crashes on second press (reported 2026-10-18)
-
-Repro (user): make a box, add Loop Cut, make a group of edges, click the purple arrow on the group field. Expected: the group's edges highlight in purple. Actual: the selection is cleared. Pressing the arrow again crashes the app.
-
-Likely cause (first press): main.rs `UiAction::PickParameter` clears `self.selection` and `group_preview` and does not load the field's current value into the highlight, so the existing group is not shown. Second press: `self.param_pick` is overwritten and `previous_display` is saved while `display` already points at the pick source, so the restore on exit is wrong; a panic in the pick path is the probable crash. Needs the panic text (run the exe from a terminal) to confirm.
-
-## Future: darker orange for object selection (requested 2026-10-18)
-
-Object selection should use a darker orange than the point, edge and face selection colours, so the two are easy to tell apart in the viewport. Check the selection colour constants in the viewport code and the object outline colour before changing them.
-
 ## Future: app icon and top-left logo (requested 2026-10-18)
 
 Use the blue "M" logo (rounded blue square with a white M) as the app icon (window and taskbar, and the exe icon) and in the top-left of the editor, in place of the current icon. Needs the logo as an .ico for the exe and a PNG for the in-app header.
@@ -249,10 +234,6 @@ Use the blue "M" logo (rounded blue square with a white M) as the app icon (wind
 Check the key table in rust/crates/minihou-app/docs/NATIVE_EDITOR.md and the keymap test when adding the keys.
 
 
-
-## Future: group highlight on any selected node (requested 2026-10-18)
-
-Any node with a group field should show its group members in purple when that node is selected in the node editor, even if the node is not the displayed one. Needs the selected node's own cooked geometry (its input is cooked, not displayed), so the viewport overlay can show the group from that node's output.
 
 ## Future: call the "primitives" domain "faces" (requested 2026-10-18)
 
@@ -276,7 +257,6 @@ Migrate the legacy nodes to the self-registering package system, following docs/
 
 ## Bugs from testing b35cd5767 (reported 2026-10-18)
 
-2. **Group create from the Tab menu:** the edge selection stays orange while the domain is points. The purple group highlight should show whenever the node is selected (not only on hover of the arrow), and follow the node's domain (edges when edges).
 8. **Push/pull does not always punch through** (see screenshot 72.png: a diagonal band of faces stays unpunched on the cube). Not reproduced in the node: a rotated box with an inset top punches cleanly (regression test through_hole_on_rotated_box_has_no_unpunched_band); needs the scene from 72.png.
 
 ## Features from testing (reported 2026-10-18)
@@ -348,10 +328,6 @@ In Houdini, a middle-mouse click on a number field opens a vertical scale bar wi
 ## Feature: copy and paste parameter values with the mouse (requested 2026-10-18)
 
 Hover over a parameter value and press Ctrl+C to copy it. Hover over another parameter and press Ctrl+V to paste it. Works for number, vector (all channels), text and enum values, and for group fields. Keep the copied value in the app (not the system clipboard only), so it works between nodes.
-
-## Feature: silhouette outline for a selected object (requested 2026-10-18)
-
-When an object is selected, show only its silhouette outline (the outer edge seen from the camera) in orange, not the internal faces and edges. Screenshot 86 shows the current internal edges on a selected object.
 
 ## Testing feedback round 3 (2026-10-19)
 

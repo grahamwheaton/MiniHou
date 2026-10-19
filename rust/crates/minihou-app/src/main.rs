@@ -5,7 +5,7 @@ mod node_selection;
 mod coplanar_tool;
 mod group_preview;
 mod param_pick;
-use param_pick::{field_selection, infer_mode, ParamPick, PickedField, param_pick_end, input_source, source_ready};
+use param_pick::{field_selection, infer_mode, ParamPick, PickedField, param_pick_end, input_source, source_ready, pick_source_ready};
 mod selection_metrics;
 #[cfg(test)] mod face_mode_profile;
 use minihou_app::graph_edit;
@@ -644,11 +644,19 @@ impl App {
                 }
             }
         }
-        self.selection = pick.previous_selection;
+        let restoring_display = self.display != pick.previous_display;
+        if restoring_display {
+            // The current scene still belongs to the pick source. Its element ids must not
+            // be interpreted against the selection from the previous display.
+            self.pending_restore_selection = Some((pick.previous_selection, self.stashed_selection.clone(), None));
+            self.selection = picking::Selection { mode:pick.previous_mode, ..Default::default() };
+        } else {
+            self.selection = pick.previous_selection;
+        }
         self.editor_state.selection = pick.previous_mode;
         self.selected_set = pick.previous_selected_set;
         self.selection_dirty = true;
-        if self.display != pick.previous_display {
+        if restoring_display {
             self.display = pick.previous_display.clone();
             self.send(Edit::Display(pick.previous_display));
         }
@@ -783,6 +791,7 @@ impl App {
         app.blender.addon_installed = false;
         if start_link { app.restart_blender_link(); }
         app.send(Edit::Replace(app.editor.doc.value().clone()));
+        app.send(Edit::Preview(app.selected.clone()));
         Ok(app)
     }
     fn send(&mut self, edit: Edit) {
@@ -2447,11 +2456,16 @@ impl App {
                     }
                 }
                 UiAction::PickParameter { node, name, mode, pairs } => {
+                    if let Some(active) = &self.param_pick {
+                        let same = active.node == node && active.name == name;
+                        self.finish_param_pick(ctx, false);
+                        if same { continue; }
+                    }
                     let original = self.editor.doc.value()["nodes"][&node]["params"][&name].as_str().unwrap_or("").to_owned();
                     let mode = infer_mode(&original, mode); // an edge group stays edges whatever the node's default domain
                     let pairs = pairs || (mode == ui::SelectionMode::Edges && !original.contains('p') && original.contains('-'));
                     let source = input_source(self.editor.doc.value(), &node, &self.display);
-                    let ready = source_ready(&self.display_ranges, &source);
+                    let ready = pick_source_ready(&self.display, &self.display_ranges, &source);
                     self.param_pick = Some(ParamPick { node:node.clone(), name:name.clone(), original, changed:false,
                         previous_selection:self.selection.clone(), previous_mode:self.editor_state.selection, pairs,
                         source:source.clone(), previous_display:self.display.clone(), previous_selected_set:self.selected_set.clone(), ready, load:false });
@@ -2742,6 +2756,7 @@ impl App {
             }
         }
         if self.selected != prev_selected {
+            self.send(Edit::Preview(self.selected.clone()));
             if self.editor.doc.value()["nodes"][&self.selected]["type"] == "boundary_select" {
                 self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
                 if self.selection.mode != ui::SelectionMode::Edges {
@@ -2884,6 +2899,7 @@ impl eframe::App for App {
             }
             if let Some(scene) = accepted.filter(|_| !display_is_empty(self.editor.doc.value())) {
                 self.display_ranges = display_ranges;
+                self.picked_field = None;
                 self.selection_dirty = true;
                 let first = self.gpu.is_none();
                 self.bounds = (scene.center, scene.radius);
@@ -2910,7 +2926,7 @@ impl eframe::App for App {
                 self.selection = if selection.is_empty() { picking::Selection { mode, ..Default::default() } } else { selection };
                 self.stashed_selection = stash;
                 if let Some(pick) = &mut self.param_pick {
-                    if !pick.ready && source_ready(&self.display_ranges, &pick.source) {
+                    if !pick.ready && pick_source_ready(&self.display, &self.display_ranges, &pick.source) {
                         pick.ready = true; pick.load = true;
                         self.selection = picking::Selection { mode:self.editor_state.selection, ..Default::default() };
                     }
@@ -3197,7 +3213,12 @@ impl eframe::App for App {
                 if let (Some(gpu), Some(scene)) = (&mut self.gpu, &self.scene) {
                     let ranges = self.display_ranges.iter().filter(|(id, _)| !self.object_hidden && self.selected_set.contains(id))
                         .map(|(_, range)| range.clone()).collect();
-                    self.group_preview.update(gpu,&self.state.device,if self.cooking.error.is_none(){self.cooking.geometry.as_deref()}else{None},self.editor.doc.value(),&self.selected,self.cooking.completed);
+                    let preview_geo = if self.cooking.error.is_none() {
+                        self.cooking.preview.as_ref().filter(|(id,_,_)| id == &self.selected).map(|(_,g,_)| g.as_ref())
+                            .or_else(|| (self.selected == self.display).then(|| self.cooking.geometry.as_deref()).flatten())
+                    } else { None };
+                    let preview_input = self.cooking.preview.as_ref().filter(|(id,_,_)| id == &self.selected).and_then(|(_,_,g)| g.as_deref());
+                    self.group_preview.update(gpu,&self.state.device,preview_geo,preview_input,self.editor.doc.value(),&self.selected,self.cooking.completed);
                     // Hovering the purple arrow previews the field's current group (only on the geometry its ids belong to).
                     let hover = ctx.data(|d| d.get_temp::<(String,String,ui::SelectionMode,bool,u64)>(egui::Id::new("param_pick_hover")))
                         .filter(|h| h.4 + 1 >= ctx.cumulative_pass_nr());
@@ -3392,7 +3413,7 @@ impl eframe::App for App {
                 let swallow_click=ctx.data(|d|d.get_temp::<bool>(egui::Id::new("mesh_cut_swallow_click"))).unwrap_or(false);
                 if swallow_click && !ctx.input(|i|i.pointer.primary_down()) { ctx.data_mut(|d|d.remove::<bool>(egui::Id::new("mesh_cut_swallow_click"))); }
                 if !swallow_click && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect,&v,p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
-                    && self.param_pick.as_ref().is_none_or(|pick| pick.ready && source_ready(&self.display_ranges, &pick.source)) {
+                    && self.param_pick.as_ref().is_none_or(|pick| pick.ready && pick_source_ready(&self.display, &self.display_ranges, &pick.source)) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());

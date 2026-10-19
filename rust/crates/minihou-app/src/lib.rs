@@ -523,6 +523,8 @@ pub enum Edit {
     LockParam { node: String, path: String, locked: bool },
     Bypass { node: String, flag: bool },
     Display(String),
+    /// Cook the selected node for its viewport group overlay without changing the display.
+    Preview(String),
     Replace(Value),
     Exposed(Vec<Value>),
     ModifierInputs { node: String, inputs: Vec<Value> },
@@ -569,6 +571,7 @@ impl Document {
                 self.set(&["nodes", node, "flags", "bypass"], json!(flag));
             }
             Edit::Display(node) => self.set_display(node)?,
+            Edit::Preview(_) => return Err("preview is not a document edit".into()),
             Edit::Exposed(entries) => self.set(&["exposed"], json!(entries)),
             Edit::ModifierInputs { node, inputs } => {
                 if self.value["nodes"][node]["type"] != "modifier_input" { return Err("expected modifier_input node".into()); }
@@ -696,6 +699,7 @@ pub struct CookResponse<T> {
     pub extras: std::collections::BTreeMap<String,Arc<Geometry>>,
     pub scene: Vec<(Value,link_protocol::Arrays)>,
     pub geometry: Option<Arc<Geometry>>,
+    pub preview: Option<(String, Arc<Geometry>, Option<Arc<Geometry>>)>,
     pub lod: Option<Arc<ClusterLod>>,
     pub prepared: Option<T>,
     /// Display output ownership in the merged geometry (point indices).
@@ -707,6 +711,9 @@ pub struct CookResponse<T> {
 /// Apply every queued edit in order, then cook just the final state.
 /// This preserves independent edits while the last edit of any parameter wins.
 pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<CookRequest>, prepare: impl FnOnce(&Geometry) -> T) -> CookResponse<T> {
+    cook_batch_preview(session, target, requests, None, prepare)
+}
+fn cook_batch_preview<T>(session: &mut Session, target: &mut String, requests: Vec<CookRequest>, preview_node: Option<&str>, prepare: impl FnOnce(&Geometry) -> T) -> CookResponse<T> {
     let revision = requests.last().map_or(0, |r| r.revision);
     let start = Instant::now();
     let mut error = None;
@@ -722,6 +729,7 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
                 Edit::LockParam { node, path, locked } => session.set_locked_param(&node,&path,locked)?,
                 Edit::Bypass { node, flag } => session.set_bypass(&node, flag)?,
                 Edit::Display(node) => *target = node,
+                Edit::Preview(_) => {},
                 Edit::External { name, input } => session.set_external(name,input),
                 Edit::Time { frame, fps } => session.set_time(frame, fps)?,
                 Edit::Exposed(_) => {}, // Interface metadata does not change the core graph.
@@ -754,6 +762,20 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
         Ok(g) => Some(g),
         Err(e) => { error = Some(e.to_string()); None }
     };
+    let preview = preview_node.and_then(|id| {
+        if !session.graph().nodes.iter().any(|(name, _)| name == id) { return None; }
+        let source = session.graph().nodes.iter().find(|(name, _)| name == id)
+            .and_then(|(_, def)| def.inputs.iter().find(|(port, _)| port == "geo")
+                .or_else(|| def.inputs.first()))
+            .and_then(|(_, ids)| ids.first()).cloned();
+        match session.cook(Some(id)) {
+            Ok(g) => {
+                let input = source.and_then(|source| session.cook(Some(&source)).ok());
+                Some((id.to_owned(), g, input))
+            },
+            Err(_) => None,
+        }
+    });
     let lod = if geometry.is_some() {
         // Breadth first finds the closest bake to the displayed node, including itself.
         let mut queue = std::collections::VecDeque::from([target.clone()]);
@@ -815,7 +837,7 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
         Some((id, range))
     }).collect();
     let prepared = geometry.as_ref().map(|g| prepare(g));
-    CookResponse { revision, geometry, lod, prepared, display_ranges, extras, scene, stats, error, milliseconds }
+    CookResponse { revision, geometry, preview, lod, prepared, display_ranges, extras, scene, stats, error, milliseconds }
 }
 #[cfg(test)]
 mod param_drag_cook_tests {
@@ -846,6 +868,25 @@ mod param_drag_cook_tests {
         let r = cook_batch(&mut session, &mut target, batch, |_| ());
         let mut cooked = r.stats.cooked.clone(); cooked.sort();
         assert_eq!(cooked, vec!["b".to_string(), "c".to_string()]);
+    }
+}
+#[cfg(test)]
+mod preview_cook_tests {
+    use super::*;
+    #[test]
+    fn selected_group_preview_keeps_its_own_geometry_across_display_changes() {
+        let value=json!({"nodes":{
+            "box":{"type":"box"},
+            "group":{"type":"group_create","inputs":{"geo":"box"},"params":{"domain":"edges","name":"rim","pattern":"0"}},
+            "other":{"type":"box"}},"display":"other"});
+        let mut session=Document::parse(value.to_string()).unwrap().session().unwrap();
+        let mut target="other".to_owned();
+        let r=cook_batch_preview(&mut session,&mut target,vec![CookRequest{revision:1,edit:Edit::Replace(value)}],Some("group"),|_|());
+        let (id,output,input)=r.preview.unwrap();
+        assert_eq!(id,"group");
+        assert!(output.edge.contains_key("group_rim") || output.vertex.contains_key("edge_group_rim") || output.edge.contains_key("edge_group_rim"));
+        assert_eq!(input.unwrap().npoints,output.npoints);
+        assert_eq!(r.display_ranges[0].0,"other");
     }
 }
 #[cfg(test)]
@@ -974,6 +1015,7 @@ pub struct CookState {
     pub requested: u64,
     pub completed: u64,
     pub geometry: Option<Arc<Geometry>>,
+    pub preview: Option<(String, Arc<Geometry>, Option<Arc<Geometry>>)>,
     pub lod: Option<Arc<ClusterLod>>,
     pub stats: CookStats,
     pub error: Option<String>,
@@ -988,6 +1030,7 @@ impl CookState {
         self.stats = response.stats;
         self.milliseconds = response.milliseconds;
         self.lod = response.lod;
+        self.preview = response.preview;
         if let Some(g) = response.geometry { self.geometry = Some(g); }
         response.prepared
     }
@@ -1030,15 +1073,17 @@ impl<T: Send + 'static> CookWorker<T> {
         let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let sent_worker = sent.clone();
         std::thread::Builder::new().name("minihou-cook".into()).spawn(move || {
+            let mut preview_node: Option<String> = None;
             loop {
                 match receiver.recv_timeout(std::time::Duration::from_millis(10)) {
                     Ok(first) => {
                         let batch = collect_cook_batch(&receiver, first);
+                        for request in &batch { if let Edit::Preview(node) = &request.edit { preview_node = Some(node.clone()); } }
                         // A newer request abandons this cook between nodes; finished nodes stay cached for it.
                         let revision = batch.last().map_or(0, |r| r.revision);
                         let newest = sent_worker.clone();
                         session.set_cancel(Some(Arc::new(move || newest.load(std::sync::atomic::Ordering::Relaxed) > revision)));
-                        let response = cook_batch(&mut session, &mut target, batch, &prepare);
+                        let response = cook_batch_preview(&mut session, &mut target, batch, preview_node.as_deref(), &prepare);
                         session.set_cancel(None);
                         *output.lock().unwrap() = Some(response);
                     }

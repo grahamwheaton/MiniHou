@@ -1392,7 +1392,8 @@ fn cube(extra:bool) -> Geometry {
             0.0, 0.0, 1.0,
             0.0, 0.0, 1.0,
         ];
-        let edge = vec![0, 1, 1, 2, 2, 3, 3, 0];
+        // Include an internal diagonal so the test catches any orange wire overlay.
+        let edge = vec![0, 1, 1, 2, 2, 3, 3, 0, 0, 2];
         let scene = Scene {
             p, n, tri, edge, point:Vec::new(), line:Vec::new(),
             pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
@@ -1415,7 +1416,7 @@ fn cube(extra:bool) -> Geometry {
             &target,
             &cam,
             Mode::Solid,
-            Overlay::default(),
+            Overlay { wireframe:true, ..Default::default() },
             crate::ui::SelectionMode::Object,
             true,
         );
@@ -1468,8 +1469,8 @@ fn cube(extra:bool) -> Geometry {
 
         // Check center pixel (32, 32): inside the mesh silhouette
         let center = pixel_at(32, 32);
-        // #ffa028 in sRGB: (255, 160, 40)
-        let is_outline = |rgba: [u8; 4]| rgba[0] >= 250 && rgba[1] >= 155 && rgba[1] <= 165 && rgba[2] >= 35 && rgba[2] <= 45;
+        // #d97812 object outline; element selection remains #ffa028.
+        let is_outline = |rgba: [u8; 4]| (212..=222).contains(&rgba[0]) && (115..=125).contains(&rgba[1]) && (13..=23).contains(&rgba[2]);
 
         // Inside the silhouette must NEVER be outline colored!
         assert!(!is_outline(center), "Center of silhouette must not be outline colored, got {:?}", center);

@@ -74,7 +74,7 @@ fn points_depth_selection_and_geometry_switches_headless() {
     assert!(revealed.iter().filter(|p|**p!=revealed[0]).count()>10,"faces off did not reveal points and curves");
     gpu.select_objects(&device,&scene,vec![0..7]);
     let outlined=render(&device,&queue,&gpu,Mode::SmoothShaded,no_faces,true);
-    assert!(outlined.iter().any(|p|p[0]==255 && (155..=165).contains(&p[1]) && (35..=45).contains(&p[2])),"faces off lost silhouette");
+    assert!(outlined.iter().any(super::display_render_tests::object_outline),"faces off lost silhouette");
     gpu.select_points(&device,&scene,&[5]);
     let selected=render_selection(&device,&queue,&gpu,Mode::SmoothShaded,no_faces,false,crate::ui::SelectionMode::Points);
     assert!(selected.iter().any(|p|p[0]==255 && (155..=165).contains(&p[1]) && (35..=45).contains(&p[2])),"selected points must be orange");

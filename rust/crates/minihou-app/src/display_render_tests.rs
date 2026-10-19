@@ -46,7 +46,8 @@ pub(super) fn render_selection(device:&wgpu::Device,queue:&wgpu::Queue,gpu:&Gpu,
     let pixels=buffer.slice(..).get_mapped_range().chunks_exact(4).map(|p| [p[0],p[1],p[2],p[3]]).collect();
     buffer.unmap(); pixels
 }
-fn outline(p:&&[u8;4])->bool { p[0]==255 && (155..=165).contains(&p[1]) && (35..=45).contains(&p[2]) }
+pub(super) fn object_outline(p:&[u8;4])->bool { (212..=222).contains(&p[0]) && (115..=125).contains(&p[1]) && (13..=23).contains(&p[2]) }
+fn outline(p:&&[u8;4])->bool { object_outline(p) }
 pub(super) fn changed(a:&[[u8;4]],b:&[[u8;4]])->usize { a.iter().zip(b).filter(|(a,b)| a!=b).count() }
 
 #[test]
