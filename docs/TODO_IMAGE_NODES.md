@@ -368,3 +368,5 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: Extract Centroid parameters should be exactly: Group, Domain, Method, Output, Attribute Name, Transfer Attribute.** Rework the node's parameter list to these six, in this order.
 - **Future todo: proper description tooltips when hovering shelf items.** Not scheduled yet.
 - **Fixed (confirmed by user live test 2026-10-19, build 25d48825d):** transform with the output node unselected in object and point/edge/face modes; adding a node in a stream pushes the output node down.
+- **Todo: a newly placed subnet should not show cook failed.** It should cook cleanly with its default contents.
+- **Todo: double-click a subnet to enter it.** Inside, the default contents are an input node piped into an output node.
