@@ -9680,10 +9680,120 @@
  "switch": {
   "index": {
    "default": 0,
-   "doc": "Which input to pass on (0 = the first; clamped to the last)",
+   "doc": "Which input to pass on (0 = the first; clamped to the last).",
    "kind": "int",
    "min": 0,
    "soft_max": 10
+  },
+  "select": {
+   "default": 0,
+   "doc": "Which input to pass on (0 = the first; clamped to the last).",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 10
+  }
+ },
+ "switchif": {
+  "enable": {
+   "default": true,
+   "doc": "Enable this condition test row.",
+   "kind": "bool"
+  },
+  "enable_value": {
+   "default": "1",
+   "doc": "Expression or value determining if condition is enabled or true.",
+   "kind": "str"
+  },
+  "expr": {
+   "default": "1",
+   "doc": "Houdini parameter alias for enable_value.",
+   "kind": "str"
+  },
+  "mergecondition": {
+   "default": "all_conditions_true",
+   "doc": "Houdini parameter alias for use_second_input_if.",
+   "kind": "enum",
+   "options": [
+    "all_conditions_true",
+    "any_condition_true",
+    "all_conditions_false",
+    "any_condition_false"
+   ]
+  },
+  "number_of_tests": {
+   "default": 2,
+   "doc": "Number of condition tests to evaluate.",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 10
+  },
+  "numtests": {
+   "default": 2,
+   "doc": "Houdini parameter alias for number_of_tests.",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 10
+  },
+  "test_input": {
+   "default": "first_input",
+   "doc": "Which input geometry provides attributes and element counts for condition tests.",
+   "kind": "enum",
+   "options": [
+    "first_input",
+    "second_input"
+   ]
+  },
+  "test_type": {
+   "default": "expression",
+   "doc": "Condition test evaluation type.",
+   "kind": "enum",
+   "options": [
+    "expression"
+   ]
+  },
+  "testinput": {
+   "default": "first_input",
+   "doc": "Houdini parameter alias for test_input.",
+   "kind": "enum",
+   "options": [
+    "first_input",
+    "second_input"
+   ]
+  },
+  "tests": {
+   "default": [
+    {
+     "enable": true,
+     "enable_value": "1",
+     "test_type": "expression"
+    },
+    {
+     "enable": true,
+     "enable_value": "1",
+     "test_type": "expression"
+    }
+   ],
+   "doc": "List of per-test rows with enable, test_type, and enable_value/expr.",
+   "kind": "json"
+  },
+  "type": {
+   "default": "expression",
+   "doc": "Houdini parameter alias for test_type.",
+   "kind": "enum",
+   "options": [
+    "expression"
+   ]
+  },
+  "use_second_input_if": {
+   "default": "all_conditions_true",
+   "doc": "Condition rule to switch to the second input.",
+   "kind": "enum",
+   "options": [
+    "all_conditions_true",
+    "any_condition_true",
+    "all_conditions_false",
+    "any_condition_false"
+   ]
   }
  },
  "torus": {
