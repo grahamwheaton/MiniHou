@@ -312,7 +312,6 @@ pub fn registry() -> &'static [NodeSpec] {
         heightfield::HEIGHTFIELD_ERODE,
         scatter::SCATTER,
         scatteralign::SCATTERALIGN,
-        merge::SWITCH,
         capture_deform::SOFT_TRANSFORM,
         transform::COPY_TRANSFORM,
         surface::CONVEX_HULL,

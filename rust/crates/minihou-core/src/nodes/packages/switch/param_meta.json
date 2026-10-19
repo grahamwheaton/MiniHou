@@ -1,0 +1,16 @@
+{
+  "index": {
+    "default": 0,
+    "doc": "Which input to pass on (0 = the first; clamped to the last).",
+    "kind": "int",
+    "min": 0,
+    "soft_max": 10
+  },
+  "select": {
+    "default": 0,
+    "doc": "Which input to pass on (0 = the first; clamped to the last).",
+    "kind": "int",
+    "min": 0,
+    "soft_max": 10
+  }
+}

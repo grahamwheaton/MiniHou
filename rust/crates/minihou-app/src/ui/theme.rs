@@ -72,7 +72,7 @@ impl Theme {
         match node_type {
             "grid" | "box" | "sphere" | "tube" | "torus" | "line" | "circle" | "null" | "point" | "curve" | "bezier" | "helix" | "lsystem" => self.c_src,
             "normal" | "attribute_create" | "attribute_transfer" | "attribute_promote" | "attribute_randomize" | "measure" | "color" => self.c_attr,
-            "merge" | "boolean" | "copy_to_points" | "switch" => self.c_comb,
+            "merge" | "boolean" | "copy_to_points" | "switch" | "switchif" => self.c_comb,
             "output" => self.c_out,
             _ => self.c_mod,
         }

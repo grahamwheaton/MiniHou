@@ -1,0 +1,5 @@
+id = "switchif"
+name = "Switch-If"
+category = "Flow"
+description = "Switch between two inputs based on condition tests."
+keywords = "switch if conditional branch test expression flow"
