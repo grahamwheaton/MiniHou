@@ -31,3 +31,65 @@ fn empty_list_clears_attributes_and_legacy_still_cooks() {
     let p=Params::resolve(NODE.params,json!({"value":[3,0,0]}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&[vec![std::sync::Arc::new(g)]],&p).unwrap().point["attrib1"].as_f32().unwrap(),&[3.,3.]);
 }
+
+#[test]
+fn advanced_attribute_create_options() {
+    let g = Geometry::from_arrays(vec![0.; 9], vec![0, 1, 2], vec![0, 3], None).unwrap();
+
+    // 1. encode_invalid
+    let p = Params::resolve(NODE.params, json!({
+        "name": "my attrib#1",
+        "encode_invalid": true,
+        "value": [5.0, 0.0, 0.0]
+    }).as_object()).unwrap();
+    let out = (NODE.cook)(&[vec![std::sync::Arc::new(g.clone())]], &p).unwrap();
+    assert!(out.point.contains_key("my_attrib_1"));
+    assert_eq!(out.point["my_attrib_1"].as_f32().unwrap(), &[5.0, 5.0, 5.0]);
+
+    // 2. enable: false skips creation
+    let p = Params::resolve(NODE.params, json!({
+        "name": "disabled_attrib",
+        "enable": false
+    }).as_object()).unwrap();
+    let out = (NODE.cook)(&[vec![std::sync::Arc::new(g.clone())]], &p).unwrap();
+    assert!(!out.point.contains_key("disabled_attrib"));
+
+    // 3. existing: "keep" preserves prior attribute
+    let mut g_with_val = g.clone();
+    g_with_val.point.insert("existing_val".into(), std::sync::Arc::new(Attr::f32(1, vec![42.0, 42.0, 42.0])));
+    let p = Params::resolve(NODE.params, json!({
+        "name": "existing_val",
+        "value": [99.0, 0.0, 0.0],
+        "existing": "keep"
+    }).as_object()).unwrap();
+    let out = (NODE.cook)(&[vec![std::sync::Arc::new(g_with_val)]], &p).unwrap();
+    assert_eq!(out.point["existing_val"].as_f32().unwrap(), &[42.0, 42.0, 42.0]);
+
+    // 4. guess_from_name
+    let p = Params::resolve(NODE.params, json!({
+        "name": "id",
+        "guess_from_name": true,
+        "value": [7.0, 0.0, 0.0]
+    }).as_object()).unwrap();
+    let out = (NODE.cook)(&[vec![std::sync::Arc::new(g.clone())]], &p).unwrap();
+    assert_eq!(out.point["id"].as_i32().unwrap(), &[7, 7, 7]);
+
+    // 5. write_values: false fills with default
+    let attrs = json!([
+        {"name": "test_def", "class": "points", "type": "float", "size": 1, "default": [12.0], "value": [88.0], "write_values": false}
+    ]);
+    let p = Params::resolve(NODE.params, json!({"attributes": attrs}).as_object()).unwrap();
+    let out = (NODE.cook)(&[vec![std::sync::Arc::new(g.clone())]], &p).unwrap();
+    assert_eq!(out.point["test_def"].as_f32().unwrap(), &[12.0, 12.0, 12.0]);
+
+    // 6. group_type: "primitives" applied to point attribute
+    let p = Params::resolve(NODE.params, json!({
+        "name": "from_prim_group",
+        "domain": "points",
+        "group": "0",
+        "group_type": "primitives",
+        "value": [1.0, 0.0, 0.0]
+    }).as_object()).unwrap();
+    let out = (NODE.cook)(&[vec![std::sync::Arc::new(g)]], &p).unwrap();
+    assert_eq!(out.point["from_prim_group"].as_f32().unwrap(), &[1.0, 1.0, 1.0]);
+}

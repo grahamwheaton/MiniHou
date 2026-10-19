@@ -295,13 +295,14 @@ Add frames (comment boxes) to the node editor, created with the O key. A frame h
 
 The Tab node search should match fuzzily: letters in order rather than an exact substring, ranked by match quality (exact name first, then word starts, then scattered letters). For example "sbd" finds "subdivide". Keep the current search on node names and keywords, and keep the existing keyword list in the node catalogue.
 
-## Future: noise and mountain nodes, full Houdini parity (requested 2026-10-18)
-
-Match Houdini's Attribute Noise (https://www.sidefx.com/docs/houdini/nodes/sop/attribnoise.html) and Mountain (screenshot 82): Group and Blend; Attribute Names (Vector, Float, with X, Y, Z channel toggles) and Attribute Class; Noise Along Vector with a Vector Attribute; Operation (Add and others), Range Values (Zero Centered and others), Amplitude, Output Raw Value, Enable Remap Ramp; Noise Type (Simplex and others), Location Attribute, Element Size, Offset (with XYZ), Use VEXpression; Animation; Fractal (type such as Hybrid Terrain, with octaves, roughness, lacunarity and so on); Warping; Post-Process. Build on the current noise and mountain nodes, and match the parameter names and defaults so existing graphs still load.
 
 ## Feature: PolyExtrude, Houdini parity (requested 2026-10-18)
 
-Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into (Connected Components and others), Split Group, Extrusion Mode (Primitive/Edge Normal and others), Distance, Inset, Twist, Divisions, Spine Shape (Straight and others). Extrusion tab: Transform Extruded Front, Output Front, Output Back, Output Side, Front, Back and Side groups, Front and Back Boundary Groups, Preserve Groups, Limit Insetting, Use Common Limit, Add Vertex Normals, Cusp Angle, Generate Unwrapped Texture Coordinates for Sides (Style Proportional, Scaling Match Incident UV Scale). Spine Control tab: Front and Back Magnitude and Stiffness, Interpolation (Rotating Frame and others), Division Spacing, External Spine (Reverse Direction, Axial Rotation, Front and Back Blend), Thickness Scale and Thickness Ramp, Twist and Local Twist Ramp with Range Half-Width. Local Control tab: attribute overrides for distance (zscale), inset (insetscale), twist (twistscale), divisions (divsscale), and local frames (localx, localz, localctr).
+Extrusion parameters implemented: Divide Into, Split Group, Extrusion Mode, Distance, Inset, Twist, Divisions, Spine Shape, Transform Extruded Front, Output Front, Output Back, Output Side, Front/Back/Side groups, Front and Back Boundary Groups, Preserve Groups, Limit Insetting, Use Common Limit, Add Vertex Normals with Cusp Angle, and Generate UVs for sides.
+
+Remaining:
+Spine Control tab: Front and Back Magnitude and Stiffness, Interpolation (Rotating Frame and others), Division Spacing, External Spine (Reverse Direction, Axial Rotation, Front and Back Blend), Thickness Scale and Thickness Ramp, Twist and Local Twist Ramp with Range Half-Width.
+Local Control tab: attribute overrides for distance (zscale), inset (insetscale), twist (twistscale), divisions (divsscale), and local frames (localx, localz, localctr).
 
 ---
 
@@ -315,11 +316,8 @@ Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into 
 
 Surface sampling now has the Houdini parameter names and opt-in output attributes: primitive Group, Generate modes, density from point/vertex/primitive/detail, count and area controls, seed and point order, triangle-local relaxation, texture-space sampling, sourceprim/sourceprimuv/density/pscale/id, and numeric attribute transfer. The legacy count, seed, and default P/N/primnum output remain available.
 
-Remaining: true volume primitives and voxel-independent/2D-volume options (the current volume mode samples polygon interiors), primitive-attribute Override Prim Area, relaxation across primitive boundaries, and string detail-to-point attributes. Keep this section until those cases work; current polygon-interior mode explicitly rejects unsupported voxel and relaxation settings.
+Remaining: true volume primitives and voxel-independent/2D-volume options (the current volume mode samples polygon interiors), relaxation across primitive boundaries, and string detail-to-point attributes. Keep this section until those cases work; current polygon-interior mode explicitly rejects unsupported voxel and relaxation settings. (Primitive-attribute Override Prim Area is now supported).
 
-## Feature: Attribute Create advanced options (remaining)
-
-Add Group Type and Encode Invalid Attribute Names. Per-attribute controls still needed: enable checkbox, Existing Name, Local Variable, Save to Info Block, additional types and Guess from name, Precision, Write Values, and Allow Local Vars. String attributes on geometry domains need storage support.
 
 ## Feature: middle-mouse scale bar slider, Houdini parity (requested 2026-10-18)
 
@@ -354,8 +352,6 @@ Nodes and parameters:
 - Array: full Blender parity.
 - Boolean parameters not working when exposed to Blender (check supported parameter types).
 
-Icons:
-- Proper shelf icons for the new loop tools, Pack, Split, Unpack and the others.
 
 Future:
 - Extrude and push/pull as one node.

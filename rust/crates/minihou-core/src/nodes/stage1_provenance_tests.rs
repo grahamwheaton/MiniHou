@@ -206,3 +206,58 @@ fn boolean_fracture_keeps_source_slots_on_both_sides() {
     assert!(out.nprims() > 0);
     inherited(&out);
 }
+
+#[test]
+fn mountain_displaces_along_normals_with_houdini_options() {
+    let q = quad();
+    let out = cook("mountain", vec![vec![Arc::new(q.clone())]], json!({
+        "amplitude": [0.0, 0.0, 0.5],
+        "noise_type": "simplex",
+        "fractal_type": "terrain",
+        "blend": 0.8
+    }));
+    out.validate().unwrap();
+    assert_eq!(out.npoints, q.npoints);
+    let orig_p = q.p();
+    let new_p = out.p();
+    // Normal of planar quad is along +Z (or -Z) so Z positions change
+    assert!(new_p.iter().zip(orig_p).any(|(a, b)| (a - b).abs() > 1e-4));
+}
+
+#[test]
+fn noise_houdini_parity_features() {
+    let q = quad();
+    // Test vector mode writing to Cd with remapping, clamping and channel masking
+    let out = cook("noise", vec![vec![Arc::new(q.clone())]], json!({
+        "attrib": "Cd",
+        "mode": "vector",
+        "channel_z": false,
+        "range_values": "positive",
+        "enable_remap": true,
+        "remap_min": 0.2,
+        "remap_max": 0.8,
+        "clamp_min": true,
+        "min_value": 0.1,
+        "operation": "set"
+    }));
+    out.validate().unwrap();
+    assert!(out.point.contains_key("Cd"));
+    let cd = out.point["Cd"].as_f32().unwrap();
+    assert_eq!(cd.len(), q.npoints * 3);
+    for chunk in cd.chunks_exact(3) {
+        assert!(chunk[0] >= 0.1);
+        assert_eq!(chunk[2], 0.0); // channel_z was false
+    }
+
+    // Test primitive class noise
+    let out_prim = cook("noise", vec![vec![Arc::new(q.clone())]], json!({
+        "attrib": "density",
+        "class": "primitive",
+        "mode": "scalar",
+        "operation": "set",
+        "range_values": "positive"
+    }));
+    out_prim.validate().unwrap();
+    assert!(out_prim.prim.contains_key("density"));
+    assert_eq!(out_prim.prim["density"].as_f32().unwrap().len(), q.nprims());
+}

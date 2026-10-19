@@ -195,6 +195,11 @@
   }
  },
  "attribute_create": {
+  "allow_local": {
+   "default": true,
+   "doc": "Allow local variables when evaluating parameter expressions.",
+   "kind": "bool"
+  },
   "attributes": {
    "default": null,
    "doc": "Repeatable attribute entries with Name, Class, Type, Size, Default, and Value.",
@@ -211,6 +216,25 @@
     "detail"
    ]
   },
+  "enable": {
+   "default": true,
+   "doc": "Enable creating this attribute.",
+   "kind": "bool"
+  },
+  "encode_invalid": {
+   "default": false,
+   "doc": "Encode/sanitize invalid characters in attribute names instead of failing.",
+   "kind": "bool"
+  },
+  "existing": {
+   "default": "overwrite",
+   "doc": "Action if attribute already exists: overwrite or keep.",
+   "kind": "enum",
+   "options": [
+    "overwrite",
+    "keep"
+   ]
+  },
   "group": {
    "default": "",
    "doc": "Only set it on these elements (others get 0); points or primitives",
@@ -218,10 +242,44 @@
    "pick_domain_default": "points",
    "pick_domain_param": "domain"
   },
+  "group_type": {
+   "default": "guess",
+   "doc": "Element domain used for group evaluation (guess follows attribute domain).",
+   "kind": "enum",
+   "options": [
+    "guess",
+    "points",
+    "primitives",
+    "vertices",
+    "detail"
+   ]
+  },
+  "guess_from_name": {
+   "default": false,
+   "doc": "Guess attribute type and component size from its name.",
+   "kind": "bool"
+  },
   "name": {
    "default": "attrib1",
    "doc": "Name of the attribute to create.",
    "kind": "str"
+  },
+  "precision": {
+   "default": "auto",
+   "doc": "Storage bit precision (auto, 32, 64, 16, 8).",
+   "kind": "enum",
+   "options": [
+    "auto",
+    "32",
+    "64",
+    "16",
+    "8"
+   ]
+  },
+  "save_to_info_block": {
+   "default": false,
+   "doc": "Save attribute metadata to node info block.",
+   "kind": "bool"
   },
   "type": {
    "default": "float",
@@ -233,7 +291,11 @@
     "vector",
     "vector2",
     "color",
-    "vector4"
+    "vector4",
+    "string",
+    "index",
+    "array",
+    "dict"
    ]
   },
   "value": {
@@ -244,6 +306,16 @@
    ],
    "doc": "Value (float/int use the first component; vector4 adds w = 1)",
    "kind": "vec3"
+  },
+  "varname": {
+   "default": "",
+   "doc": "Local variable name for expressions.",
+   "kind": "str"
+  },
+  "write_values": {
+   "default": true,
+   "doc": "Write evaluated values to the attribute (false fills default only).",
+   "kind": "bool"
   }
  },
  "attribute_delete": {
@@ -6064,6 +6136,18 @@
   }
  },
  "polyextrude": {
+  "add_vertex_normals": {
+   "default": false,
+   "doc": "Compute and add vertex normals with cusp angle.",
+   "kind": "bool"
+  },
+  "cusp_angle": {
+   "default": 60.0,
+   "doc": "Cusp angle for vertex normals in degrees.",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
   "direction": {
    "default": [
     0.0,
@@ -6080,10 +6164,41 @@
    "soft_max": 2.0,
    "soft_min": -2.0
   },
+  "divide_into": {
+   "default": "connected",
+   "doc": "Divide connected components or individual elements.",
+   "kind": "enum",
+   "options": [
+    "connected",
+    "individual"
+   ]
+  },
+  "divisions": {
+   "default": 1,
+   "doc": "Number of subdivisions along the extrusion height.",
+   "kind": "int",
+   "min": 1
+  },
   "edges": {
    "default": "",
    "doc": "Optional edge selection for edge extrusion.",
    "kind": "str"
+  },
+  "extrusion_mode": {
+   "default": "primitive_normal",
+   "doc": "Direction mode for extrusion.",
+   "kind": "enum",
+   "options": [
+    "primitive_normal",
+    "point_normal",
+    "edge_normal",
+    "direction"
+   ]
+  },
+  "generate_sides_uvs": {
+   "default": false,
+   "doc": "Generate texture coordinates for side walls.",
+   "kind": "bool"
   },
   "group": {
    "default": "",
@@ -6097,6 +6212,11 @@
    "kind": "float",
    "soft_max": 1.0,
    "soft_min": 0.0
+  },
+  "limit_insetting": {
+   "default": false,
+   "doc": "Limit insetting to prevent self-intersection.",
+   "kind": "bool"
   },
   "mode": {
    "default": "connected",
@@ -6112,6 +6232,16 @@
    "doc": "The original faces left behind (needs 'output_back')",
    "kind": "bool"
   },
+  "outgrp_back_boundary": {
+   "default": false,
+   "doc": "Output group for back boundary edges.",
+   "kind": "bool"
+  },
+  "outgrp_back_boundary_name": {
+   "default": "extrudeBackBoundary",
+   "doc": "Name of back boundary group.",
+   "kind": "str"
+  },
   "outgrp_back_name": {
    "default": "extrudeBack",
    "doc": "Name of the back group",
@@ -6121,6 +6251,16 @@
    "default": true,
    "doc": "The extruded faces (the selected faces, moved)",
    "kind": "bool"
+  },
+  "outgrp_front_boundary": {
+   "default": false,
+   "doc": "Output group for front boundary edges.",
+   "kind": "bool"
+  },
+  "outgrp_front_boundary_name": {
+   "default": "extrudeFrontBoundary",
+   "doc": "Name of front boundary group.",
+   "kind": "str"
   },
   "outgrp_front_name": {
    "default": "extrudeFront",
@@ -6142,10 +6282,72 @@
    "doc": "Keep the original faces as well (a closed shell)",
    "kind": "bool"
   },
+  "output_front": {
+   "default": true,
+   "doc": "Generate front faces on extruded regions.",
+   "kind": "bool"
+  },
+  "output_side": {
+   "default": true,
+   "doc": "Generate side walls connecting base and front faces.",
+   "kind": "bool"
+  },
   "points": {
    "default": "",
    "doc": "Optional point selection for point extrusion.",
    "kind": "str"
+  },
+  "preserve_groups": {
+   "default": true,
+   "doc": "Preserve input primitive and point groups on extruded elements.",
+   "kind": "bool"
+  },
+  "spine_shape": {
+   "default": "straight",
+   "doc": "Shape of spine curve between base and extruded front.",
+   "kind": "enum",
+   "options": [
+    "straight",
+    "spline"
+   ]
+  },
+  "split_group": {
+   "default": "",
+   "doc": "Split extrusion into separate pieces along boundary.",
+   "kind": "str"
+  },
+  "transform_front": {
+   "default": true,
+   "doc": "Transform the extruded front face.",
+   "kind": "bool"
+  },
+  "twist": {
+   "default": 0.0,
+   "doc": "Twist angle in degrees applied to extruded front faces.",
+   "kind": "float"
+  },
+  "use_common_limit": {
+   "default": false,
+   "doc": "Use a single insetting limit for all connected faces.",
+   "kind": "bool"
+  },
+  "uv_scaling": {
+   "default": "match_incident",
+   "doc": "UV scaling mode for side walls.",
+   "kind": "enum",
+   "options": [
+    "match_incident",
+    "unit"
+   ]
+  },
+  "uv_style": {
+   "default": "proportional",
+   "doc": "UV layout style for extruded side walls.",
+   "kind": "enum",
+   "options": [
+    "proportional",
+    "uniform"
+   ]
   }
  },
  "polyfill": {
