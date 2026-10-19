@@ -373,7 +373,6 @@ Nodes and parameters:
 - All output groups optional: checkbox, label, then group name with target select.
 - PolyExtrude: offset-even checkbox (Blender parity).
 - Delete node: full Houdini parity.
-- Grid primitive defaults to 3x3.
 - New node: Extract Centroid (Houdini parity). New node: Normal (Houdini parity). New node: Fuse (Houdini parity).
 - Blender curves input (support).
 - Controller node (thought done; verify).

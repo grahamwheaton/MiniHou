@@ -92,7 +92,7 @@ pub const GRID: NodeSpec = NodeSpec {
     name: "grid",
     inputs: &[],
     params: crate::params!(
-        "size_x": 10.0; "size_y": 10.0; "columns": 10; "rows": 10; "center": [0.0, 0.0, 0.0];
+        "size_x": 10.0; "size_y": 10.0; "columns": 3; "rows": 3; "center": [0.0, 0.0, 0.0];
         "rotate": [0.0, 0.0, 0.0]; "scale": [1.0, 1.0, 1.0]; "uniform_scale": 1.0;
     ),
     cook: grid,

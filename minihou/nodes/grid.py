@@ -7,8 +7,8 @@ from ..sdk import Float, Handle, Int, Vec3, node
 @node("grid", category="source", params=[
     Float("size_x", 10.0, min=0.0, soft_max=100.0, label="Size X"),
     Float("size_y", 10.0, min=0.0, soft_max=100.0, label="Size Y"),
-    Int("columns", 10, min=2, max=20000, soft_max=1000, label="Columns (points)", proxy="res2"),
-    Int("rows", 10, min=2, max=20000, soft_max=1000, label="Rows (points)", proxy="res2"),
+    Int("columns", 3, min=2, max=20000, soft_max=1000, label="Columns (points)", proxy="res2"),
+    Int("rows", 3, min=2, max=20000, soft_max=1000, label="Rows (points)", proxy="res2"),
     Vec3("center", (0.0, 0.0, 0.0)),
     Vec3("rotate", (0,0,0)), Vec3("scale", (1,1,1)), Float("uniform_scale", 1., min=0),
 ], handles=[Handle("size_x", axis="x", at="@center", reach=True, scale=2.0, min=0.0), Handle("size_y", axis="y", at="@center", reach=True, scale=2.0, min=0.0)])

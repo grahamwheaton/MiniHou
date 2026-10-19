@@ -2666,7 +2666,7 @@
    "kind": "vec3"
   },
   "columns": {
-   "default": 10,
+   "default": 3,
    "doc": "",
    "kind": "int",
    "max": 20000,
@@ -2683,7 +2683,7 @@
    "kind": "vec3"
   },
   "rows": {
-   "default": 10,
+   "default": 3,
    "doc": "",
    "kind": "int",
    "max": 20000,
