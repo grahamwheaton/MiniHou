@@ -244,13 +244,22 @@ pub fn current_scope(ctx: &egui::Context, file: &Path, doc: &serde_json::Value) 
     let scoped=scope_doc(doc,&path)?;
     Some((path,scoped,state.inner_selected,state.inner_selected_set))
 }
+pub fn select_inner(ctx:&egui::Context,file:&Path,ids:Vec<String>) {
+    ctx.data_mut(|d| {
+        let key=state_id(file);
+        let mut state=d.get_persisted::<State>(key).unwrap_or_default();
+        state.inner_selected=ids.first().cloned().unwrap_or_default();
+        state.inner_selected_set=ids.into_iter().collect();
+        d.insert_persisted(key,state);
+    });
+}
 pub fn embed_scope(doc: &serde_json::Value, path: &[String], inner: serde_json::Value) -> Option<serde_json::Value> {
     let mut next=doc.clone();
     let mut scope=&mut next;
     for id in path {scope=&mut scope["nodes"][id]["inner"];}
     if !scope.is_object() {return None;}
     scope["nodes"]=inner["nodes"].clone();
-    if let Some(output)=inner.get("output").or_else(||inner.get("display")) {scope["output"]=output.clone();}
+    if let Some(output)=inner.get("display").or_else(||inner.get("output")) {scope["output"]=output.clone();}
     Some(next)
 }
 pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -> Option<UiAction> {
@@ -321,6 +330,14 @@ mod subnet_scope_tests {
         let Some(UiAction::Edit {edit:Edit::Replace(next),..})=scoped_edit(&doc,&["group".into()],action) else {panic!("expected root edit")};
         assert_eq!(next["nodes"]["group"]["inner"]["nodes"]["inner"]["params"]["size"],json!([2,2,2]));
         assert_eq!(next["nodes"]["other"],doc["nodes"]["other"]);
+    }
+    #[test]
+    fn network_inner_output_change_embeds_in_parent_subnet() {
+        let doc=json!({"nodes":{"group":{"type":"subnet","inner":{"nodes":{"a":{"type":"box"},"b":{"type":"box"}},"output":"a"}}}});
+        let mut inner=scope_doc(&doc,&["group".into()]).unwrap();
+        inner["display"]=json!("b");
+        let next=embed_scope(&doc,&["group".into()],inner).unwrap();
+        assert_eq!(next["nodes"]["group"]["inner"]["output"],"b");
     }
 }
 fn rename_dialog(ctx: &egui::Context, out: &mut Actions) {

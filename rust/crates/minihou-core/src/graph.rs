@@ -461,6 +461,7 @@ mod subnet_graph_tests {
     fn subnet_promoted_channel_resolves_into_inner_node() {
         let doc=json!({"display":"subnet1","nodes":{
             "driver":{"type":"box","params":{"size":[3.0,1.0,1.0]}},
+            "follower":{"type":"box","params":{"size":[1.0,1.0,1.0]},"channels":{"size.x":"ch('../subnet1/width')"}},
             "subnet1":{"type":"subnet","params":{"width":1.0},"channels":{"width":"ch('../driver/size.x') * 2"},
                 "promoted_params":[{"name":"width","node":"box1","param":"size.x","default":1.0}],
                 "inner":{"nodes":{"box1":{"type":"box","params":{"size":[1.0,1.0,1.0]}}},"output":"box1"}}
@@ -471,5 +472,6 @@ mod subnet_graph_tests {
         assert!(resolved.diagnostics.is_empty(),"{:?}",resolved.diagnostics);
         assert_eq!(resolved.params["subnet1"]["width"],json!(6.0));
         assert_eq!(resolved.params["subnet1/box1"]["size"][0],json!(6.0));
+        assert_eq!(resolved.params["follower"]["size"][0],json!(6.0));
     }
 }
