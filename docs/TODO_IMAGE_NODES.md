@@ -362,6 +362,7 @@ Bugs:
 - Copy to Points: with pack on, nothing reaches Blender (it looks right in MiniHou).
 - Blender Object: clicking reset transform has no effect in MiniHou (Blender changes the result).
 - Scene Objects: after a reload, moved objects jump back to their MiniHou positions. Overridden empty positions must persist.
+- Mirror gizmo has gone; restore it.
 - Deleting nodes from an embedded Blender graph can make Blender unresponsive.
 - Inset needs to auto-merge (parity with Blender). Vertex bevel needs parity with Blender and must flow correctly.
 - Cannot double-click to open a subnet node. (Not built: nested subnet navigation, plan step 3; double-click currently sets display.)

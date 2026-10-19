@@ -1318,9 +1318,10 @@ fn serve_client(
                     .geometry
                     .filter(|_| good_seq != Some(snapshot.good_seq))
                 {
-                    let arrays = link_protocol::geometry_arrays(&geo);
+                    let shown = link_protocol::output_geometry(&geo).map_err(io::Error::other)?;
+                    let arrays = link_protocol::geometry_arrays(&shown);
                     let (header, changed) =
-                        diff.build(&arrays, &geo, snapshot.good_seq, &snapshot.cook);
+                        diff.build(&arrays, &shown, snapshot.good_seq, &snapshot.cook);
                     send_frame(&mut socket, &header, &changed)?;
                     let names: Vec<_> = snapshot.extras.keys().cloned().collect();
                     send_frame(
@@ -1330,9 +1331,10 @@ fn serve_client(
                     )?;
                     extra_diffs.retain(|name, _| snapshot.extras.contains_key(name));
                     for (name, g) in &snapshot.extras {
+                        let shown = link_protocol::output_geometry(g).map_err(io::Error::other)?;
                         let (mut h, a) = extra_diffs.entry(name.clone()).or_default().build(
-                            &link_protocol::geometry_arrays(g),
-                            g,
+                            &link_protocol::geometry_arrays(&shown),
+                            &shown,
                             snapshot.good_seq,
                             &snapshot.cook,
                         );
@@ -1386,6 +1388,33 @@ fn serve_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blender_input_reset_transform_uses_live_reference_matrix() {
+        let graph = json!({"display":"b","nodes":{"b":{"type":"blender_object"}}});
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let mut editor = minihou_app::EditorDocument::new(doc.clone(), PathBuf::from("object.json"));
+        let mut server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("object.json")).unwrap();
+        let source = Geometry::points_only(vec![1., 0., 0.]).unwrap();
+        let key = minihou_app::modifier_inputs::picker_key("b");
+        let mut arrays = link_protocol::geometry_arrays(&Geometry::default());
+        arrays.extend(link_protocol::geometry_arrays(&source).into_iter()
+            .map(|(name, array)| (format!("source:0/{name}"), array)));
+        let mut references = serde_json::Map::new();
+        references.insert(key.clone(), json!({"matrix":[1.,0.,0.,5.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.]}));
+        let message = json!({"type":"live_activate","path":"object.json","graph":graph,
+            "sources":[key],"references":references});
+        let edits = server.handle_live(&LinkRequest { peer:0, message, arrays, completion:None }, &mut editor).unwrap();
+        let mut session = editor.doc.session().unwrap();
+        for edit in edits {
+            if let minihou_app::Edit::External { name, input } = edit { session.set_external(name, input); }
+        }
+        assert_eq!(session.cook(None).unwrap().p(), &[6., 0., 0.]);
+        let edit = minihou_app::Edit::Param { node:"b".into(), name:"reset_transform".into(), value:json!(true) };
+        editor.doc.edit(&edit).unwrap();
+        session.set_param("b", "reset_transform", json!(true)).unwrap();
+        assert_eq!(session.cook(None).unwrap().p(), &[1., 0., 0.]);
+    }
 
     #[test]
     fn image_transport_requests_verifies_and_reuses_on_reconnect() {

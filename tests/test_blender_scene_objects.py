@@ -258,6 +258,8 @@ class ScenePiecesTests(LiveHarness, unittest.TestCase):
         self.pump(lambda: "session:so" in self.so.last_summary)
         self.assertIs(obj.parent, control)
         self.assertEqual(control.name, control_name)
+        self.assertAlmostEqual(obj.matrix_world.translation.x - before.x, 1.0)
+        self.assertIn("minihou_scene_placement", control)
 
     def test_the_users_work_on_pieces_survives_and_unchanged_pieces_are_not_rewritten(self):
         n = self.piece_count()

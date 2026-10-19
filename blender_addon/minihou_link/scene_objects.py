@@ -156,6 +156,20 @@ def _make(name: str, src_name: str, tag: str, ident: int, col, placeholder_log: 
 
 DIGEST = "minihou_digest"        # on an object's mesh: hash of the shape last written, so an unchanged piece is not rewritten
 CONTROL = "minihou_scene_control"  # on the empty that places an objects-mode mesh
+PLACEMENT = "minihou_scene_placement"  # last transform written by MiniHou; survives saving and reopening the blend file
+
+
+def _placement(obj):
+    return list(obj.location) + list(obj.rotation_euler) + list(obj.scale)
+
+
+def _user_moved_control(obj) -> bool:
+    previous = obj.get(PLACEMENT)
+    if previous is None:
+        return False
+    current = _placement(obj)
+    return len(previous) != 9 or any(not sp._close(current[i:i + 3], previous[i:i + 3], eps)
+        for i, eps in ((0, sp.LOC_EPS), (3, sp.ROT_EPS), (6, sp.SCALE_EPS)))
 
 
 def _control(obj, tag: str, col):
@@ -473,10 +487,14 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
     controls = {ident: _control(obj, tag, col) for ident, obj in objs.items() if object_mode and ident in wanted_ids}
     for item in plan.create + plan.update + [i for i in plan.retarget if i.ident in rebuilt]:
         obj = controls[item.ident] if object_mode else objs[item.ident]
+        if object_mode and item.ident not in created and _user_moved_control(obj):
+            continue
         if item.ident in created or sp.changed(item, _info(obj)):
             obj.location = item.loc
             obj.rotation_euler = item.rot
             obj.scale = item.scale
+        if object_mode:
+            obj[PLACEMENT] = _placement(obj)
     if parent_obj is not None:                            # a modifier's objects live in its owner's space: moving the owner moves them
         for ident in created | set(plan.reparent):
             obj = controls[ident] if object_mode else objs[ident]
