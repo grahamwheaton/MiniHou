@@ -360,3 +360,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Future todo: L-System should generate 3D output, not 2D.** Not scheduled yet.
 - **Future todo: Metaballs / Points to Surface node needs a rework.** Not scheduled yet.
 - **Bug: Controller node parameters are not displayed.** The parameter panel for controller1 shows only the header, the "Add section" button and the ch() hint. Its own parameters should appear below.
+- **Todo: empty network shows an empty viewport, not a cook-failed error.** With no nodes in the network editor, do not show the cook failed error. The viewport should just be empty.
