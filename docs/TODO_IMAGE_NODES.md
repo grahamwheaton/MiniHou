@@ -378,8 +378,6 @@ Nodes and parameters:
 - Array: full Blender parity.
 - Boolean parameters not working when exposed to Blender (check supported parameter types).
 
-Icons:
-- Proper shelf icons for the new loop tools, Pack, Split, Unpack and the others.
 
 Future:
 - Extrude and push/pull as one node.
