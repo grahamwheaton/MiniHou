@@ -173,9 +173,9 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     let id = state_id(v.path);
     let mut state = ui.ctx().data_mut(|d| d.get_persisted::<State>(id).unwrap_or_default());
     state.subnet_path = valid_path(v.doc, &state.subnet_path);
-    if !state.subnet_path.is_empty() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::U)) {
+    if !state.subnet_path.is_empty() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         state.subnet_path.pop(); reset_scope(&mut state);
-        ui.ctx().input_mut(|i| { i.consume_key(egui::Modifiers::NONE,egui::Key::Escape); i.consume_key(egui::Modifiers::NONE,egui::Key::U); });
+        ui.ctx().input_mut(|i| { i.consume_key(egui::Modifiers::NONE,egui::Key::Escape); });
     }
     let scoped_doc = scope_doc(v.doc, &state.subnet_path);
     let scoped_graph = scoped_doc.as_ref().and_then(|doc| minihou_core::Graph::from_value(doc).ok());
