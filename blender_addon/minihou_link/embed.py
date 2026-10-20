@@ -55,6 +55,8 @@ STATE = "minihou_embed_state"
 ERROR = "minihou_embed_error"
 FREEZE = "minihou_freeze"
 OWNER = "minihou_owner"      # on the Text: the network id that owns it
+ASSET_OWNER = "minihou_asset_owner"  # original modifier object, retained when an asset is copied
+TARGET_CHANGES = "minihou_target_migration"  # exact graph fields rewritten for the asset
 MARK = "minihou_embedded_graph"
 
 _pending = {}                # network id -> monotonic time of the last unsaved edit
@@ -245,6 +247,64 @@ def runtime_graph(ng):
     return json.loads(ng.get(GRAPH, "{}") or "{}")
 
 
+def bind_target(graph, owner):
+    """Replace only root Blender Object references to the asset's original owner."""
+    out = json.loads(json.dumps(graph))
+    changed = []
+    for nid, node in out.get("nodes", {}).items():
+        if (node.get("type") == "blender_object" and not node.get("inputs")
+                and node.get("params", {}).get("object") == owner):
+            node["params"]["object"] = "@target"
+            changed.append(f"nodes.{nid}.params.object: {owner!r} -> '@target'")
+    return out, changed
+
+
+def _asset_owner(ng):
+    owner = str(ng.get(ASSET_OWNER, ""))
+    if owner or bpy is None or "minihou_modifier_id" not in ng:
+        return owner
+    users = [obj for obj in bpy.data.objects for mod in getattr(obj, "modifiers", ())
+             if getattr(mod, "node_group", None) == ng]
+    if len(users) > 1:
+        roots = {node.get("params", {}).get("object") for node in runtime_graph(ng).get("nodes", {}).values()
+                 if node.get("type") == "blender_object" and not node.get("inputs")}
+        matches = {obj.name for obj in users if obj.name in roots}
+        if len(matches) == 1:
+            owner = matches.pop()
+            ng[ASSET_OWNER] = owner
+            return owner
+    if len(users) == 1:
+        owner = users[0].name
+        # A legacy asset may arrive without its original owner object. Its copied
+        # Source Object socket still names that owner until the instance is split.
+        try:
+            from . import modifiers
+            mod = next(mod for mod in users[0].modifiers if mod.node_group == ng)
+            source = modifiers.get_source(mod)
+            if source is not None and source.name != owner:
+                owner = source.name
+        except (ImportError, AttributeError, KeyError, StopIteration):
+            pass
+        ng[ASSET_OWNER] = owner
+        return owner
+    return ""
+
+
+def repair_target(ng):
+    """Migrate a known owner's runtime and embedded graph, recording each changed field."""
+    owner = _asset_owner(ng)
+    if not owner:
+        return []
+    graph, changed = bind_target(runtime_graph(ng), owner)
+    if changed:
+        ng[GRAPH] = json.dumps(graph)
+        ng[TARGET_CHANGES] = json.dumps(changed)
+        if mode(ng) == EMBEDDED:
+            write(ng, graph)
+        print(f"[minihou] {ng.name}: asset target migration: {'; '.join(changed)}")
+    return changed
+
+
 def write(ng, graph=None, *, label=None):
     """Store graph (default: the runtime copy) in the network's text. Returns the hash."""
     graph = runtime_graph(ng) if graph is None else graph
@@ -304,6 +364,7 @@ def embed(ng, graph=None, *, label=None, file=None):
     if graph is not None:
         graph, _ = migrate(graph)
         ng[GRAPH] = json.dumps(graph)
+    repair_target(ng)
     h = write(ng, label=label)
     ng[MODE] = EMBEDDED
     return h
@@ -469,6 +530,12 @@ def repair():
             copy.use_fake_user = True
             copy[OWNER] = network_id(ng)
             ng[TEXT] = copy.name
+    for ng in networks():
+        if ng.users and ng.get(STATE) != "unreadable":
+            try:
+                repair_target(ng)
+            except (EmbedError, ValueError) as exc:
+                ng[ERROR] = str(exc)
     live = {network_id(ng) for ng in networks() if mode(ng) == EMBEDDED}
     used = {ng.get(TEXT) for ng in networks()}
     for text in list(bpy.data.texts):
