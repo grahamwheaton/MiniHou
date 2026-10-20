@@ -37,7 +37,7 @@ pub(super) fn transform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         if !use_point { positions[3*i..3*i+3].copy_from_slice(&geo.p()[3*i..3*i+3]); }
     }
     out.set_p(positions);
-    super::packed::transform_instances(&mut out, &m, &selected);
+    super::super::packed::transform_instances(&mut out, &m, &selected);
     if let Some(n) = geo.point.get("N") {
         let n = n.as_f32().filter(|_| n.width == 3).ok_or_else(|| Error::new("point attribute N must be 3 floats"))?;
         // normals take the inverse scale: B (R / s) B^T, a zero scale counting as 1
@@ -156,4 +156,3 @@ fn proportional_transform(geo: &Geometry, p: &Params, selected: &[bool]) -> Resu
     }
     Ok(out)
 }
-

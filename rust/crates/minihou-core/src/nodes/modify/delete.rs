@@ -252,4 +252,3 @@ fn slice_table_indices(table: &AttrTable, indices: &[usize]) -> AttrTable {
     }
     out
 }
-

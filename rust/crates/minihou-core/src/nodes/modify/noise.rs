@@ -339,4 +339,3 @@ pub(super) fn noise_node(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
     Ok(out)
 }
-
