@@ -1,5 +1,5 @@
 use std::{collections::BTreeMap, sync::Arc};
-use super::{Tri, add_output_attributes, sampled_attr};
+use super::{Tri, output::{add_output_attributes, sampled_attr}};
 use super::super::np_random::Rng;
 use crate::error::{Error, Result};
 use crate::geometry::{Attr, Geometry};
@@ -356,4 +356,3 @@ pub(super) fn relax_samples(pos: &mut [f32], samples: &mut [(usize, [f64; 3])], 
     }
     Ok(())
 }
-
