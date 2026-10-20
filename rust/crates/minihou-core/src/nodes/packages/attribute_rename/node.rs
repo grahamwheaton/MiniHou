@@ -1,6 +1,6 @@
 use crate::{error::{Error, Result}, geometry::Geometry, nodes::{Inputs, NodeSpec, GEO}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "attribute_rename",
     inputs: GEO,
     params: crate::params!("from_name": ""; "to_name": ""),

@@ -2,6 +2,7 @@
 //! output (exact topology and attribute names; floats within rounding). Parameters it does not implement yet are declared
 //! `unsupported`, so a graph that sets one fails loudly instead of cooking something different.
 
+use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
 use crate::error::{Error, Result};
@@ -113,6 +114,9 @@ pub struct InputSpec {
 /// a multi input any number).
 pub type Inputs = [Vec<Arc<Geometry>>];
 
+/// A cached node payload and its size in bytes.
+pub type Sidecar = (Arc<dyn Any + Send + Sync>, usize);
+
 /// Ordered geometry sockets produced by a single node cook.
 #[derive(Clone, Debug)]
 pub struct NodeOutputs(pub Vec<Geometry>);
@@ -136,6 +140,7 @@ pub struct NodeSpec {
     pub params: &'static [ParamSpec],
     pub cook: fn(&Inputs, &Params) -> Result<Geometry>,
     pub cook_multi: Option<fn(&Inputs, &Params) -> Result<NodeOutputs>>,
+    pub cook_sidecar: Option<fn(&Inputs, &Params) -> Result<Option<Sidecar>>>,
 }
 
 impl NodeSpec {
@@ -179,6 +184,13 @@ pub struct NodeCatalogueEntry {
 
 mod packages {
     include!(concat!(env!("OUT_DIR"), "/node_packages.rs"));
+    pub(super) fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {
+        subnet::public_params(node)
+    }
+}
+
+pub(crate) fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {
+    packages::subnet_public_params(node)
 }
 
 pub fn package_catalogue() -> &'static [NodeCatalogueEntry] { packages::CATALOGUE }
@@ -295,8 +307,10 @@ pub fn registry() -> &'static [NodeSpec] {
         rbd_material_fracture::RBD_MATERIAL_FRACTURE,
         convex_decomposition::CONVEX_DECOMPOSITION,
         python_node::PYTHON,
-        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
-        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: Some(lod_bake_sidecar), name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
+        #[cfg(test)]
+        NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: Some(test_sidecar), name: "test_sidecar", inputs: &[], params: &[], cook: empty_subnet_input },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
         delaunay::DELAUNAY,
         surface::BRIDGE,
         surface::REVOLVE,
@@ -319,8 +333,8 @@ pub fn registry() -> &'static [NodeSpec] {
         dissolve::DISSOLVE,
         output::OUTPUT,
         output::INPUT,
-        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "subnet_input", inputs: &[], params: &[], cook: empty_subnet_input },
-        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "subnet_output", inputs: GEO, params: &[], cook: pass_through },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "subnet_input", inputs: &[], params: &[], cook: empty_subnet_input },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "subnet_output", inputs: GEO, params: &[], cook: pass_through },
     ];
     static MERGED: OnceLock<Vec<NodeSpec>> = OnceLock::new();
     MERGED.get_or_init(|| {
@@ -381,6 +395,33 @@ fn lod_bake(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         return Err(Error::new("cluster_size must be 16..128, min_triangles must be nonnegative, and error_px must be positive and finite"));
     }
     pass_through(inputs,p)
+}
+
+fn lod_bake_sidecar(inputs: &Inputs, p: &Params) -> Result<Option<Sidecar>> {
+    use crate::lod::{BuildError, ClusterLod};
+
+    let cluster_size = p.i("cluster_size")?;
+    let min_triangles = p.i("min_triangles")?;
+    let error_px = p.f("error_px")?;
+    if !(16..=128).contains(&cluster_size) || min_triangles < 0 || !(error_px as f32).is_finite() || error_px <= 0.0 {
+        return Err(Error::new("cluster_size must be 16..128, min_triangles must be nonnegative, and error_px must be positive and finite"));
+    }
+    if !p.b("enabled")? { return Ok(None); }
+    let g = inputs[0].first().expect("validated by pass-through");
+    let (tris, _) = crate::preview::fan_triangles(&g.topology.vertex_point, &g.topology.prim_offsets, g.topology.closed.as_deref());
+    if tris.len() / 3 < min_triangles as usize || tris.is_empty() { return Ok(None); }
+    let positions: Vec<[f32; 3]> = g.p().as_chunks::<3>().0.to_vec();
+    let triangles = tris.as_chunks::<3>().0.to_vec();
+    let mut lod = ClusterLod::build_with_cluster_size(positions, triangles, cluster_size as usize)
+        .map_err(|e| Error::new(match e { BuildError::InvalidIndices => "invalid triangle indices", BuildError::NonFinitePosition => "non-finite position", BuildError::EmptyMesh => "empty mesh" }))?;
+    lod.error_px = error_px as f32;
+    let bytes = lod.bytes();
+    Ok(Some((Arc::new(lod), bytes)))
+}
+
+#[cfg(test)]
+fn test_sidecar(_inputs: &Inputs, _params: &Params) -> Result<Option<Sidecar>> {
+    Ok(Some((Arc::new(String::from("attached")), 8)))
 }
 
 /// `np.linspace(start, stop, num)` in float64: `i * step + start`, with the last value exactly `stop`.

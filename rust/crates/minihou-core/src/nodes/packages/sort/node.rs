@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{AttrData, Geometry, Topology};
 use crate::params::{Params};
 use crate::nodes::attrib_tools::{domain, size};
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "sort",
     inputs: GEO,
     params: crate::params!(

@@ -40,7 +40,7 @@ pub const PARAMS: &[ParamSpec] = crate::params!(
     "append_groups": false;
 );
 
-pub const POLYFILL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const POLYFILL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "polyfill",
     inputs: GEO,
     params: PARAMS,

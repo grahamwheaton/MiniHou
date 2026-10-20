@@ -3,7 +3,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::{Params};
 use crate::nodes::attrib_tools::{domain, size, set_with_group, piece_labels};
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "color",
     inputs: GEO,
     params: crate::params!(

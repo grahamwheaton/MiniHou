@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::{GEO, Inputs, NodeOutputs, NodeSpec};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, params::Params};
 
-pub const RBD_MATERIAL_FRACTURE: NodeSpec = NodeSpec { outputs: &["pieces", "constraints"], cook_multi: Some(cook_multi),
+pub const RBD_MATERIAL_FRACTURE: NodeSpec = NodeSpec { outputs: &["pieces", "constraints"], cook_multi: Some(cook_multi), cook_sidecar: None,
     name: "rbd_material_fracture", inputs: GEO,
     params: crate::params!(
         "material":"concrete"; "density":1000.; "friction":0.6; "restitution":0.1; "glue_strength":1.0e7;

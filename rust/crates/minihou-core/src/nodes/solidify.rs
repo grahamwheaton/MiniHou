@@ -7,7 +7,7 @@ use crate::{
     params::Params,
 };
 use std::{collections::BTreeMap, sync::Arc};
-pub const SOLIDIFY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const SOLIDIFY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "solidify",
     inputs: GEO,
     params: crate::params!("thickness":0.1;"offset":-1.;"even":true;"rim":true;"group":"";"outgrp_top":false;"outgrp_top_name":"solidifytop";"outgrp_bottom":false;"outgrp_bottom_name":"solidifybottom";"outgrp_side":false;"outgrp_side_name":"solidifyside"),

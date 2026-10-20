@@ -17,7 +17,7 @@ use std::{
 const MAX_EDITS: usize = 4_000_000;
 const MAX_TEXT: usize = 48_000_000;
 
-pub const ATTRIB_PAINT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const ATTRIB_PAINT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "attrib_paint",
     inputs: GEO,
     params: crate::params!("attribute":"paint"; "domain":"point"; "kind":"float";

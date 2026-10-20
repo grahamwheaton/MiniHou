@@ -15,7 +15,7 @@ pub const INPUTS: &[InputSpec] = &[
     InputSpec { name: "geos", multi: true, optional: true },
 ];
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "switch",
     inputs: INPUTS,
     params: crate::params!(

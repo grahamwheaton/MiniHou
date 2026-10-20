@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::nodes::{Inputs, NodeSpec, GEO};
 use crate::{error::Result, geometry::Geometry, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "pcg_points",
     inputs: GEO,
     params: crate::params!("extents": [0.5, 0.5, 0.5]; "density": 1.0),

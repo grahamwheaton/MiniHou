@@ -1,6 +1,6 @@
 use crate::{error::Result, geometry::Geometry, nodes::{attribs::matches, Inputs, NodeSpec, GEO}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "attribute_delete",
     inputs: GEO,
     params: crate::params!("names": ""),

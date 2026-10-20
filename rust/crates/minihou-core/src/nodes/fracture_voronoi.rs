@@ -4,13 +4,13 @@ use crate::{error::{Error,Result},geometry::{Attr,AttrData,AttrTable,Geometry},p
 use std::{collections::{BTreeMap,BTreeSet},sync::Arc};
 const PORTS:&[InputSpec]=&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"points",multi:false,optional:false}];
 pub(super) const INSIDE:&str="vfinsidetmp";
-pub const VORONOI_FRACTURE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,
+pub const VORONOI_FRACTURE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name:"voronoi_fracture",inputs:PORTS,
     params:crate::params!("piece_attrib":"piece";"inside_group":"inside";"gap":0.;"create_inside":true;"cluster_pieces":false;"cluster_attrib":"cluster";
         "outgrp_inside":true;"outgrp_inside_name":"inside";"outgrp_outside":false;"outgrp_outside_name":"outside";
         "outgrp_cutpoints":false;"outgrp_cutpoints_name":"cutpoints";"outgrp_cutedges":false;"outgrp_cutedges_name":"cutedges"),cook:fracture,
 };
-pub const VORONOI_SPLIT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,
+pub const VORONOI_SPLIT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name:"voronoi_split",inputs:PORTS,
     params:crate::params!("piece_attrib":"piece";"outgrp_cutpoints":false;"outgrp_cutpoints_name":"cutpoints";"outgrp_cutedges":false;"outgrp_cutedges_name":"cutedges"),cook:split,
 };

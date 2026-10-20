@@ -2,7 +2,7 @@
 use std::sync::Arc;
 use crate::{Attr, Error, Geometry, Result, params::Params};
 use super::{InputSpec,Inputs,NodeSpec,scalar_expr::{Expr,Number}};
-pub const BLEND:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"blend",inputs:&[
+pub const BLEND:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"blend",inputs:&[
     InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"targets",multi:true,optional:true}
 ],params:crate::params!("amount":1.;"weights":"1";"attributes":"P";"mask":"";"group":""),cook:blend};
 

@@ -3,7 +3,7 @@ use crate::{nodes::{InputSpec, Inputs, NodeSpec}, error::{Error, Result}, geomet
 use crate::nodes::curves::{norm, sub};
 
 const CONTROLS: &str = r#"[{"p": [-1, 0, 0], "left": [-1.5, 0, 0], "right": [-0.5, 0, 0], "mode": "AUTO"}, {"p": [0, 0, 1], "left": [-0.5, 0, 1], "right": [0.5, 0, 1], "mode": "AUTO"}, {"p": [1, 0, 0], "left": [0.5, 0, 0], "right": [1.5, 0, 0], "mode": "AUTO"}]"#;
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "bezier", inputs: &[InputSpec{name:"geo",multi:false,optional:true}],
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "bezier", inputs: &[InputSpec{name:"geo",multi:false,optional:true}],
     params: crate::params!("controls": CONTROLS; "closed": false; "resolution": 24; "as_mesh": false), cook: bezier };
 fn bezier(inputs:&Inputs,p:&Params)->Result<Geometry> {
     let value:serde_json::Value=serde_json::from_str(&p.s("controls")?).map_err(|e| Error::new(e.to_string()))?;

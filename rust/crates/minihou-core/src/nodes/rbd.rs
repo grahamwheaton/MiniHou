@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::Params;
 
-pub const RBD_CONFIGURE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const RBD_CONFIGURE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "rbd_configure",
     inputs: GEO,
     params: crate::params!("piece_attrib": ""; "id_offset": 0; "active": true; "mass": 1.0; "friction": 0.6; "restitution": 0.0;
@@ -18,7 +18,7 @@ pub const RBD_CONFIGURE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_mult
     cook: rbd_configure,
 };
 
-pub const RBD_CONSTRAINT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const RBD_CONSTRAINT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "rbd_constraint",
     inputs: &[],
     params: crate::params!("kind": "glue"; "body_a": 0; "body_b": 1; "world": false; "anchor": [0.0, 0.0, 0.0];
@@ -27,7 +27,7 @@ pub const RBD_CONSTRAINT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_mul
     cook: rbd_constraint,
 };
 
-pub const RBD_SOLVER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const RBD_SOLVER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "rbd_solver",
     inputs: &[
         InputSpec { name: "bodies", multi: false, optional: false },

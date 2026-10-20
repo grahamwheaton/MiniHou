@@ -6,7 +6,7 @@ use crate::nodes::{groups, model, InputSpec, Inputs, NodeSpec, GEO};
 use crate::normals;
 use crate::params::Params;
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "normal",
     inputs: GEO,
     params: crate::params!(
