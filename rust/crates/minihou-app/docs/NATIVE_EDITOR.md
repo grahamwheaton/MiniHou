@@ -52,6 +52,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Alt+N | Flip faces | Viewport |
 | Alt+M | Mirror tool | Viewport |
 | Shift+V | Edge slide | Viewport |
+| Shift+S | Scale cage | Viewport |
 | Shift+C | Reset 3D cursor and frame all | Viewport |
 | Tab | Add node menu | Viewport |
 | Home | Frame selected | Viewport |
