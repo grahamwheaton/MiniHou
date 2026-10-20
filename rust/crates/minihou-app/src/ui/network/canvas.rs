@@ -188,23 +188,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
             let face = Rect::from_min_max(pos2(card.left() + 20.0 * state.zoom, card.top()), pos2(card.right() - 20.0 * state.zoom, card.bottom()));
             let response = ui.interact(face, id.with(("node", node_id)), sense)
                 .on_hover_text(format!("{} · {} · {} params", node_id, node.node_type, node.params.as_ref().map_or(0, |p| p.len())));
-            response.clone().context_menu(|ui| {
-                if ui.button("Rename node...").clicked() {
-                    ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("rename_link_node"),(node_id.clone(),node_id.clone())));
-                    ui.close();
-                }
-                let links = minihou_app::value_link_ui::links(v.doc);
-                for link in links.iter().filter(|l| &l.target == node_id && !l.broken) {
-                    if ui.button(format!("Go to source: {}.{}",link.source,link.source_param)).clicked() {
-                        out.push(UiAction::NavigateLink {node:link.source.clone(),param:link.source_param.clone()}); ui.close();
-                    }
-                }
-                for link in links.iter().filter(|l| &l.source == node_id) {
-                    if ui.button(format!("Go to target: {}.{}",link.target,link.target_param)).clicked() {
-                        out.push(UiAction::NavigateLink {node:link.target.clone(),param:link.target_param.clone()}); ui.close();
-                    }
-                }
-            });
+            node_context_menu(&response, node_id, v, out);
             if response.double_clicked() {
                 if node.node_type == "subnet" { state.subnet_path.push(node_id.clone()); reset_scope(state); }
                 else { out.push(UiAction::SetDisplay(node_id.clone())); }
@@ -370,23 +354,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
             noodle(&p, a, b, v.theme.accent);
         }
     }
-    if let Some(menu) = &mut state.menu {
-        let canvas_pos = menu.canvas_pos();
-        if let Some(choice) = network_menu::show(ctx, id.with("menu"), menu, v, out) {
-            match choice {
-                network_menu::Choice::Close => {
-                    if matches!(out.0.last(), Some(UiAction::AddNode { after: None, .. })) {
-                        state.add_pos = canvas_pos;
-                    } else if !matches!(out.0.last(), Some(UiAction::AddNode { .. })) {
-                        state.add_pos = None;
-                    }
-                    state.menu = None;
-                }
-                network_menu::Choice::FrameAll => { frame_all(state, r, content_bounds(&positions)); state.menu = None; state.add_pos = None; },
-                network_menu::Choice::Tidy => { tidy_state(state); out.push(UiAction::TidyNetwork); state.menu = None; state.add_pos = None; },
-            }
-        }
-    }
+    canvas_menu(ctx, id, state, v, out, r, &positions);
     p.text(pos2(r.left() + 10.0, r.bottom() - 8.0), Align2::LEFT_BOTTOM, "Tab add node · Home frame all · Del delete", FontId::proportional(11.0), v.theme.faint);
 }
 

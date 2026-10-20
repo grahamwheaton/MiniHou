@@ -8,6 +8,8 @@ mod network_wires;
 #[path = "network_menu.rs"]
 mod network_menu;
 
+mod context;
+use context::*;
 mod canvas;
 use canvas::*;
 mod menus;
