@@ -208,4 +208,3 @@ pub(super) fn planar_guess(
     }
     out
 }
-

@@ -219,4 +219,3 @@ pub(super) fn make_discs(
     }
     label
 }
-

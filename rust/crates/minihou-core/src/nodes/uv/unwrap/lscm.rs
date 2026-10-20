@@ -251,4 +251,3 @@ pub(super) fn lscm(
 
     (0..n).map(|u| [sol[u], sol[n + u]]).collect()
 }
-
