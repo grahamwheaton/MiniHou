@@ -4,12 +4,23 @@ fn needs_selection_depth(mode: Mode, xray: bool, editing: bool, faces: bool) -> 
     !xray && faces && (mode.hidden() || (editing && !mode.shaded()))
 }
 
+fn viewport_point_size(size: f32, mode: crate::ui::SelectionMode) -> f32 {
+    size * if mode == crate::ui::SelectionMode::Points { 2.0 } else { 1.0 }
+}
+
 #[cfg(test)]
 #[test]
 fn edit_highlights_have_occluding_depth_when_faces_are_drawn() {
     assert!(needs_selection_depth(Mode::Wireframe, false, true, true));
     assert!(!needs_selection_depth(Mode::SmoothShaded, false, true, false));
     assert!(!needs_selection_depth(Mode::SmoothShaded, true, true, false));
+}
+
+#[cfg(test)]
+#[test]
+fn point_mode_supports_half_the_previous_marker_size() {
+    assert_eq!(viewport_point_size(1.0, crate::ui::SelectionMode::Points), 2.0);
+    assert_eq!(viewport_point_size(0.5, crate::ui::SelectionMode::Points), 1.0);
 }
 
 impl Gpu {
@@ -64,7 +75,7 @@ impl Gpu {
             flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,if sketchup_clean {2} else {mode.matcap() as u32}],
             object_color:(overlay.object_color==ObjectColor::Random || use_cd) as u32,_pad_color:[0;3],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
-            element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size*if selection_mode==crate::ui::SelectionMode::Points {4.} else {1.},overlay.geometry.line_width],
+            element_size:[target.size[0] as f32,target.size[1] as f32,viewport_point_size(overlay.geometry.point_size, selection_mode),overlay.geometry.line_width],
             element_flags:[(overlay.geometry.points || selection_mode==crate::ui::SelectionMode::Points) as u32,overlay.geometry.lines as u32,points_visible(&overlay.geometry,selection_mode) as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
             element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
         queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));

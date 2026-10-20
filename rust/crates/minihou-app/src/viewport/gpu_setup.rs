@@ -123,7 +123,9 @@ impl Gpu {
         let z_axis=buf("z axis",bytemuck::cast_slice(&[Element {a:[0.,0.,-1e6],b:[0.,0.,1e6],kind:6,selected:0}]),wgpu::BufferUsages::VERTEX);
         let pipe_face_markers=mk("face centres","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,-2,true,C::LessEqual,false,W::ALL);
         let pipe_face_markers_xray=mk("face centres xray","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,-2,true,C::Always,false,W::ALL);
-        let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-1,true,C::LessEqual,true,W::ALL);
+        // A corner shared by three faces needs enough depth bias to keep its
+        // marker visible against the adjacent rasterized triangles.
+        let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-4,true,C::LessEqual,true,W::ALL);
         let pipe_elements_ghost=mk("ghost points and curves","vs_element","fs_element_ghost",&element_bufs,T::TriangleList,-1,true,C::LessEqual,false,W::ALL);
         let pipe_surf = mk("surf", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 0, false, C::LessEqual, true, W::ALL);
         let pipe_tex=mk("textured surface","vs_tex","fs_tex",&tex_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
