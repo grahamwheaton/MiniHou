@@ -208,4 +208,3 @@ pub(super) fn extract_loops(g: &Geometry, boundary_mask: &[bool], auto_complete:
 
     Ok(loops)
 }
-

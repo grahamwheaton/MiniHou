@@ -147,4 +147,3 @@ pub(super) fn params_along(c: &[[f64; 3]]) -> Vec<f64> {
     let tot = a.last().copied().unwrap_or(1.0).max(1e-12);
     a.iter().map(|x| x / tot).collect()
 }
-
