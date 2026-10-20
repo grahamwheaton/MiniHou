@@ -85,11 +85,16 @@ pub(super) fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &
         p.text(pos2(face.left() + 16.0 * zoom, r.center().y), Align2::LEFT_CENTER, ellipsis(id, face.width() - 16.0 * zoom - link_width, 12.0), FontId::monospace(12.0), text);
         if link_count > 0 { p.text(pos2(face.right(), r.center().y), Align2::RIGHT_CENTER, format!("↗ {link_count}"), FontId::proportional(10.0 * zoom), link_color); }
     } else { p.rect_filled(r.shrink(2.0), 3.0, cat); }
-    let inputs = input_slots(node);
+    let inputs = input_slots(node, &v.doc["nodes"][id]);
     for index in 0..inputs.len() {
         p.circle(r.min + input_offset(index, inputs.len()) * zoom, 5.0 * zoom, t.base, Stroke::new(1.5_f32, t.stroke2));
     }
-    if node.node_type != "output" { p.circle(pos2(r.center().x, r.bottom()), 5.0 * zoom, t.base, Stroke::new(1.5_f32, t.stroke2)); }
+    if node.node_type != "output" {
+        let count = output_count(&v.doc["nodes"][id]);
+        for index in 0..count {
+            p.circle(r.min + output_offset(index, count) * zoom, 5.0 * zoom, t.base, Stroke::new(1.5_f32, t.stroke2));
+        }
+    }
     if v.cooking.cooking() && !node.bypass { p.rect_filled(Rect::from_min_size(pos2(r.left() + 2.0, r.bottom() - 3.0), vec2(r.width() * 0.38, 2.0)), 0.0, t.accent); }
     if let Some(message) = error {
         let galley = p.layout(message.to_owned(), FontId::monospace(11.0 * zoom), t.text, r.width() - 16.0);

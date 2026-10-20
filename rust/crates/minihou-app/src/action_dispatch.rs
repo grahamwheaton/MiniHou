@@ -207,23 +207,44 @@ impl App {
                 if self.network_hover {
                     if let Some((path,inner,selected,set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
                         let ids:Vec<String>=if set.is_empty(){vec![selected]}else{set.into_iter().collect()};
-                        if let Some((changed,ids))=subnet_edit::toggle(&inner,&ids) {
+                        if let Some((changed,id))=subnet_edit::group(&inner,&ids) {
                             if let Some(root)=ui::network::embed_scope(self.editor.doc.value(),&path,changed) {
-                                if self.commit_document(root,"group inner nodes") {ui::network::select_inner(ctx,&self.editor.path,ids);}
+                                if self.commit_document(root,"group inner nodes") {ui::network::select_inner(ctx,&self.editor.path,vec![id]);}
                             }
                         } else {self.file_status="Select inner nodes to group".into();}
                         return;
                     }
                 }
                 let ids: Vec<String> = if self.selected_set.is_empty() { vec![self.selected.clone()] } else { self.selected_set.iter().cloned().collect() };
-                match subnet_edit::toggle(self.editor.doc.value(), &ids) {
-                    Some((value, sel)) => if self.commit_document(value, "group nodes") {
-                        self.selected = sel[0].clone();
-                        self.selected_set = sel.into_iter().collect();
+                match subnet_edit::group(self.editor.doc.value(), &ids) {
+                    Some((value, id)) => if self.commit_document(value, "group nodes") {
+                        self.selected = id.clone();
+                        self.selected_set = std::collections::BTreeSet::from([id]);
                         if let Ok(g) = Graph::from_value(self.editor.doc.value()) { self.display = g.main_output().unwrap_or_else(|_| self.selected.clone()); }
                     },
                     None => self.file_status = "Select nodes to group (only one may feed the rest of the network)".into(),
                 }
+            }
+            "ungroup_selection" => {
+                if !self.network_hover { return; }
+                if let Some((path, inner, selected, set)) = ui::network::current_scope(ctx, &self.editor.path, self.editor.doc.value()) {
+                    let id = if set.len() == 1 { set.iter().next().cloned() } else if set.is_empty() { Some(selected) } else { None };
+                    if let Some((changed, ids)) = id.and_then(|id| subnet_edit::ungroup(&inner, &id)) {
+                        if let Some(root) = ui::network::embed_scope(self.editor.doc.value(), &path, changed) {
+                            if self.commit_document(root, "ungroup inner subnet") { ui::network::select_inner(ctx, &self.editor.path, ids); }
+                        }
+                    } else { self.file_status = "Select one subnet to ungroup".into(); }
+                    return;
+                }
+                let id = if self.selected_set.len() == 1 { self.selected_set.iter().next().cloned() }
+                    else if self.selected_set.is_empty() { Some(self.selected.clone()) } else { None };
+                if let Some((value, ids)) = id.and_then(|id| subnet_edit::ungroup(self.editor.doc.value(), &id)) {
+                    if self.commit_document(value, "ungroup subnet") {
+                        self.selected = ids.first().cloned().unwrap_or_default();
+                        self.selected_set = ids.into_iter().collect();
+                        if let Ok(g) = Graph::from_value(self.editor.doc.value()) { self.display = g.main_output().unwrap_or_else(|_| self.selected.clone()); }
+                    }
+                } else { self.file_status = "Select one subnet to ungroup".into(); }
             }
             "duplicate_selection" => { if let Some(id) = self.selected_set.iter().next().cloned() { self.duplicate_node(&id); } }
             "duplicate_linked_selection" => self.duplicate_linked_nodes(),
@@ -464,6 +485,7 @@ impl App {
                 UiAction::AddNode { node_type, after } => self.add_node(ctx, &node_type, after.as_deref()),
                 UiAction::AddNetworkNode { node_type, pos, wire } => {
                     if let Some((mut value, id)) = graph_edit::add(self.editor.doc.value(), &node_type, None) {
+                        if node_type == "subnet" { subnet_edit::initialize(&mut value, &id); }
                         if node_type == "boundary_select" {
                             let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary");
                             merge_params(&mut value, &id, json!({"output_group_name": name}));
@@ -498,6 +520,7 @@ impl App {
                 }
                 UiAction::AddConnectedNode { node_type, connection, pos } => {
                     if let Some((mut value, id)) = graph_edit::add_connected(self.editor.doc.value(), &node_type, &connection, pos) {
+                        if node_type == "subnet" { subnet_edit::initialize(&mut value, &id); }
                         if node_type == "boundary_select" {
                             let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary");
                             merge_params(&mut value, &id, json!({"output_group_name": name}));

@@ -71,7 +71,7 @@ struct State { show_links: bool, focus: Option<String>, zoom: f32, pan: Vec2, mo
     selected_wires: BTreeSet<WireRef>, graph_snapshot: Option<serde_json::Value>,
     cut: Option<Cut>, box_op: SelectionOp,
     wiggle: Wiggle,
-    wire: Option<AddConnection>, pickup: Option<crate::graph_edit::WirePickup>,
+    wire: Option<AddConnection>, wire_output_index: usize, pickup: Option<crate::graph_edit::WirePickup>,
     drag_before: Option<serde_json::Value>, drag_physics: bool,
     drag: Option<(String, Pos2)>, box_start: Option<Pos2>, alt_pan: bool, menu: Option<network_menu::MenuState>,
     canvas: Option<Rect>, add_pos: Option<Pos2> }
@@ -79,7 +79,7 @@ impl Default for State {
     fn default() -> Self { Self { show_links: true, focus: None, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true, physics: true, springs: None,
         subnet_path: Vec::new(), inner_selected: String::new(), inner_selected_set: BTreeSet::new(),
         selected_wires: BTreeSet::new(), graph_snapshot: None, cut: None, box_op: SelectionOp::Replace,
-        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None,
+        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, wire_output_index: 0, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None,
         canvas: None, add_pos: None } }
 }
 
@@ -173,9 +173,9 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     let id = state_id(v.path);
     let mut state = ui.ctx().data_mut(|d| d.get_persisted::<State>(id).unwrap_or_default());
     state.subnet_path = valid_path(v.doc, &state.subnet_path);
-    if !state.subnet_path.is_empty() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::U)) {
+    if !state.subnet_path.is_empty() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         state.subnet_path.pop(); reset_scope(&mut state);
-        ui.ctx().input_mut(|i| { i.consume_key(egui::Modifiers::NONE,egui::Key::Escape); i.consume_key(egui::Modifiers::NONE,egui::Key::U); });
+        ui.ctx().input_mut(|i| { i.consume_key(egui::Modifiers::NONE,egui::Key::Escape); });
     }
     let scoped_doc = scope_doc(v.doc, &state.subnet_path);
     let scoped_graph = scoped_doc.as_ref().and_then(|doc| minihou_core::Graph::from_value(doc).ok());
@@ -267,12 +267,21 @@ pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -
         UiAction::DeleteNode(node) => inner=crate::graph_edit::delete(&inner,&node)?,
         UiAction::AddNetworkNode {node_type,pos,wire} => {
             let (mut next,id)=crate::graph_edit::add(&inner,&node_type,None)?;
+            if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
             next["nodes"][&id]["pos"]=serde_json::json!(pos);
             if let Some(wire)=wire {next=crate::graph_edit::insert_existing(&next,&id,&wire)?;}
             inner=next;
         }
-        UiAction::AddConnectedNode {node_type,connection,pos} => inner=crate::graph_edit::add_connected(&inner,&node_type,&connection,pos)?.0,
-        UiAction::AddNode {node_type,after} => inner=crate::graph_edit::add(&inner,&node_type,after.as_deref())?.0,
+        UiAction::AddConnectedNode {node_type,connection,pos} => {
+            let (mut next,id)=crate::graph_edit::add_connected(&inner,&node_type,&connection,pos)?;
+            if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
+            inner=next;
+        },
+        UiAction::AddNode {node_type,after} => {
+            let (mut next,id)=crate::graph_edit::add(&inner,&node_type,after.as_deref())?;
+            if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
+            inner=next;
+        },
         UiAction::ConnectNodes {from,to,port} => inner=crate::graph_edit::connect(&inner,&from,&to,port.as_deref())?,
         UiAction::DisconnectAll(node) => inner=crate::graph_edit::disconnect_all(&inner,&node)?,
         UiAction::DisconnectInput {node,port} => inner=crate::graph_edit::disconnect(&inner,&node,&port)?,

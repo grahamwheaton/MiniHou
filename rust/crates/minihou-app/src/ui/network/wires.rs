@@ -1,7 +1,13 @@
 use super::*;
 
 /// Slots include unused declared inputs; multi-input wires share their named port.
-pub(super) fn input_slots(node: &NodeDef) -> Vec<String> {
+pub(super) fn input_slots(node: &NodeDef, raw: &serde_json::Value) -> Vec<String> {
+    if node.node_type == "subnet" {
+        if let Some(sockets) = raw["input_sockets"].as_array() {
+            return sockets.iter().filter_map(|socket| socket["index"].as_u64())
+                .map(|index| format!("in{index}")).collect();
+        }
+    }
     minihou_core::nodes::get(&node.node_type).map(|spec| spec.inputs.iter().flat_map(|port| {
         let count = node.inputs.iter().find(|(name, _)| name == port.name).map_or(0, |(_, refs)| refs.len()).max(1);
         std::iter::repeat_n(port.name.to_owned(), count)
@@ -12,15 +18,46 @@ pub(super) fn input_offset(index: usize, count: usize) -> Vec2 {
     vec2(CARD.x * 0.5 + (index as f32 - (count.saturating_sub(1)) as f32 * 0.5) * 16.0, 0.0)
 }
 
+pub(super) fn output_count(raw: &serde_json::Value) -> usize {
+    raw["output_sockets"].as_array().map_or(1, |sockets| sockets.len().max(1))
+}
+
+pub(super) fn output_offset(index: usize, count: usize) -> Vec2 {
+    vec2(CARD.x * 0.5 + (index as f32 - (count.saturating_sub(1)) as f32 * 0.5) * 16.0, CARD.y)
+}
+
+#[cfg(test)]
+mod subnet_port_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn declared_subnet_sockets_have_distinct_canvas_positions() {
+        let mut doc = json!({"nodes": {"box1": {"type": "box"}, "sub": {"type": "subnet", "inputs": {"geo": "box1"}}}});
+        crate::subnet_edit::initialize(&mut doc, "sub");
+        let doc = crate::subnet_edit::add_input(&doc, "sub", "box1").unwrap();
+        let graph = minihou_core::Graph::from_value(&doc).unwrap();
+        let node = &graph.nodes.iter().find(|(id, _)| id == "sub").unwrap().1;
+        assert_eq!(input_slots(node, &doc["nodes"]["sub"]), vec!["in0", "in1"]);
+        assert_ne!(input_offset(0, 2), input_offset(1, 2));
+        assert_ne!(output_offset(0, 2), output_offset(1, 2));
+    }
+}
+
 pub(super) fn canvas_ports(v: &View, positions: &[(String, Pos2)]) -> Vec<(AddConnection, Pos2)> {
     let mut ports = Vec::new();
     for (id, at) in positions {
         let Some((_, node)) = v.graph.nodes.iter().find(|(n, _)| n == id) else { continue };
-        let inputs = input_slots(node);
+        let inputs = input_slots(node, &v.doc["nodes"][id]);
         for (index, port) in inputs.iter().enumerate() {
             ports.push((AddConnection::Input { node: id.clone(), port: port.clone() }, *at + input_offset(index, inputs.len())));
         }
-        if node.node_type != "output" { ports.push((AddConnection::Output(id.clone()), *at + vec2(CARD.x * 0.5, CARD.y))); }
+        if node.node_type != "output" {
+            let count = output_count(&v.doc["nodes"][id]);
+            for index in 0..count {
+                ports.push((AddConnection::Output(id.clone()), *at + output_offset(index, count)));
+            }
+        }
     }
     ports
 }
@@ -84,22 +121,24 @@ pub(super) fn dependency_links(p: &egui::Painter, canvas: Rect, state: &State, v
 }
 
 pub(super) fn wire_curves(canvas: Rect, state: &State, v: &View, positions: &[(String, Pos2)]) -> Vec<(WireRef, Vec<Pos2>)> {
-    curves_for(canvas, state, v.graph, positions)
+    curves_for(canvas, state, v.graph, v.doc, positions)
 }
-pub(super) fn curves_for(canvas: Rect, state: &State, graph: &minihou_core::Graph, positions: &[(String, Pos2)]) -> Vec<(WireRef, Vec<Pos2>)> {
+pub(super) fn curves_for(canvas: Rect, state: &State, graph: &minihou_core::Graph, doc: &serde_json::Value, positions: &[(String, Pos2)]) -> Vec<(WireRef, Vec<Pos2>)> {
     let mut wires = Vec::new();
     let mut seen = BTreeSet::new();
     let lookup: HashMap<&str, Pos2> = positions.iter().map(|(id, at)| (id.as_str(), *at)).collect();
     for (target, def) in &graph.nodes {
         let Some(&end) = lookup.get(target.as_str()) else { continue };
-        let slots = input_slots(def);
+        let slots = input_slots(def, &doc["nodes"][target]);
         let mut used = HashMap::<&str, usize>::new();
-        for (port, source) in def.inputs.iter().flat_map(|(port, refs)| refs.iter().map(move |source| (port, source))) {
+        for (port, source, source_index) in def.inputs.iter().flat_map(|(port, refs)| refs.iter().enumerate().map(move |(index, source)|
+            (port, source, index))) {
             let offset = used.entry(port).or_default();
             let Some(index) = slots.iter().position(|name| name == port).map(|i| i + *offset) else { continue };
             *offset += 1;
             let Some(&start) = lookup.get(source.as_str()) else { continue };
-            let a = screen(canvas, state, start + vec2(CARD.x * 0.5, CARD.y));
+            let endpoint = def.output_for(port, source_index, source);
+            let a = screen(canvas, state, start + output_offset(endpoint.output, output_count(&doc["nodes"][source])));
             let b = screen(canvas, state, end + input_offset(index, slots.len()));
             let wire = WireRef { from: source.clone(), to: target.clone(), port: port.clone() };
             if seen.insert(wire.clone()) { wires.push((wire, network_wires::curve(a,b))); }

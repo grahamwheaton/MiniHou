@@ -39,10 +39,10 @@ pub enum Command {
     ResetCursor,
     RepeatLast,
     SketchLine, SketchPolyline, SketchPolygon, SketchRectangle, SketchCircle,
-    SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks, GroupNodes, GroupCreate,
+    SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks, GroupNodes, UngroupNodes, GroupCreate,
 }
 impl Command {
-    pub const ALL: [Self; 97] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 98] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -53,7 +53,7 @@ impl Command {
         Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::EdgeSlide, Self::Knife, Self::FlipFaces, Self::Mirror, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
         Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
         Self::ResetCursor, Self::RepeatLast,
-        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess, Self::GoToLinkSource, Self::GoToLinkTarget, Self::ToggleDepLinks, Self::GroupNodes, Self::GroupCreate];
+        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess, Self::GoToLinkSource, Self::GoToLinkTarget, Self::ToggleDepLinks, Self::GroupNodes, Self::UngroupNodes, Self::GroupCreate];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectLinked => "Select linked", Self::InvertSelection => "Invert selection",
@@ -69,7 +69,7 @@ impl Command {
         Self::Proportional => "Proportional editing", Self::ShadeNext => "Next shading", Self::ShadePrevious => "Previous shading",
         Self::Undo => "Undo", Self::Redo => "Redo", Self::Save => "Save", Self::SaveAs => "Save as", Self::Open => "Open",
         Self::Copy => "Copy nodes", Self::Paste => "Paste nodes",
-        Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::LinkedDuplicateNode => "Duplicate linked parameters", Self::DuplicateObject => "Duplicate objects and move", Self::GroupNodes => "Group / ungroup nodes", Self::GroupCreate => "Group Create from selection", Self::TidyNetwork => "Tidy network",
+        Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::LinkedDuplicateNode => "Duplicate linked parameters", Self::DuplicateObject => "Duplicate objects and move", Self::GroupNodes => "Group nodes", Self::UngroupNodes => "Ungroup subnet", Self::GroupCreate => "Group Create from selection", Self::TidyNetwork => "Tidy network",
         Self::Preferences => "Preferences",
         Self::BoxSelect => "Box select", Self::CircleSelect => "Circle select", Self::LassoSelect => "Lasso select", Self::Paint => "Paint",
         Self::Extrude => "Extrude (modal)", Self::Inset => "Inset", Self::Bevel => "Bevel (modal)", Self::PushPull => "Push / pull (modal)",
@@ -99,7 +99,7 @@ impl Command {
         Self::PanUp => "pan_up", Self::PanDown => "pan_down", Self::ZoomIn => "zoom_in", Self::ZoomOut => "zoom_out",
         Self::Xray => "xray", Self::Snap => "snap", Self::Proportional => "proportional", Self::ShadeNext => "shade_next",
         Self::ShadePrevious => "shade_previous", Self::Undo => "undo", Self::Redo => "redo", Self::Save => "save",
-        Self::SaveAs => "save_as", Self::Open => "open", Self::Copy => "copy", Self::Paste => "paste", Self::DeleteNode => "delete_node", Self::DissolveNode => "dissolve_node", Self::DuplicateNode => "duplicate_node", Self::LinkedDuplicateNode => "linked_duplicate_node", Self::DuplicateObject => "duplicate_object", Self::GroupNodes => "group_nodes", Self::GroupCreate => "group_create",
+        Self::SaveAs => "save_as", Self::Open => "open", Self::Copy => "copy", Self::Paste => "paste", Self::DeleteNode => "delete_node", Self::DissolveNode => "dissolve_node", Self::DuplicateNode => "duplicate_node", Self::LinkedDuplicateNode => "linked_duplicate_node", Self::DuplicateObject => "duplicate_object", Self::GroupNodes => "group_nodes", Self::UngroupNodes => "ungroup_nodes", Self::GroupCreate => "group_create",
         Self::TidyNetwork => "tidy_network", Self::Preferences => "preferences",
         Self::BoxSelect => "box_select", Self::CircleSelect => "circle_select", Self::LassoSelect => "lasso_select", Self::Paint => "paint",
         Self::Extrude => "extrude", Self::Inset => "inset", Self::Bevel => "bevel", Self::PushPull => "pushpull",
@@ -149,6 +149,7 @@ impl Command {
         Self::LinkedDuplicateNode => UiAction::Command("duplicate_linked_selection".into()),
         Self::DuplicateObject => UiAction::Command("duplicate_objects".into()),
         Self::GroupNodes => UiAction::Command("group_selection".into()),
+        Self::UngroupNodes => UiAction::Command("ungroup_selection".into()),
         Self::GroupCreate => UiAction::Command("group_selection".into()),
         Self::Copy | Self::Paste => UiAction::Command(self.id().to_owned()),
         Self::TidyNetwork => UiAction::TidyNetwork, Self::Preferences => UiAction::OpenPreferences,
@@ -215,6 +216,7 @@ impl Keymap {
         add(K::D,false,true,false,C::DuplicateObject,X::Viewport);
         add(K::D,false,false,true,C::DuplicateObject,X::Viewport);
         add(K::G,true,false,false,C::GroupNodes,X::Network);
+        add(K::U,true,false,false,C::UngroupNodes,X::Network);
         add(K::G,true,false,false,C::GroupCreate,X::Viewport);
         add(K::X,true,false,false,C::DissolveNode,X::Network);
         for (key,cmd) in [(K::C,C::Copy),(K::V,C::Paste),(K::A,C::SelectAll),
@@ -430,6 +432,7 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
         for (key, modifiers, network, command) in [
             (Key::G, Modifiers::CTRL, false, Command::GroupCreate),
             (Key::G, Modifiers::CTRL, true, Command::GroupNodes),
+            (Key::U, Modifiers::CTRL, true, Command::UngroupNodes),
             (Key::X, Modifiers::NONE, false, Command::DeleteNode),
             (Key::Delete, Modifiers::NONE, false, Command::DeleteNode),
         ] {
@@ -440,7 +443,7 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
                 key, physical_key: None, pressed: true, repeat: false, modifiers,
             }], ..Default::default() }, |ctx| {
                 let actions = map.poll(ctx, &KeyContext { viewport_hovered: !network, network_hovered: network, ..Default::default() });
-                let expected = if key == Key::G { "group_selection" } else { "delete_selection" };
+                let expected = match key { Key::G => "group_selection", Key::U => "ungroup_selection", _ => "delete_selection" };
                 assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
             });
         }
