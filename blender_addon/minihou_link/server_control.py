@@ -45,7 +45,7 @@ class ServerController:
         with self._lock:
             self._state, self._detail, self._editor_url = state, detail, editor_url
 
-    def start(self, python_path, project_root, graph_path, *, host="127.0.0.1",
+    def start(self, app_path, graph_path, *, host="127.0.0.1",
               port=DEFAULT_PORT, http_port=8766):
         """Return immediately. Poll snapshot() from a Blender timer for status."""
         with self._lock:
@@ -64,7 +64,7 @@ class ServerController:
             self._cancel = threading.Event()
             self._set("starting", "Checking for a compatible engine")
             self._thread = threading.Thread(target=self._start, args=(
-                python_path, project_root, graph_path, host, int(port), int(http_port)),
+                app_path, graph_path, host, int(port), int(http_port)),
                 name="minihou-launcher", daemon=True)
             self._thread.start()
 
@@ -92,6 +92,8 @@ class ServerController:
             return False
         if os.path.normcase(os.path.realpath(actual)) != os.path.normcase(os.path.realpath(graph)):
             raise ValueError("Existing engine serves a different graph; use its graph or another port")
+        if header.get("editor") == "native" and header.get("editor_url") is None:
+            return True
         url = urlsplit(header.get("editor_url") or "")
         loopback = {"localhost", "127.0.0.1", "::1"}
         if (url.scheme != "http" or host not in loopback or url.hostname not in loopback
@@ -100,7 +102,24 @@ class ServerController:
             raise ValueError("Existing engine editor address does not match the configured editor port")
         return True
 
-    def _start(self, python_path, project_root, graph_path, host, port, http_port):
+    @staticmethod
+    def _app_executable(app_path):
+        name = "minihou-app.exe" if os.name == "nt" else "minihou-app"
+        if app_path:
+            candidates = [Path(app_path)]
+        else:
+            root = Path(__file__).resolve().parents[2]
+            target = os.environ.get("CARGO_TARGET_DIR")
+            targets = [root / "rust" / "target"] if not target else [Path(target)]
+            if target and not targets[0].is_absolute():
+                targets = [Path.cwd() / target, root / target, root / "rust" / target]
+            candidates = [base / profile / name for base in targets for profile in ("debug", "release")]
+        for candidate in candidates:
+            if candidate.is_absolute() and candidate.is_file():
+                return candidate.resolve()
+        raise ValueError("MiniHou Rust app (minihou-app) not found. Build it with cargo build --manifest-path rust/Cargo.toml -p minihou-app, or set its executable path in add-on preferences.")
+
+    def _start(self, app_path, graph_path, host, port, http_port):
         try:
             if not graph_path or not Path(graph_path).is_absolute() or not Path(graph_path).is_file():
                 raise ValueError("Select an existing absolute graph file path")
@@ -110,35 +129,20 @@ class ServerController:
                 if not self._compatible(existing, graph, host, http_port):
                     raise ValueError("Existing engine has not reported its graph; retry when it is ready")
                 if not self._cancel.is_set():
-                    self._set("ready", "Reusing existing engine (not owned by Blender)", existing["editor_url"])
+                    self._set("ready", "Reusing existing engine (not owned by Blender)", existing.get("editor_url") or "")
                     self._monitor_reused(host, port)
                 return
-            executable, root = Path(python_path), Path(project_root)
-            if not python_path or not executable.is_absolute() or not executable.is_file():
-                raise ValueError("Configure an absolute external Python executable or portable Python runtime")
-            if "blender" in executable.name.lower():
-                raise ValueError("Choose external Python, not the Blender executable")
-            if not project_root or not root.is_absolute() or not (root / "minihou" / "__main__.py").is_file():
-                raise ValueError("Configure the MiniHou project folder containing minihou/__main__.py")
-            env = os.environ.copy()
-            env.pop("PYTHONHOME", None)
-            env.pop("PYTHONPATH", None)
+            executable = self._app_executable(app_path)
+            if host not in {"localhost", "127.0.0.1"} or port != DEFAULT_PORT:
+                raise ValueError(f"minihou-app listens on 127.0.0.1:{DEFAULT_PORT}; select that link port to launch it")
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            check = subprocess.run([str(executable), "-c", "import sys; assert sys.version_info >= (3, 11), 'MiniHou requires Python 3.11+'; import numpy, minihou; print('MINIHOU_PYTHON_READY')"],
-                                   cwd=str(root), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
-                                   creationflags=flags)
-            if check.returncode or "MINIHOU_PYTHON_READY" not in check.stdout:
-                raise ValueError("External Python must be 3.11+ with MiniHou/numpy available. Configure a prepared runtime. "
-                                 + (check.stderr or check.stdout)[-2000:])
             if self._cancel.is_set():
                 return
             if self._log is not None:
                 self._log.close()
             self._log = tempfile.TemporaryFile(mode="w+b")
-            self._process = subprocess.Popen([
-                str(executable), "-m", "minihou", "serve", str(graph), "--host", host,
-                "--port", str(port), "--http-port", str(http_port), "--root", str(root)],
-                cwd=str(root), env=env, stdin=subprocess.DEVNULL,
+            self._process = subprocess.Popen([str(executable), str(graph)],
+                cwd=str(graph.parent), stdin=subprocess.DEVNULL,
                 stdout=self._log, stderr=subprocess.STDOUT, creationflags=flags)
             deadline = time.monotonic() + self.startup_timeout
             while not self._cancel.wait(0.15):
@@ -149,7 +153,7 @@ class ServerController:
                 except (ConnectionError, socket.timeout):
                     header = None
                 if header and self._compatible(header, graph, host, http_port):
-                    self._set("ready", "Engine ready (started by Blender)", header["editor_url"])
+                    self._set("ready", "Rust app ready (started by Blender)", header.get("editor_url") or "")
                     return
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Engine readiness timed out: " + self._read_log())
@@ -230,6 +234,8 @@ class ServerController:
 
     def open_editor(self):
         state = self.snapshot()
-        if state["state"] != "ready" or not state["editor_url"]:
-            raise ValueError("Start or reuse a ready MiniHou server first")
+        if state["state"] != "ready":
+            raise ValueError("Start or reuse a ready MiniHou app first")
+        if not state["editor_url"]:
+            raise ValueError("The Rust editor is in the MiniHou app window")
         return webbrowser.open(state["editor_url"])

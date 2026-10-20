@@ -44,7 +44,7 @@ class ServerControllerTests(unittest.TestCase):
 
     def test_reuse_needs_no_runtime_and_stop_never_terminates_external_server(self):
         with patch.object(self.controller, "_probe", return_value=self.header), patch.object(launcher.subprocess, "Popen") as popen:
-            self.controller.start("", "", str(self.graph))
+            self.controller.start("", str(self.graph))
             state = finish(self.controller)
             self.assertEqual(state["state"], "ready")
             self.assertFalse(state["owned"])
@@ -54,52 +54,41 @@ class ServerControllerTests(unittest.TestCase):
     def test_incompatible_graph_or_editor_never_launches_or_stops(self):
         for field, value in [("graph_path", str(self.root / "other.json")), ("editor_url", "http://127.0.0.1:9999/")]:
             with self.subTest(field=field), patch.object(self.controller, "_probe", return_value={**self.header, field: value}), patch.object(launcher.subprocess, "Popen") as popen:
-                self.controller.start("", "", str(self.graph))
+                self.controller.start("", str(self.graph))
                 self.assertEqual(finish(self.controller)["state"], "error")
                 popen.assert_not_called()
 
-    def test_explicit_runtime_required_and_blender_executable_rejected(self):
-        blender = self.root / "blender.exe"
-        blender.touch()
-        for executable in ["", "python", str(blender)]:
-            with self.subTest(executable=executable), patch.object(self.controller, "_probe", return_value=None), patch.object(launcher.subprocess, "Popen") as popen:
-                self.controller.start(executable, str(ROOT), str(self.graph))
-                self.assertEqual(finish(self.controller)["state"], "error")
-                popen.assert_not_called()
+    def test_missing_app_never_launches(self):
+        with patch.object(self.controller, "_probe", return_value=None), patch.object(launcher.subprocess, "Popen") as popen:
+            self.controller.start(str(self.root / "missing-app"), str(self.graph))
+            self.assertIn("minihou-app", finish(self.controller)["detail"])
+            popen.assert_not_called()
 
     def test_launch_readiness_and_owned_stop(self):
         process = Mock()
         process.poll.return_value = None
-        check = types.SimpleNamespace(returncode=0, stdout="MINIHOU_PYTHON_READY", stderr="")
-        with patch.object(self.controller, "_probe", side_effect=[None, self.header]), patch.object(launcher.subprocess, "run", return_value=check), patch.object(launcher.subprocess, "Popen", return_value=process) as popen:
-            self.controller.start(sys.executable, str(ROOT), str(self.graph))
+        app = self.root / "minihou-app"
+        app.touch()
+        with patch.object(self.controller, "_probe", side_effect=[None, self.header]), patch.object(launcher.subprocess, "Popen", return_value=process) as popen:
+            self.controller.start(str(app), str(self.graph))
             state = finish(self.controller)
             self.assertEqual(state["state"], "ready")
             self.assertTrue(state["owned"])
             command = popen.call_args.args[0]
-            self.assertEqual(command[:4], [sys.executable, "-m", "minihou", "serve"])
-            self.assertNotIn("--no-save", command)
-            self.assertNotIn("PYTHONHOME", popen.call_args.kwargs["env"])
+            self.assertEqual(command, [str(app), str(self.graph)])
             with patch.object(launcher.webbrowser, "open", return_value=True) as browser:
                 self.assertTrue(self.controller.open_editor())
                 browser.assert_called_once_with(self.header["editor_url"])
             self.controller.stop(wait=True)
             process.terminate.assert_called_once()
 
-    def test_import_failure_reports_error_without_launch(self):
-        check = types.SimpleNamespace(returncode=1, stdout="", stderr="No module named numpy")
-        with patch.object(self.controller, "_probe", return_value=None), patch.object(launcher.subprocess, "run", return_value=check), patch.object(launcher.subprocess, "Popen") as popen:
-            self.controller.start(sys.executable, str(ROOT), str(self.graph))
-            state = finish(self.controller)
-            self.assertIn("No module named numpy", state["detail"])
-            popen.assert_not_called()
-
     def test_startup_timeout_cleans_up_owned_process(self):
         process = Mock()
         process.poll.return_value = None
-        check = types.SimpleNamespace(returncode=0, stdout="MINIHOU_PYTHON_READY", stderr="")
-        with patch.object(self.controller, "_probe", return_value=None), patch.object(launcher.subprocess, "run", return_value=check), patch.object(launcher.subprocess, "Popen", return_value=process):
-            self.controller.start(sys.executable, str(ROOT), str(self.graph))
+        app = self.root / "minihou-app"
+        app.touch()
+        with patch.object(self.controller, "_probe", return_value=None), patch.object(launcher.subprocess, "Popen", return_value=process):
+            self.controller.start(str(app), str(self.graph))
             self.assertEqual(finish(self.controller)["state"], "error")
             process.terminate.assert_called_once()
             self.assertFalse(self.controller.snapshot()["owned"])
@@ -123,40 +112,9 @@ class ServerControllerTests(unittest.TestCase):
             thread.join(2)
             listener.close()
 
-    @unittest.skipIf(sys.version_info < (3, 11), "External engine requires Python 3.11+")
-    def test_real_external_engine_launch_reuse_and_owned_cleanup(self):
-        import shutil
-        from urllib.request import urlopen
-        shutil.copyfile(ROOT / "examples" / "graphs" / "demo.json", self.graph)
-        sockets = [socket.socket(), socket.socket()]
-        for item in sockets:
-            item.bind(("127.0.0.1", 0))
-        port, http_port = [item.getsockname()[1] for item in sockets]
-        for item in sockets:
-            item.close()
-        self.controller.startup_timeout = 30
-        other = ServerController()
-        try:
-            self.controller.start(sys.executable, str(ROOT), str(self.graph), host="localhost", port=port, http_port=http_port)
-            self.controller._thread.join(40)
-            state = self.controller.snapshot()
-            self.assertEqual(state["state"], "ready", state["detail"])
-            with urlopen(state["editor_url"], timeout=3) as response:
-                self.assertEqual(response.status, 200)
-            other.start("", "", str(self.graph), host="localhost", port=port, http_port=http_port)
-            self.assertEqual(finish(other)["state"], "ready")
-            self.assertFalse(other.snapshot()["owned"])
-            other.stop(wait=True)
-            process = self.controller._process
-            self.assertIsNone(process.poll())
-            self.controller.stop(wait=True)
-            self.assertIsNotNone(process.poll())
-        finally:
-            other.stop(wait=True)
-
     def test_reused_server_loss_updates_status(self):
         with patch.object(self.controller, "_probe", side_effect=[self.header, None]):
-            self.controller.start("", "", str(self.graph))
+            self.controller.start("", str(self.graph))
             self.assertEqual(finish(self.controller)["state"], "ready")
             self.controller._monitor.join(3)
             state = self.controller.snapshot()
