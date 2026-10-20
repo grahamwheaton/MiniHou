@@ -105,7 +105,11 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     let hit_port = pointer.filter(|at| r.contains(*at)).and_then(|at| ports.iter().rev()
         .find(|(_, world)| screen(r, state, *world).distance(at) <= (9.0 * state.zoom).max(6.0)));
     if state.menu.is_none() && ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary)) {
-        if let Some((port, _)) = hit_port {
+        if let Some((port, world)) = hit_port {
+            state.wire_output_index = if matches!(port, AddConnection::Output(_)) {
+                ports.iter().filter(|(candidate, _)| candidate == port)
+                    .position(|(_, position)| position == world).unwrap_or(0)
+            } else { 0 };
             state.pickup = match port {
                 AddConnection::Input { node, port } => crate::graph_edit::WirePickup::begin(v.doc, node, port),
                 _ => None,
@@ -123,7 +127,23 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     }
     if state.wire.is_some() && ctx.input(|i| i.pointer.button_released(PointerButton::Primary)) {
         let source = state.wire.take().unwrap();
-        if let Some(pickup) = state.pickup.take() {
+        let source_output = std::mem::take(&mut state.wire_output_index);
+        let subnet_target = if hit_port.is_none() { pointer.filter(|at| r.contains(*at)).and_then(|at| positions.iter().rev()
+            .find(|(node, pos)| v.doc["nodes"][node]["type"] == "subnet"
+                && Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at))
+            .map(|(node, _)| node.clone())) } else { None };
+        if let Some(subnet) = subnet_target {
+            let next = if let Some(pickup) = state.pickup.take() {
+                pickup.release(v.doc, None).and_then(|base|
+                    crate::subnet_edit::add_output(&base, &subnet, &pickup.original.to, &pickup.original.port))
+            } else {
+                match source {
+                    AddConnection::Output(from) => crate::subnet_edit::add_input_from(v.doc, &subnet, &from, source_output),
+                    AddConnection::Input { node, port } => crate::subnet_edit::add_output(v.doc, &subnet, &node, &port),
+                }
+            };
+            if let Some(next) = next { out.push(UiAction::NetworkGesture { expected: v.doc.clone(), before: v.doc.clone(), next }); }
+        } else if let Some(pickup) = state.pickup.take() {
             let target = hit_port.map(|(target, _)| target.clone()).or_else(|| {
                 let at = pointer.filter(|at| r.contains(*at))?;
                 let (node, _) = positions.iter().rev().find(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at))?;
@@ -132,13 +152,43 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
                 Some(AddConnection::Input { node: node.clone(), port: port.name.into() })
             });
             let next = match target {
+                Some(AddConnection::Input { node, port }) if v.doc["nodes"][&node]["type"] == "subnet" && port.starts_with("in") =>
+                    pickup.release(v.doc, None).and_then(|base| crate::subnet_edit::connect_input(&base, &node, &port, &pickup.original.from)),
                 Some(AddConnection::Input { node, port }) => pickup.release(v.doc, Some((&node, &port))),
                 None if over => pickup.release(v.doc, None),
                 _ => None,
             };
             if let Some(next) = next { out.push(UiAction::NetworkGesture { expected: v.doc.clone(), before: v.doc.clone(), next }); }
-        } else if let Some((target, _)) = hit_port {
-            if let Some(action) = wire_connection(&source, target) { out.push(action); }
+        } else if let Some((target, target_world)) = hit_port {
+            let target_output = if matches!(target, AddConnection::Output(_)) {
+                ports.iter().filter(|(candidate, _)| candidate == target)
+                    .position(|(_, position)| position == target_world).unwrap_or(0)
+            } else { 0 };
+            let subnet_connection = match (&source, target) {
+                (AddConnection::Output(from), AddConnection::Input { node, port })
+                    if v.doc["nodes"][node]["type"] == "subnet" && port.starts_with("in") =>
+                    crate::subnet_edit::connect_input_from(v.doc, node, port, from, source_output),
+                (AddConnection::Input { node, port }, AddConnection::Output(from))
+                    if v.doc["nodes"][node]["type"] == "subnet" && port.starts_with("in") =>
+                    crate::subnet_edit::connect_input_from(v.doc, node, port, from, target_output),
+                _ => None,
+            };
+            if let Some(next) = subnet_connection { out.push(UiAction::NetworkGesture { expected: v.doc.clone(), before: v.doc.clone(), next }); }
+            else if let (AddConnection::Output(from), AddConnection::Input { node, port }) = (&source, target) {
+                if source_output > 0 {
+                    if let Some(next) = crate::graph_edit::connect_output(v.doc, from, source_output, node, Some(port)) {
+                        out.push(UiAction::NetworkGesture { expected: v.doc.clone(), before: v.doc.clone(), next });
+                    }
+                } else if let Some(action) = wire_connection(&source, target) { out.push(action); }
+            }
+            else if let (AddConnection::Input { node, port }, AddConnection::Output(from)) = (&source, target) {
+                if target_output > 0 {
+                    if let Some(next) = crate::graph_edit::connect_output(v.doc, from, target_output, node, Some(port)) {
+                        out.push(UiAction::NetworkGesture { expected: v.doc.clone(), before: v.doc.clone(), next });
+                    }
+                } else if let Some(action) = wire_connection(&source, target) { out.push(action); }
+            }
+            else if let Some(action) = wire_connection(&source, target) { out.push(action); }
         } else if let Some(at) = pointer.filter(|at| r.contains(*at)) {
             let on_card = positions.iter().any(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at));
             let on_map = Rect::from_min_size(pos2(r.right() - 106.0, r.bottom() - 130.0), vec2(96.0, 120.0)).contains(at);
@@ -348,7 +398,8 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     let live = state.wire.as_ref().map(|port| (port, pointer))
         .or_else(|| { let menu = state.menu.as_ref()?; menu.connect_to.as_ref().map(|(port, _)| (port, Some(menu.at()))) });
     if let Some((port, Some(end))) = live {
-        if let Some((_, start)) = ports.iter().find(|(candidate, _)| candidate == port) {
+        let output_index = if state.wire.is_some() && matches!(port, AddConnection::Output(_)) { state.wire_output_index } else { 0 };
+        if let Some((_, start)) = ports.iter().filter(|(candidate, _)| candidate == port).nth(output_index) {
             let start = screen(r, state, *start);
             let (a, b) = if matches!(port, AddConnection::Output(_)) { (start, end) } else { (end, start) };
             noodle(&p, a, b, v.theme.accent);

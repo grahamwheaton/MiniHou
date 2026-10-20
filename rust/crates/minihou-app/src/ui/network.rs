@@ -71,7 +71,7 @@ struct State { show_links: bool, focus: Option<String>, zoom: f32, pan: Vec2, mo
     selected_wires: BTreeSet<WireRef>, graph_snapshot: Option<serde_json::Value>,
     cut: Option<Cut>, box_op: SelectionOp,
     wiggle: Wiggle,
-    wire: Option<AddConnection>, pickup: Option<crate::graph_edit::WirePickup>,
+    wire: Option<AddConnection>, wire_output_index: usize, pickup: Option<crate::graph_edit::WirePickup>,
     drag_before: Option<serde_json::Value>, drag_physics: bool,
     drag: Option<(String, Pos2)>, box_start: Option<Pos2>, alt_pan: bool, menu: Option<network_menu::MenuState>,
     canvas: Option<Rect>, add_pos: Option<Pos2> }
@@ -79,7 +79,7 @@ impl Default for State {
     fn default() -> Self { Self { show_links: true, focus: None, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true, physics: true, springs: None,
         subnet_path: Vec::new(), inner_selected: String::new(), inner_selected_set: BTreeSet::new(),
         selected_wires: BTreeSet::new(), graph_snapshot: None, cut: None, box_op: SelectionOp::Replace,
-        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None,
+        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, wire_output_index: 0, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None,
         canvas: None, add_pos: None } }
 }
 

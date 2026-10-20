@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 fn refs(node: &Value) -> Vec<String> {
     node.get("inputs").and_then(Value::as_object).into_iter().flat_map(|m| m.values()).flat_map(|v| match v {
         Value::String(s) => vec![s.clone()],
-        Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect(),
+        Value::Object(o) => o.get("node").and_then(Value::as_str).map(str::to_owned).into_iter().collect(),
+        Value::Array(a) => a.iter().filter_map(|x| x.as_str().or_else(|| x["node"].as_str()).map(str::to_owned)).collect(),
         _ => vec![],
     }).collect()
 }
@@ -16,14 +17,68 @@ fn map_refs(node: &mut Value, f: &mut dyn FnMut(&str) -> String) {
     for v in inputs.values_mut() {
         match v {
             Value::String(s) => *s = f(s),
-            Value::Array(a) => for x in a { if let Some(s) = x.as_str() { *x = json!(f(s)); } },
+            Value::Object(o) => if let Some(s) = o.get("node").and_then(Value::as_str) {
+                o.insert("node".into(), json!(f(s)));
+            },
+            Value::Array(a) => for x in a {
+                if let Some(s) = x.as_str() { *x = json!(f(s)); }
+                else if let Some(o) = x.as_object_mut() {
+                    if let Some(s) = o.get("node").and_then(Value::as_str) { o.insert("node".into(), json!(f(s))); }
+                }
+            },
             _ => {}
         }
     }
 }
 
+fn map_endpoints(node: &mut Value, f: &mut dyn FnMut(&Value) -> Value) {
+    let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) else { return };
+    for value in inputs.values_mut() {
+        if let Value::Array(refs) = value { for endpoint in refs { *endpoint = f(endpoint); } }
+        else { *value = f(value); }
+    }
+}
+
+fn restored_endpoint(endpoint: &Value, inner: &Map<String, Value>, ext: &[Option<Value>],
+    rename: &std::collections::HashMap<String, String>) -> Value {
+    let source = endpoint.as_str().or_else(|| endpoint["node"].as_str());
+    let Some(source) = source else { return endpoint.clone() };
+    if let Some(index) = inner.get(source).filter(|node| node["type"] == "subnet_input")
+        .and_then(|node| node["port_index"].as_u64()).map(|i| i as usize)
+        .or_else(|| source.strip_prefix("$in").and_then(|i| i.parse::<usize>().ok())) {
+        return ext.get(index).and_then(Clone::clone).unwrap_or(Value::Null);
+    }
+    if let Some(new) = rename.get(source) {
+        if endpoint.is_string() { return json!(new); }
+        let mut changed = endpoint.clone();
+        changed["node"] = json!(new);
+        return changed;
+    }
+    endpoint.clone()
+}
+
 fn fresh(nodes: &Map<String, Value>, ty: &str) -> String {
     (1..).map(|n| format!("{ty}{n}")).find(|id| !nodes.contains_key(id)).unwrap()
+}
+
+fn depends_on(nodes: &Map<String, Value>, start: &str, sought: &str) -> bool {
+    let mut pending = vec![start.to_owned()];
+    let mut seen = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if id == sought { return true; }
+        if seen.insert(id.clone()) {
+            if let Some(node) = nodes.get(&id) { pending.extend(refs(node)); }
+        }
+    }
+    false
+}
+
+fn has_output(nodes: &Map<String, Value>, source: &str, output: usize) -> bool {
+    let Some(node) = nodes.get(source) else { return false };
+    let Some(ty) = node["type"].as_str() else { return false };
+    minihou_core::nodes::get(ty).is_some_and(|spec| output < spec.outputs.len())
+        || ty == "subnet" && node["output_sockets"].as_array().is_some_and(|sockets|
+            sockets.iter().any(|socket| socket["index"].as_u64() == Some(output as u64)))
 }
 
 /// Give a newly added subnet a visible pass-through pair. Existing inner graphs are preserved.
@@ -45,10 +100,117 @@ pub fn initialize(value: &mut Value, id: &str) {
     }, "output": "output1"});
 }
 
+fn ensure_sockets(sub: &mut Value) -> Option<()> {
+    if !sub["input_sockets"].is_array() {
+        let sources = match &sub["inputs"]["geo"] {
+            Value::String(_) | Value::Object(_) => vec![sub["inputs"]["geo"].clone()],
+            Value::Array(refs) => refs.clone(),
+            _ => Vec::new(),
+        };
+        let count = sources.len().max(1);
+        let inner = sub["inner"]["nodes"].as_object_mut()?;
+        let mut boundaries = Vec::new();
+        for index in 0..count {
+            let boundary = fresh(inner, "input");
+            inner.insert(boundary.clone(), json!({"type": "subnet_input", "port_index": index,
+                "pos": [-220.0, index as f64 * 96.0]}));
+            boundaries.push(boundary);
+        }
+        for node in inner.values_mut() {
+            map_refs(node, &mut |r| r.strip_prefix("$in").and_then(|n| n.parse::<usize>().ok())
+                .and_then(|n| boundaries.get(n)).cloned().unwrap_or_else(|| r.to_owned()));
+        }
+        sub["input_sockets"] = Value::Array((0..count).map(|index|
+            json!({"index": index, "name": format!("Input {}", index + 1)})).collect());
+        sub["inputs"] = Value::Object(sources.into_iter().enumerate().map(|(index, source)|
+            (format!("in{index}"), source)).collect());
+    }
+    if !sub["output_sockets"].is_array() {
+        let output = sub["inner"]["output"].as_str()?.to_owned();
+        let inner = sub["inner"]["nodes"].as_object_mut()?;
+        if inner.get(&output)?["type"] == "subnet_output" {
+            inner.get_mut(&output)?["port_index"] = json!(0);
+        } else {
+            let boundary = fresh(inner, "output");
+            inner.insert(boundary.clone(), json!({"type": "subnet_output", "port_index": 0,
+                "inputs": {"geo": output}, "pos": [220.0, 0.0]}));
+            sub["inner"]["output"] = json!(boundary);
+        }
+        sub["output_sockets"] = json!([{"index": 0, "name": "Output 1"}]);
+    }
+    Some(())
+}
+
+/// A noodle from a source node creates a connected input and its inner boundary.
+pub fn add_input(value: &Value, id: &str, source: &str) -> Option<Value> {
+    add_input_from(value, id, source, 0)
+}
+
+pub fn add_input_from(value: &Value, id: &str, source: &str, output: usize) -> Option<Value> {
+    let mut next = value.clone();
+    let nodes = next.get_mut("nodes")?.as_object_mut()?;
+    if id == source || !has_output(nodes, source, output) || nodes[source]["type"] == "output"
+        || depends_on(nodes, source, id) { return None; }
+    let sub = nodes.get_mut(id).filter(|n| n["type"] == "subnet")?;
+    ensure_sockets(sub)?;
+    let index = sub["input_sockets"].as_array()?.iter().filter_map(|s| s["index"].as_u64()).max().map_or(0, |i| i + 1);
+    let inner = sub["inner"]["nodes"].as_object_mut()?;
+    let boundary = fresh(inner, "input");
+    inner.insert(boundary, json!({"type": "subnet_input", "port_index": index,
+        "pos": [-220.0, index as f64 * 96.0]}));
+    sub["input_sockets"].as_array_mut()?.push(json!({"index": index, "name": format!("Input {}", index + 1)}));
+    sub["inputs"][format!("in{index}")] = if output == 0 { json!(source) }
+        else { json!({"node": source, "output": output}) };
+    Some(next)
+}
+
+pub fn connect_input(value: &Value, id: &str, port: &str, source: &str) -> Option<Value> {
+    connect_input_from(value, id, port, source, 0)
+}
+
+pub fn connect_input_from(value: &Value, id: &str, port: &str, source: &str, output: usize) -> Option<Value> {
+    let index = port.strip_prefix("in")?.parse::<u64>().ok()?;
+    let mut next = value.clone();
+    let nodes = next.get_mut("nodes")?.as_object_mut()?;
+    if id == source || !has_output(nodes, source, output) || nodes[source]["type"] == "output"
+        || depends_on(nodes, source, id) { return None; }
+    let sub = nodes.get_mut(id).filter(|n| n["type"] == "subnet")?;
+    ensure_sockets(sub)?;
+    if !sub["input_sockets"].as_array()?.iter().any(|socket| socket["index"] == index) { return None; }
+    sub["inputs"][port] = if output == 0 { json!(source) }
+        else { json!({"node": source, "output": output}) };
+    Some(next)
+}
+
+/// A noodle from a downstream input creates an output boundary and wires that input to it.
+pub fn add_output(value: &Value, id: &str, target: &str, port: &str) -> Option<Value> {
+    let mut next = value.clone();
+    let nodes = next.get_mut("nodes")?.as_object_mut()?;
+    if id == target || !nodes.contains_key(target) || depends_on(nodes, id, target) { return None; }
+    let sub = nodes.get_mut(id).filter(|n| n["type"] == "subnet")?;
+    ensure_sockets(sub)?;
+    let index = sub["output_sockets"].as_array()?.iter().filter_map(|s| s["index"].as_u64()).max().map_or(0, |i| i + 1);
+    let first = sub["inner"]["output"].as_str()?.to_owned();
+    let inner = sub["inner"]["nodes"].as_object_mut()?;
+    let source = if inner[&first]["type"] == "subnet_output" {
+        inner[&first]["inputs"]["geo"].clone()
+    } else { json!(first) };
+    let boundary = fresh(inner, "output");
+    inner.insert(boundary, json!({"type": "subnet_output", "port_index": index,
+        "inputs": {"geo": source}, "pos": [220.0, index as f64 * 96.0]}));
+    sub["output_sockets"].as_array_mut()?.push(json!({"index": index, "name": format!("Output {}", index + 1)}));
+    crate::graph_edit::connect_output(&next, id, index as usize, target, Some(port))
+}
+
 pub fn group(value: &Value, ids: &[String]) -> Option<(Value, String)> {
     let nodes = value.get("nodes")?.as_object()?;
     let sel: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
     if sel.is_empty() || sel.iter().any(|id| !nodes.contains_key(*id)) { return None; }
+    if nodes.iter().filter(|(id, _)| !sel.contains(id.as_str())).any(|(_, node)|
+        node["inputs"].as_object().into_iter().flat_map(|inputs| inputs.values()).flat_map(|value|
+            if let Value::Array(refs) = value { refs.iter().collect::<Vec<_>>() } else { vec![value] })
+            .any(|endpoint| endpoint["node"].as_str().is_some_and(|source| sel.contains(source))
+                && endpoint["output"].as_u64().is_some_and(|index| index > 0))) { return None; }
     let displayed = minihou_app::display_nodes(value);
     // The inner output: the one selected node read from outside, else the displayed or first selected sink.
     let mut outs: Vec<&str> = Vec::new();
@@ -64,13 +226,17 @@ pub fn group(value: &Value, ids: &[String]) -> Option<(Value, String)> {
         1 => outs[0],
         _ => return None,
     };
-    let mut ext: Vec<String> = Vec::new();
+    let mut ext: Vec<Value> = Vec::new();
     let mut inner = Map::new();
     for (id, nd) in nodes.iter().filter(|(id, _)| sel.contains(id.as_str())) {
         let mut nd = nd.clone();
-        map_refs(&mut nd, &mut |r| if sel.contains(r) { r.to_owned() } else {
-            let k = ext.iter().position(|e| e == r).unwrap_or_else(|| { ext.push(r.to_owned()); ext.len() - 1 });
-            format!("$in{k}")
+        map_endpoints(&mut nd, &mut |endpoint| {
+            let source = endpoint.as_str().or_else(|| endpoint["node"].as_str());
+            if source.is_none() { return endpoint.clone(); }
+            if source.is_some_and(|source| sel.contains(source)) { return endpoint.clone(); }
+            let k = ext.iter().position(|existing| existing == endpoint)
+                .unwrap_or_else(|| { ext.push(endpoint.clone()); ext.len() - 1 });
+            json!(format!("$in{k}"))
         });
         inner.insert(id.clone(), nd);
     }
@@ -99,7 +265,7 @@ pub fn group(value: &Value, ids: &[String]) -> Option<(Value, String)> {
         "output_sockets": [{"index": 0, "name": "Output 1"}]});
     if !ext.is_empty() {
         node["inputs"] = Value::Object(ext.iter().enumerate().map(|(index, source)|
-            (format!("in{index}"), json!(source))).collect());
+            (format!("in{index}"), source.clone())).collect());
     }
     if !pos.is_empty() {
         let n = pos.len() as f64;
@@ -118,14 +284,16 @@ pub fn ungroup(value: &Value, id: &str) -> Option<(Value, Vec<String>)> {
     let inner = sub["inner"]["nodes"].as_object()?;
     let output_boundary = sub["inner"]["output"].as_str().filter(|o| inner.contains_key(*o))?;
     let output = if inner[output_boundary]["type"] == "subnet_output" {
-        inner[output_boundary]["inputs"]["geo"].as_str()?
-    } else { output_boundary };
-    let ext = if sub["input_sockets"].is_array() {
-        sub["input_sockets"].as_array()?.iter().map(|socket| {
-            let index = socket["index"].as_u64()?;
-            sub["inputs"].get(format!("in{index}")).and_then(Value::as_str).map(str::to_owned)
-        }).collect::<Vec<_>>()
-    } else { refs(sub).into_iter().map(Some).collect() };
+        inner[output_boundary]["inputs"]["geo"].clone()
+    } else { json!(output_boundary) };
+    let ext = if let Some(sockets) = sub["input_sockets"].as_array() {
+        let mut values = vec![None; sockets.iter().filter_map(|socket| socket["index"].as_u64()).max().unwrap_or(0) as usize + 1];
+        for socket in sockets {
+            let index = socket["index"].as_u64()? as usize;
+            values[index] = sub["inputs"].get(format!("in{index}")).cloned();
+        }
+        values
+    } else { refs(sub).into_iter().map(|source| Some(json!(source))).collect() };
     let mut next = value.clone();
     let all = next.get_mut("nodes")?.as_object_mut()?;
     all.remove(id);
@@ -139,21 +307,38 @@ pub fn ungroup(value: &Value, id: &str) -> Option<(Value, Vec<String>)> {
     for (key, nd) in inner {
         let mut nd = nd.clone();
         if matches!(nd["type"].as_str(), Some("subnet_input" | "subnet_output")) { continue; }
-        map_refs(&mut nd, &mut |r| {
-            let boundary = inner.get(r).filter(|n| n["type"] == "subnet_input")
-                .and_then(|n| n["port_index"].as_u64()).and_then(|i| ext.get(i as usize));
-            boundary.and_then(Clone::clone).or_else(|| r.strip_prefix("$in").and_then(|k| k.parse::<usize>().ok())
-                .and_then(|k| ext.get(k)).and_then(Clone::clone))
-                .or_else(|| rename.get(r).cloned()).unwrap_or_else(|| r.to_owned())
-        });
+        map_endpoints(&mut nd, &mut |endpoint| restored_endpoint(endpoint, inner, &ext, &rename));
         all.insert(rename[key].clone(), nd);
     }
-    let out = rename.get(output).cloned().or_else(|| inner.get(output).filter(|n| n["type"] == "subnet_input")
-        .and_then(|n| n["port_index"].as_u64()).and_then(|i| ext.get(i as usize)).and_then(Clone::clone))?;
-    for (k, nd) in all.iter_mut() {
-        if !rename.values().any(|v| v == k) { map_refs(nd, &mut |r| if r == id { out.clone() } else { r.to_owned() }); }
+    let out = restored_endpoint(&output, inner, &ext, &rename);
+    if out.is_null() { return None; }
+    let mut output_targets = std::collections::HashMap::from([(0_u64, out.clone())]);
+    for socket in sub["output_sockets"].as_array().into_iter().flatten() {
+        let Some(index) = socket["index"].as_u64() else { continue };
+        let source = inner.values().find(|node| node["type"] == "subnet_output" && node["port_index"] == index)
+            .and_then(|node| node["inputs"].get("geo"));
+        let resolved = source.map(|source| restored_endpoint(source, inner, &ext, &rename));
+        if let Some(resolved) = resolved.filter(|value| !value.is_null()) { output_targets.insert(index, resolved); }
     }
-    let shown: Vec<String> = minihou_app::display_nodes(value).iter().map(|d| if d == id { out.clone() } else { d.clone() }).collect();
+    for (k, nd) in all.iter_mut() {
+        if !rename.values().any(|v| v == k) {
+            if let Some(inputs) = nd.get_mut("inputs").and_then(Value::as_object_mut) {
+                for value in inputs.values_mut() {
+                    let refs = match value { Value::Array(refs) => refs.as_mut_slice(), one => std::slice::from_mut(one) };
+                    for endpoint in refs {
+                        if endpoint.as_str() == Some(id) { *endpoint = out.clone(); }
+                        else if endpoint["node"] == id {
+                            let index = endpoint["output"].as_u64().unwrap_or(0);
+                            if let Some(target) = output_targets.get(&index) { *endpoint = target.clone(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let shown: Vec<String> = minihou_app::display_nodes(value).iter().map(|d| if d == id {
+        out.as_str().or_else(|| out["node"].as_str()).unwrap_or_default().to_owned()
+    } else { d.clone() }).collect();
     if !shown.is_empty() { next["display"] = if shown.len() == 1 { json!(shown[0]) } else { json!(shown) }; }
     let mut selected: Vec<_> = rename.into_values().collect();
     selected.sort();
@@ -180,6 +365,72 @@ mod tests {
         assert_eq!(v["nodes"]["sub"]["inputs"]["in0"], "box1");
         v["display"] = json!("sub");
         assert_eq!(cook(&v), cook(&json!({"nodes": {"box1": v["nodes"]["box1"]}, "display": "box1"})));
+    }
+    #[test]
+    fn noodle_drop_adds_connected_input_and_output_boundaries() {
+        let mut v = sample();
+        v["nodes"]["sub"] = json!({"type": "subnet", "inputs": {"geo": "box1"}});
+        initialize(&mut v, "sub");
+        let with_input = add_input(&v, "sub", "xf").unwrap();
+        assert_eq!(with_input["nodes"]["sub"]["inputs"]["in1"], "xf");
+        assert_eq!(with_input["nodes"]["sub"]["inner"]["nodes"]["input2"]["port_index"], 1);
+        let rewired = connect_input(&with_input, "sub", "in1", "box1").unwrap();
+        assert_eq!(rewired["nodes"]["sub"]["inputs"]["in1"], "box1");
+        let with_output = add_output(&with_input, "sub", "out", "geo").unwrap();
+        assert_eq!(with_output["nodes"]["sub"]["inner"]["nodes"]["output2"]["port_index"], 1);
+        assert_eq!(with_output["nodes"]["out"]["inputs"]["geo"], json!({"node": "sub", "output": 1}));
+        assert_eq!(cook(&with_output), cook(&json!({"nodes": {"box1": v["nodes"]["box1"]}, "display": "box1"})));
+        let (ungrouped, _) = ungroup(&with_output, "sub").unwrap();
+        assert_eq!(ungrouped["nodes"]["out"]["inputs"]["geo"], "box1");
+        assert_eq!(cook(&ungrouped), cook(&with_output));
+    }
+    #[test]
+    fn noodle_drop_upgrades_a_legacy_subnet() {
+        let v = json!({"nodes": {
+            "box1": {"type": "box"},
+            "sub": {"type": "subnet", "inputs": {"geo": "box1"}, "inner": {
+                "nodes": {"move": {"type": "transform", "inputs": {"geo": "$in0"}}}, "output": "move"}},
+            "out": {"type": "output", "inputs": {"geo": "sub"}}
+        }, "display": "out"});
+        let with_input = add_input(&v, "sub", "box1").unwrap();
+        assert_eq!(with_input["nodes"]["sub"]["inner"]["nodes"]["move"]["inputs"]["geo"], "input1");
+        assert_eq!(with_input["nodes"]["sub"]["inner"]["nodes"]["output1"]["inputs"]["geo"], "move");
+        assert_eq!(cook(&with_input), cook(&v));
+    }
+    #[test]
+    fn ungroup_preserves_a_higher_output_used_as_an_input() {
+        let mut v = json!({"nodes": {
+            "box1": {"type": "box"},
+            "first": {"type": "subnet", "inputs": {"geo": "box1"}},
+            "second": {"type": "subnet", "inputs": {"geo": "box1"}},
+            "out": {"type": "output", "inputs": {"geo": "second"}}
+        }, "display": "out"});
+        initialize(&mut v, "first");
+        initialize(&mut v, "second");
+        let v = add_output(&v, "first", "out", "geo").unwrap();
+        let mut v = add_input_from(&v, "second", "first", 1).unwrap();
+        v["nodes"]["second"]["inner"]["nodes"]["output1"]["inputs"]["geo"] = json!("input2");
+        v["nodes"]["out"]["inputs"]["geo"] = json!("second");
+        let (back, _) = ungroup(&v, "second").unwrap();
+        assert_eq!(back["nodes"]["out"]["inputs"]["geo"], json!({"node": "first", "output": 1}));
+        assert_eq!(cook(&back), cook(&v));
+    }
+    #[test]
+    fn group_preserves_an_external_higher_output_endpoint() {
+        let mut v = json!({"nodes": {
+            "box1": {"type": "box"}, "first": {"type": "subnet", "inputs": {"geo": "box1"}},
+            "move": {"type": "transform", "inputs": {"geo": {"node": "first", "output": 1}}},
+            "out": {"type": "output", "inputs": {"geo": "move"}}
+        }, "display": "out"});
+        initialize(&mut v, "first");
+        v["nodes"]["first"]["output_sockets"].as_array_mut().unwrap().push(json!({"index": 1, "name": "Output 2"}));
+        v["nodes"]["first"]["inner"]["nodes"]["output2"] = json!({"type": "subnet_output", "port_index": 1, "inputs": {"geo": "input1"}});
+        let (grouped, id) = group(&v, &["move".into()]).unwrap();
+        assert_eq!(grouped["nodes"][&id]["inputs"]["in0"], json!({"node": "first", "output": 1}));
+        assert_eq!(cook(&grouped), cook(&v));
+        let (back, _) = ungroup(&grouped, &id).unwrap();
+        assert_eq!(back["nodes"]["move"]["inputs"]["geo"], json!({"node": "first", "output": 1}));
+        assert_eq!(cook(&back), cook(&v));
     }
     #[test]
     fn group_keeps_inner_graph_and_cooks_the_same() {
