@@ -418,7 +418,7 @@ mod tests {
         assert!(entries(&menu).iter().any(|(_, entry)| matches!(entry, Entry::Tool("grid"))));
     }
     #[test] fn package_is_in_tab_menu_and_legacy_contents_remain() {
-        for (legacy, merged) in shelf_data::TABS.iter().zip(tabs()) {
+        for (legacy, merged) in shelf_data::legacy_tabs().iter().zip(tabs()) {
             assert_eq!(legacy.name, merged.name);
             assert_eq!(legacy.tools.iter().map(|t| (t.label, t.node_type)).collect::<Vec<_>>(),
                 merged.tools.iter().take(legacy.tools.len()).map(|t| (t.label, t.node_type)).collect::<Vec<_>>());

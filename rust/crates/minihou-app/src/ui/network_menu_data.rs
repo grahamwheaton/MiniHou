@@ -1,233 +1,53 @@
-//! Node menu labels and types copied from the shelf catalogue.
+//! The network menu shares the catalogue and labels with the shelf. Its
+//! layout keeps the few historical ordering and membership differences.
+#[path = "shelf_data.rs"]
+mod shelf_data;
+
+use minihou_core::nodes::package_catalogue;
+use serde::Deserialize;
+use std::sync::OnceLock;
+
 #[derive(Clone, Copy)]
 pub(super) struct Tool { pub label: &'static str, pub node_type: &'static str }
 #[derive(Clone, Copy)]
 pub(super) struct Category { pub name: &'static str, pub tools: &'static [Tool] }
-pub(super) const TABS: &[Category] = &[
-    Category { name: "Create", tools: &[
-        Tool { label: "Box", node_type: "box" },
-        Tool { label: "Sphere", node_type: "sphere" },
-        Tool { label: "Tube", node_type: "tube" },
-        Tool { label: "Torus", node_type: "torus" },
-        Tool { label: "Grid", node_type: "grid" },
-        Tool { label: "Null", node_type: "null" },
-        Tool { label: "Circle", node_type: "circle" },
-        Tool { label: "Bezier", node_type: "bezier" },
-        Tool { label: "Polyline", node_type: "curve" },
-        Tool { label: "Helix", node_type: "helix" },
-        Tool { label: "L-System", node_type: "lsystem" },
-        Tool { label: "Lattice Grid", node_type: "lattice_grid" },
-        Tool { label: "Metaball", node_type: "points_to_surface" },
-        Tool { label: "Blender Object", node_type: "blender_object" },
-        Tool { label: "Blender Image", node_type: "blender_image" },
-        Tool { label: "Image File", node_type: "image_file" },
-        Tool { label: "USD Import", node_type: "usd_import" },
-        Tool { label: "Host Mesh", node_type: "modifier_input" },
-        Tool { label: "Object Input", node_type: "object_input" },
-        Tool { label: "Controller", node_type: "controller" },
-    ] },
-    Category { name: "Modify", tools: &[
-        Tool { label: "Transform", node_type: "transform" },
-        Tool { label: "Merge", node_type: "merge" },
-        Tool { label: "Duplicate", node_type: "copy_transform" },
-        Tool { label: "Copy to Points", node_type: "copy_to_points" },
-        Tool { label: "Instance", node_type: "instance" },
-        Tool { label: "Switch", node_type: "switch" },
-        Tool { label: "Match Size", node_type: "match_size" },
-        Tool { label: "Blast", node_type: "blast" },
-        Tool { label: "Delete", node_type: "delete" },
-        Tool { label: "Fuse", node_type: "fuse" },
-        Tool { label: "Clean", node_type: "clean" },
-        Tool { label: "Sort", node_type: "sort" },
-        Tool { label: "Null", node_type: "null" },
-        Tool { label: "Output", node_type: "output" },
-        Tool { label: "Scene Objects", node_type: "scene_objects" },
-        Tool { label: "Image Out", node_type: "image_out" },
-        Tool { label: "USD Export", node_type: "usd_export" },
-        Tool { label: "Input", node_type: "input" },
-    ] },
-    Category { name: "Model", tools: &[
-        Tool { label: "Boolean", node_type: "boolean" },
-        Tool { label: "Clip", node_type: "clip" },
-        Tool { label: "Mirror", node_type: "mirror" },
-        Tool { label: "Array", node_type: "array" },
-        Tool { label: "Subdivide", node_type: "subdivide" },
-        Tool { label: "Skin", node_type: "skin" },
-        Tool { label: "Skin Profiles", node_type: "skin_profiles" },
-        Tool { label: "Revolve", node_type: "revolve" },
-        Tool { label: "Sweep", node_type: "sweep" },
-        Tool { label: "PolyReduce", node_type: "polyreduce" },
-        Tool { label: "Convex Hull", node_type: "convex_hull" },
-        Tool { label: "Remesh", node_type: "remesh" },
-    ] },
-    Category { name: "Polygon", tools: &[
-        Tool { label: "PolyExtrude", node_type: "polyextrude" },
-        Tool { label: "Push / Pull", node_type: "pushpull" },
-        Tool { label: "Inset", node_type: "inset" },
-        Tool { label: "Outset", node_type: "outset" },
-        Tool { label: "PolyBevel", node_type: "polybevel" },
-        Tool { label: "Solidify", node_type: "solidify" },
-        Tool { label: "PolySplit", node_type: "polysplit" },
-        Tool { label: "Loop Cut", node_type: "loop_cut" },
-        Tool { label: "Edge Slide", node_type: "edge_slide" },
-        Tool { label: "Knife", node_type: "knife" },
-        Tool { label: "PolyFill", node_type: "polyfill" },
-        Tool { label: "PolyBridge", node_type: "polybridge" },
-        Tool { label: "PolyExpand2D", node_type: "polyexpand2d" },
-        Tool { label: "Dissolve", node_type: "dissolve" },
-        Tool { label: "Divide", node_type: "divide" },
-        Tool { label: "Grid Fill", node_type: "grid_fill" },
-        Tool { label: "Recalculate Normals", node_type: "recalc_normals" },
-        Tool { label: "Tris to Quads", node_type: "tris_to_quads" },
-        Tool { label: "Bridge", node_type: "bridge" },
-        Tool { label: "Normal", node_type: "normal" },
-    ] },
-    Category { name: "Edges", tools: &[
-        Tool { label: "Dissolve Edges", node_type: "dissolve_edges" },
-        Tool { label: "Edge Collapse", node_type: "edge_collapse" },
-        Tool { label: "Edge Flip", node_type: "edge_flip" },
-        Tool { label: "Edge Cusp", node_type: "edge_cusp" },
-        Tool { label: "Crease", node_type: "crease" },
-        Tool { label: "Edge Group", node_type: "edge_group" },
-        Tool { label: "Edge Group Promote", node_type: "edge_group_promote" },
-    ] },
-    Category { name: "Deform", tools: &[
-        Tool { label: "Bend", node_type: "bend" },
-        Tool { label: "Twist", node_type: "twist" },
-        Tool { label: "Linear Taper", node_type: "linear_taper" },
-        Tool { label: "Squash and Stretch", node_type: "squash_stretch" },
-        Tool { label: "Soft Transform", node_type: "soft_transform" },
-        Tool { label: "Soft Peak", node_type: "soft_peak" },
-        Tool { label: "Smooth", node_type: "smooth" },
-        Tool { label: "Mountain", node_type: "noise" },
-        Tool { label: "Lattice", node_type: "lattice" },
-        Tool { label: "Point Deform", node_type: "point_deform" },
-        Tool { label: "Path Deform", node_type: "path_deform" },
-        Tool { label: "Point Jitter", node_type: "point_jitter" },
-        Tool { label: "Point Relax", node_type: "point_relax" },
-        Tool { label: "Blend", node_type: "blend" },
-        Tool { label: "Exploded View", node_type: "exploded_view" },
-    ] },
-    Category { name: "Texture", tools: &[
-        Tool { label: "UV Project", node_type: "uv_project" },
-        Tool { label: "UV Flatten", node_type: "uv_flatten" },
-        Tool { label: "UV Transform", node_type: "uv_transform" },
-        Tool { label: "Color", node_type: "color" },
-    ] },
-    Category { name: "Groups", tools: &[
-        Tool { label: "Group Create", node_type: "group_create" },
-        Tool { label: "Group Expand", node_type: "group_expand" },
-        Tool { label: "Grow / Shrink", node_type: "grow" },
-        Tool { label: "Select Path", node_type: "select_path" },
-        Tool { label: "Select Loop", node_type: "select_loop" },
-        Tool { label: "Select Ring", node_type: "select_ring" },
-        Tool { label: "Group Promote", node_type: "group_promote" },
-        Tool { label: "Group by Range", node_type: "group_range" },
-        Tool { label: "Blast", node_type: "blast" },
-        Tool { label: "Delete", node_type: "delete" },
-    ] },
-    Category { name: "Attributes", tools: &[
-        Tool { label: "Wrangle", node_type: "wrangle" },
-        Tool { label: "Attribute Create", node_type: "attribute_create" },
-        Tool { label: "Attribute Transfer", node_type: "attribute_transfer" },
-        Tool { label: "Attribute Promote", node_type: "attribute_promote" },
-        Tool { label: "Attribute Randomize", node_type: "attribute_randomize" },
-        Tool { label: "Attribute Blur", node_type: "attribute_blur" },
-        Tool { label: "Attribute Paint", node_type: "attrib_paint" },
-        Tool { label: "Measure", node_type: "measure" },
-        Tool { label: "Connectivity", node_type: "connectivity" },
-        Tool { label: "Ray", node_type: "ray" },
-        Tool { label: "Falloff", node_type: "falloff" },
-        Tool { label: "Occlusion", node_type: "occlusion" },
-        Tool { label: "Python", node_type: "python" },
-    ] },
-    Category { name: "Curves", tools: &[
-        Tool { label: "Bezier", node_type: "bezier" },
-        Tool { label: "Polyline", node_type: "curve" },
-        Tool { label: "Helix", node_type: "helix" },
-        Tool { label: "Simplify Curve", node_type: "curve_simplify" },
-        Tool { label: "Contour", node_type: "contour" },
-        Tool { label: "Slice", node_type: "slice" },
-        Tool { label: "Carve", node_type: "carve" },
-        Tool { label: "Convert Line", node_type: "convert_line" },
-        Tool { label: "PolyPath", node_type: "polypath" },
-        Tool { label: "Sweep", node_type: "sweep" },
-    ] },
-    Category { name: "Points", tools: &[
-        Tool { label: "Scatter", node_type: "scatter" },
-        Tool { label: "Scatter and Align", node_type: "scatteralign" },
-        Tool { label: "Fuse", node_type: "fuse" },
-        Tool { label: "Delaunay", node_type: "delaunay" },
-        Tool { label: "Point Jitter", node_type: "point_jitter" },
-        Tool { label: "Point Relax", node_type: "point_relax" },
-        Tool { label: "Points to Surface", node_type: "points_to_surface" },
-    ] },
-    Category { name: "Rigid Bodies", tools: &[
-        Tool { label: "RBD Material Fracture", node_type: "rbd_material_fracture" },
-        Tool { label: "Voronoi Fracture", node_type: "voronoi_fracture" },
-        Tool { label: "Voronoi Fracture Points", node_type: "voronoi_fracture_points" },
-        Tool { label: "Voronoi Split", node_type: "voronoi_split" },
-        Tool { label: "Voronoi Adjacency", node_type: "voronoi_adjacency" },
-        Tool { label: "Boolean Fracture", node_type: "boolean_fracture" },
-        Tool { label: "Convex Decomposition", node_type: "convex_decomposition" },
-        Tool { label: "Assemble", node_type: "assemble" },
-        Tool { label: "RBD Configure", node_type: "rbd_configure" },
-        Tool { label: "RBD Solver", node_type: "rbd_solver" },
-        Tool { label: "Exploded View", node_type: "exploded_view" },
-    ] },
-    Category { name: "Constraints", tools: &[
-        Tool { label: "RBD Constraint", node_type: "rbd_constraint" },
-        Tool { label: "Glue Cluster", node_type: "glue_cluster" },
-        Tool { label: "RBD Constraint Properties", node_type: "rbd_constraint_properties" },
-        Tool { label: "Voronoi Adjacency", node_type: "voronoi_adjacency" },
-    ] },
-    Category { name: "Terrain FX", tools: &[
-        Tool { label: "Grid", node_type: "grid" },
-        Tool { label: "Mountain", node_type: "noise" },
-        Tool { label: "Heightfield Erode", node_type: "heightfield_erode" },
-        Tool { label: "Scatter", node_type: "scatter" },
-    ] },
-    Category { name: "Volume", tools: &[
-        Tool { label: "Remesh", node_type: "remesh" },
-        Tool { label: "SDF Shape", node_type: "sdf_shape" },
-        Tool { label: "SDF Boolean", node_type: "sdf_boolean" },
-        Tool { label: "Points to Surface", node_type: "points_to_surface" },
-    ] },
-    Category { name: "PCG", tools: &[
-    ] },
-    Category { name: "Procedural", tools: &[
-        Tool { label: "Building Rules", node_type: "building_rules" },
-        Tool { label: "Region Identify", node_type: "region_identify" },
-        Tool { label: "Region Transform", node_type: "region_transform" },
-        Tool { label: "Goal Length", node_type: "goal_length" },
-        Tool { label: "Goal Collision", node_type: "goal_collision" },
-        Tool { label: "Goal Surface", node_type: "goal_surface" },
-        Tool { label: "Goal Gravity", node_type: "goal_gravity" },
-        Tool { label: "Goal Pin", node_type: "goal_pin" },
-        Tool { label: "Goal Solve", node_type: "goal_solve" },
-    ] },
-    Category { name: "Flow", tools: &[
-        Tool { label: "Repeat", node_type: "loop_block" },
-        Tool { label: "Loop Begin", node_type: "loop_begin" },
-        Tool { label: "Loop End", node_type: "loop_end" },
-        Tool { label: "For Each", node_type: "for_each" },
-        Tool { label: "Solver", node_type: "solver" },
-        Tool { label: "Switch", node_type: "switch" },
-    ] },
-    Category { name: "Measure", tools: &[
-    ] },
-    Category { name: "Library", tools: &[
-    ] },
-];
 
-pub(super) fn tabs() -> &'static [Category] {
-    static MERGED: std::sync::OnceLock<Vec<Category>> = std::sync::OnceLock::new();
-    MERGED.get_or_init(|| TABS.iter().map(|tab| {
-        let mut tools = tab.tools.to_vec();
-        for node in minihou_core::nodes::package_catalogue().iter().filter(|node| node.category == tab.name) {
-            if tools.iter().any(|tool| tool.node_type == node.id) { continue; }
-            tools.push(Tool { label: node.name, node_type: node.id });
+#[derive(Deserialize)]
+struct Placement { id: String, label: Option<String> }
+#[derive(Deserialize)]
+struct LayoutTab { name: String, tools: Vec<Placement> }
+
+fn layout() -> &'static [LayoutTab] {
+    static LAYOUT: OnceLock<Vec<LayoutTab>> = OnceLock::new();
+    LAYOUT.get_or_init(|| serde_json::from_str(include_str!("network_menu_layout.json")).expect("network menu layout"))
+}
+fn permanent(value: &str) -> &'static str { Box::leak(value.to_owned().into_boxed_str()) }
+
+fn build(append_new: bool) -> Vec<Category> {
+    layout().iter().map(|tab| {
+        let mut tools: Vec<Tool> = tab.tools.iter().map(|placement| {
+            let label = placement.label.as_deref()
+                .or_else(|| shelf_data::tabs().iter().find(|shelf| shelf.name == tab.name)
+                    .and_then(|shelf| shelf.tools.iter().find(|tool| tool.node_type == placement.id)).map(|tool| tool.label))
+                .or_else(|| package_catalogue().iter().find(|node| node.id == placement.id).map(|node| node.name))
+                .unwrap_or(&placement.id);
+            Tool { label: permanent(label), node_type: permanent(&placement.id) }
+        }).collect();
+        if append_new {
+            for node in package_catalogue().iter().filter(|node| node.category == tab.name) {
+                if tools.iter().any(|tool| tool.node_type == node.id) { continue; }
+                tools.push(Tool { label: node.name, node_type: node.id });
+            }
         }
-        Category { name: tab.name, tools: Box::leak(tools.into_boxed_slice()) }
-    }).collect())
+        Category { name: permanent(&tab.name), tools: Box::leak(tools.into_boxed_slice()) }
+    }).collect()
+}
+
+pub(super) fn legacy_tabs() -> &'static [Category] {
+    static LEGACY: OnceLock<Vec<Category>> = OnceLock::new();
+    LEGACY.get_or_init(|| build(false))
+}
+pub(super) fn tabs() -> &'static [Category] {
+    static TABS: OnceLock<Vec<Category>> = OnceLock::new();
+    TABS.get_or_init(|| build(true))
 }
