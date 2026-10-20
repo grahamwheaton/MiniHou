@@ -1,10 +1,11 @@
-//! Bevel manifold triangle/quad vertices by replacing each corner with an edge-cut ring.
+//! Bevel manifold triangle/quad vertices with a shrinking corner grid.
 use crate::{
     error::{Error, Result},
     geometry::{Attr, Geometry},
     nodes::{
-        GEO, Inputs, NodeSpec, groups,
+        groups,
         model::{add, gather, len, lerp, make, mul, positions, range, sub},
+        Inputs, NodeSpec, GEO,
     },
     params::Params,
 };
@@ -13,7 +14,9 @@ use std::{
     sync::Arc,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec {
+    outputs: &["geometry"],
+    cook_multi: None,
     name: "vertex_bevel",
     inputs: GEO,
     params: crate::params!("group": ""; "width": 0.1; "segments": 1; "profile": 0.5),
@@ -23,6 +26,36 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
 type Edge = (usize, usize);
 fn edge(a: usize, b: usize) -> Edge {
     (a.min(b), a.max(b))
+}
+
+fn arc_position(
+    start: [f64; 3],
+    end: [f64; 3],
+    corner: [f64; 3],
+    t: f64,
+    profile: f64,
+) -> [f64; 3] {
+    let line = add(mul(start, 1.0 - t), mul(end, t));
+    // At profile 0.5, place the midpoint of a right-angle arc at
+    // (1 - sqrt(1/2)) along each edge, versus 1/2 for the chord.
+    let bulge = 2.0 * (std::f64::consts::SQRT_2 - 1.0) * profile;
+    add(line, mul(sub(corner, line), 4.0 * t * (1.0 - t) * bulge))
+}
+
+fn append_point(
+    outpos: &mut Vec<[f64; 3]>,
+    source_a: &mut Vec<usize>,
+    source_b: &mut Vec<usize>,
+    fractions: &mut Vec<f64>,
+    position: [f64; 3],
+    source: usize,
+) -> usize {
+    let id = outpos.len();
+    outpos.push(position);
+    source_a.push(source);
+    source_b.push(source);
+    fractions.push(0.0);
+    id
 }
 
 #[derive(Clone, Copy)]
@@ -199,6 +232,73 @@ fn cook(inputs: &Inputs, params: &Params) -> Result<Geometry> {
     let mut faces = Vec::<Vec<usize>>::new();
     let mut prim_source = Vec::new();
     let mut vertex_source = Vec::new();
+    // Each face-side arc runs from this corner's outgoing edge to the
+    // next corner's outgoing edge (this face's incoming edge).
+    let mut arcs = BTreeMap::<usize, Vec<usize>>::new();
+    let mut grids = BTreeMap::<usize, Vec<Vec<Vec<usize>>>>::new();
+    for (&point, ring) in &accepted {
+        let n = ring.len();
+        let mut layers = Vec::new();
+        let mut boundary = Vec::with_capacity(n);
+        let center = ring.iter().fold([0.0; 3], |sum, c| {
+            add(sum, outpos[cut[&(point, c.outgoing)]])
+        });
+        let center = add(
+            mul(center, (1.0 - profile * 0.5) / n as f64),
+            mul(pos[point], profile * 0.5),
+        );
+        for i in 0..n {
+            let start = outpos[cut[&(point, ring[i].outgoing)]];
+            let end = outpos[cut[&(point, ring[(i + 1) % n].outgoing)]];
+            let mut side = vec![cut[&(point, ring[i].outgoing)]];
+            for k in 1..segments as usize {
+                let t = k as f64 / segments as f64;
+                let p = arc_position(start, end, pos[point], t, profile);
+                side.push(append_point(
+                    &mut outpos,
+                    &mut source_a,
+                    &mut source_b,
+                    &mut fractions,
+                    p,
+                    point,
+                ));
+            }
+            arcs.insert(ring[i].vertex, side.clone());
+            boundary.push(side);
+        }
+        layers.push(boundary);
+        for j in 1..=(segments as usize / 2) {
+            let m = segments as usize - 2 * j;
+            if m == 0 {
+                break;
+            }
+            let mut layer = Vec::with_capacity(n);
+            for i in 0..n {
+                let start = outpos[cut[&(point, ring[i].outgoing)]];
+                let end = outpos[cut[&(point, ring[(i + 1) % n].outgoing)]];
+                let mut side = Vec::with_capacity(m);
+                for k in 0..m {
+                    let t = (j + k) as f64 / segments as f64;
+                    let p = arc_position(start, end, pos[point], t, profile);
+                    let p = add(
+                        mul(p, 1.0 - j as f64 / (segments as f64 / 2.0)),
+                        mul(center, j as f64 / (segments as f64 / 2.0)),
+                    );
+                    side.push(append_point(
+                        &mut outpos,
+                        &mut source_a,
+                        &mut source_b,
+                        &mut fractions,
+                        p,
+                        point,
+                    ));
+                }
+                layer.push(side);
+            }
+            layers.push(layer);
+        }
+        grids.insert(point, layers);
+    }
     for face in 0..g.nprims() {
         let r = range(&g, face);
         let mut made = Vec::new();
@@ -216,8 +316,15 @@ fn cook(inputs: &Inputs, params: &Params) -> Result<Geometry> {
                     vertex + 1
                 };
                 made.push(cut[&(point, vp[prev] as usize)]);
+                vertex_source.push(vertex);
+                if let Some(arc) = arcs.get(&vertex) {
+                    for &id in arc.iter().skip(1).rev() {
+                        made.push(id);
+                        vertex_source.push(vertex);
+                    }
+                }
                 made.push(cut[&(point, vp[next] as usize)]);
-                vertex_source.extend([vertex, vertex]);
+                vertex_source.push(vertex);
             } else {
                 made.push(point);
                 vertex_source.push(vertex);
@@ -227,35 +334,69 @@ fn cook(inputs: &Inputs, params: &Params) -> Result<Geometry> {
         prim_source.push(face);
     }
     for (&point, ring) in &accepted {
-        let mut outer: Vec<usize> = ring.iter().map(|c| cut[&(point, c.outgoing)]).collect();
-        for layer in 1..segments as usize {
-            let t = layer as f64 / segments as f64;
-            let toward_corner =
-                (1.0 - profile) * t + profile * (t * std::f64::consts::FRAC_PI_2).sin();
-            let mut inner = Vec::new();
-            for c in ring {
-                let base = cut[&(point, c.outgoing)];
-                let id = outpos.len();
-                outpos.push(add(
-                    outpos[base],
-                    mul(sub(pos[point], outpos[base]), toward_corner),
-                ));
-                source_a.push(point);
-                source_b.push(c.outgoing);
-                fractions.push(fractions[base] * (1.0 - toward_corner));
-                inner.push(id);
+        let layers = &grids[&point];
+        for j in 0..layers.len() {
+            let outer = &layers[j];
+            let m = outer[0].len();
+            if m < 2 {
+                break;
             }
-            for i in 0..outer.len() {
-                let j = (i + 1) % outer.len();
-                faces.push(vec![outer[i], outer[j], inner[j], inner[i]]);
-                prim_source.push(ring[i].face);
-                vertex_source.extend([ring[i].vertex; 4]);
+            if m == 2 {
+                let center = ring.iter().fold([0.0; 3], |sum, c| {
+                    add(sum, outpos[cut[&(point, c.outgoing)]])
+                });
+                let center = add(
+                    mul(center, (1.0 - profile * 0.5) / ring.len() as f64),
+                    mul(pos[point], profile * 0.5),
+                );
+                let id = append_point(
+                    &mut outpos,
+                    &mut source_a,
+                    &mut source_b,
+                    &mut fractions,
+                    center,
+                    point,
+                );
+                for i in 0..ring.len() {
+                    faces.push(vec![
+                        outer[(i + ring.len() - 1) % ring.len()][1],
+                        outer[i][0],
+                        outer[i][1],
+                        id,
+                    ]);
+                    prim_source.push(ring[i].face);
+                    vertex_source.extend([ring[i].vertex; 4]);
+                }
+            } else {
+                let inner = &layers[j + 1];
+                for i in 0..ring.len() {
+                    faces.push(vec![
+                        outer[(i + ring.len() - 1) % ring.len()][m - 1],
+                        outer[i][0],
+                        outer[i][1],
+                        inner[i][0],
+                    ]);
+                    prim_source.push(ring[i].face);
+                    vertex_source.extend([ring[i].vertex; 4]);
+                    for k in 1..m - 1 {
+                        let next = if k == m - 2 {
+                            inner[(i + 1) % ring.len()][0]
+                        } else {
+                            inner[i][k]
+                        };
+                        faces.push(vec![outer[i][k], outer[i][k + 1], next, inner[i][k - 1]]);
+                        prim_source.push(ring[i].face);
+                        vertex_source.extend([ring[i].vertex; 4]);
+                    }
+                }
             }
-            outer = inner;
         }
-        faces.push(outer);
-        prim_source.push(ring[0].face);
-        vertex_source.extend(ring.iter().map(|c| c.vertex));
+        if segments % 2 == 1 {
+            let inner = layers.last().unwrap();
+            faces.push(inner.iter().map(|side| side[0]).collect());
+            prim_source.push(ring[0].face);
+            vertex_source.extend(ring.iter().map(|c| c.vertex));
+        }
     }
     let mut point = lerp(&g.point, &source_a, &source_b, &fractions);
     point.insert(
