@@ -207,19 +207,19 @@ impl App {
                 if self.network_hover {
                     if let Some((path,inner,selected,set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
                         let ids:Vec<String>=if set.is_empty(){vec![selected]}else{set.into_iter().collect()};
-                        if let Some((changed,ids))=subnet_edit::toggle(&inner,&ids) {
+                        if let Some((changed,id))=subnet_edit::group(&inner,&ids) {
                             if let Some(root)=ui::network::embed_scope(self.editor.doc.value(),&path,changed) {
-                                if self.commit_document(root,"group inner nodes") {ui::network::select_inner(ctx,&self.editor.path,ids);}
+                                if self.commit_document(root,"group inner nodes") {ui::network::select_inner(ctx,&self.editor.path,vec![id]);}
                             }
                         } else {self.file_status="Select inner nodes to group".into();}
                         return;
                     }
                 }
                 let ids: Vec<String> = if self.selected_set.is_empty() { vec![self.selected.clone()] } else { self.selected_set.iter().cloned().collect() };
-                match subnet_edit::toggle(self.editor.doc.value(), &ids) {
-                    Some((value, sel)) => if self.commit_document(value, "group nodes") {
-                        self.selected = sel[0].clone();
-                        self.selected_set = sel.into_iter().collect();
+                match subnet_edit::group(self.editor.doc.value(), &ids) {
+                    Some((value, id)) => if self.commit_document(value, "group nodes") {
+                        self.selected = id.clone();
+                        self.selected_set = std::collections::BTreeSet::from([id]);
                         if let Ok(g) = Graph::from_value(self.editor.doc.value()) { self.display = g.main_output().unwrap_or_else(|_| self.selected.clone()); }
                     },
                     None => self.file_status = "Select nodes to group (only one may feed the rest of the network)".into(),

@@ -82,14 +82,33 @@ pub fn group(value: &Value, ids: &[String]) -> Option<(Value, String)> {
         });
         inner.insert(id.clone(), nd);
     }
+    let mut boundary_ids = Vec::new();
+    for index in 0..ext.len().max(1) {
+        let boundary = fresh(&inner, "input");
+        inner.insert(boundary.clone(), json!({"type": "subnet_input", "port_index": index,
+            "pos": [-220.0, index as f64 * 96.0]}));
+        boundary_ids.push(boundary);
+    }
+    for nd in inner.values_mut() {
+        map_refs(nd, &mut |r| r.strip_prefix("$in").and_then(|n| n.parse::<usize>().ok())
+            .and_then(|n| boundary_ids.get(n)).cloned().unwrap_or_else(|| r.to_owned()));
+    }
+    let output_boundary = fresh(&inner, "output");
+    inner.insert(output_boundary.clone(), json!({"type": "subnet_output", "port_index": 0,
+        "inputs": {"geo": output}, "pos": [220.0, 0.0]}));
     let mut next = value.clone();
     let all = next.get_mut("nodes")?.as_object_mut()?;
     let pos: Vec<[f64; 2]> = sel.iter().filter_map(|id| { let p = nodes[*id].get("pos")?.as_array()?; Some([p.first()?.as_f64()?, p.get(1)?.as_f64()?]) }).collect();
     let id = fresh(all, "subnet");
     for s in &sel { all.remove(*s); }
     for nd in all.values_mut() { map_refs(nd, &mut |r| if r == output { id.clone() } else { r.to_owned() }); }
-    let mut node = json!({"type": "subnet", "inner": {"nodes": inner, "output": output}});
-    if !ext.is_empty() { node["inputs"] = json!({"geo": if ext.len() == 1 { json!(ext[0]) } else { json!(ext) }}); }
+    let mut node = json!({"type": "subnet", "inner": {"nodes": inner, "output": output_boundary},
+        "input_sockets": (0..boundary_ids.len()).map(|index| json!({"index": index, "name": format!("Input {}", index + 1)})).collect::<Vec<_>>(),
+        "output_sockets": [{"index": 0, "name": "Output 1"}]});
+    if !ext.is_empty() {
+        node["inputs"] = Value::Object(ext.iter().enumerate().map(|(index, source)|
+            (format!("in{index}"), json!(source))).collect());
+    }
     if !pos.is_empty() {
         let n = pos.len() as f64;
         node["pos"] = json!([pos.iter().map(|p| p[0]).sum::<f64>() / n, pos.iter().map(|p| p[1]).sum::<f64>() / n]);
@@ -105,27 +124,40 @@ pub fn ungroup(value: &Value, id: &str) -> Option<(Value, Vec<String>)> {
     let nodes = value.get("nodes")?.as_object()?;
     let sub = nodes.get(id).filter(|n| n["type"] == "subnet")?;
     let inner = sub["inner"]["nodes"].as_object()?;
-    let output = sub["inner"]["output"].as_str().filter(|o| inner.contains_key(*o))?;
-    let ext = refs(sub);
+    let output_boundary = sub["inner"]["output"].as_str().filter(|o| inner.contains_key(*o))?;
+    let output = if inner[output_boundary]["type"] == "subnet_output" {
+        inner[output_boundary]["inputs"]["geo"].as_str()?
+    } else { output_boundary };
+    let ext = if sub["input_sockets"].is_array() {
+        sub["input_sockets"].as_array()?.iter().map(|socket| {
+            let index = socket["index"].as_u64()?;
+            sub["inputs"].get(format!("in{index}")).and_then(Value::as_str).map(str::to_owned)
+        }).collect::<Vec<_>>()
+    } else { refs(sub).into_iter().map(Some).collect() };
     let mut next = value.clone();
     let all = next.get_mut("nodes")?.as_object_mut()?;
     all.remove(id);
     // Restore the inner ids; rename on a clash.
     let mut rename = std::collections::HashMap::new();
-    for key in inner.keys() {
+    for key in inner.keys().filter(|key| !matches!(inner[*key]["type"].as_str(), Some("subnet_input" | "subnet_output"))) {
         let new = if all.contains_key(key) { fresh(all, key.trim_end_matches(|c: char| c.is_ascii_digit())) } else { key.clone() };
         all.insert(new.clone(), json!({}));
         rename.insert(key.clone(), new);
     }
     for (key, nd) in inner {
         let mut nd = nd.clone();
-        map_refs(&mut nd, &mut |r| match r.strip_prefix("$in").and_then(|k| k.parse::<usize>().ok()) {
-            Some(k) => ext.get(k).cloned().unwrap_or_default(),
-            None => rename.get(r).cloned().unwrap_or_else(|| r.to_owned()),
+        if matches!(nd["type"].as_str(), Some("subnet_input" | "subnet_output")) { continue; }
+        map_refs(&mut nd, &mut |r| {
+            let boundary = inner.get(r).filter(|n| n["type"] == "subnet_input")
+                .and_then(|n| n["port_index"].as_u64()).and_then(|i| ext.get(i as usize));
+            boundary.and_then(Clone::clone).or_else(|| r.strip_prefix("$in").and_then(|k| k.parse::<usize>().ok())
+                .and_then(|k| ext.get(k)).and_then(Clone::clone))
+                .or_else(|| rename.get(r).cloned()).unwrap_or_else(|| r.to_owned())
         });
         all.insert(rename[key].clone(), nd);
     }
-    let out = rename[output].clone();
+    let out = rename.get(output).cloned().or_else(|| inner.get(output).filter(|n| n["type"] == "subnet_input")
+        .and_then(|n| n["port_index"].as_u64()).and_then(|i| ext.get(i as usize)).and_then(Clone::clone))?;
     for (k, nd) in all.iter_mut() {
         if !rename.values().any(|v| v == k) { map_refs(nd, &mut |r| if r == id { out.clone() } else { r.to_owned() }); }
     }
@@ -162,12 +194,28 @@ mod tests {
         assert_eq!(id, "subnet1");
         assert!(g["nodes"].get("xf").is_none());
         assert_eq!(g["nodes"]["out"]["inputs"]["geo"], "subnet1");
-        assert_eq!(g["nodes"]["subnet1"]["inputs"]["geo"], "box1");
-        assert_eq!(g["nodes"]["subnet1"]["inner"]["nodes"]["xf"]["inputs"]["geo"], "$in0");
+        assert_eq!(g["nodes"]["subnet1"]["inputs"]["in0"], "box1");
+        assert_eq!(g["nodes"]["subnet1"]["inner"]["nodes"]["xf"]["inputs"]["geo"], "input1");
+        assert_eq!(g["nodes"]["subnet1"]["inner"]["nodes"]["output1"]["inputs"]["geo"], "nrm");
         let doc = crate::graph_edit::validated(g.clone()).unwrap();
         assert_eq!(cook(&g), cook(&v));
         assert_eq!(cook(&serde_json::from_str::<Value>(doc.text()).unwrap()), cook(&v));
         assert_eq!(doc.session().unwrap().graph().to_value(), g);
+    }
+    #[test]
+    fn group_adds_a_boundary_for_each_external_input() {
+        let v = json!({"nodes": {
+            "a": {"type": "box"}, "b": {"type": "sphere"},
+            "merge": {"type": "merge", "inputs": {"geos": ["a", "b"]}},
+            "out": {"type": "output", "inputs": {"geo": "merge"}}
+        }, "display": "out"});
+        let (g, id) = group(&v, &["merge".into()]).unwrap();
+        let sub = &g["nodes"][&id];
+        assert_eq!(sub["input_sockets"].as_array().unwrap().len(), 2);
+        assert_eq!(sub["inputs"]["in0"], "a");
+        assert_eq!(sub["inputs"]["in1"], "b");
+        assert_eq!(sub["inner"]["nodes"]["merge"]["inputs"]["geos"], json!(["input1", "input2"]));
+        assert_eq!(cook(&g), cook(&v));
     }
     #[test]
     fn ungroup_restores_the_original() {
