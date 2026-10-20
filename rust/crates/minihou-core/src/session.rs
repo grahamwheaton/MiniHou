@@ -135,12 +135,13 @@ impl Session {
     /// an error at cook time, as in a graph file.
     pub fn set_param(&mut self, node: &str, name: &str, value: Value) -> Result<()> {
         let controller = self.graph.controller_param(node, name).is_some();
+        let promoted = self.graph.promoted_param(node, name).is_some();
         let def = self.graph.nodes.iter_mut().find(|(n, _)| n == node).map(|(_, d)| d)
             .ok_or_else(|| Error::new(format!("no such node '{node}'")))?;
         let spec = nodes::get(&def.node_type).ok_or_else(|| {
             Error::new(format!("node '{node}': node type '{}' is not in the Rust backend yet", def.node_type))
         })?;
-        if !spec.params.iter().any(|p| p.name == name) && !controller {
+        if !spec.params.iter().any(|p| p.name == name) && !controller && !promoted {
             return Err(Error::new(format!("node '{node}' ({}): unknown parameter {name:?}", def.node_type)));
         }
         def.params.get_or_insert_with(Default::default).insert(name.to_string(), value);
@@ -150,10 +151,11 @@ impl Session {
     pub fn set_channel(&mut self, node: &str, path: &str, expression: Option<String>) -> Result<()> {
         let (base, component) = crate::channels::split_component(path);
         let controller = self.graph.controller_param(node, base).map(|p| p["default"].clone());
+        let promoted = self.graph.promoted_param(node, base).map(|p| p["default"].clone());
         let def = self.graph.nodes.iter_mut().find(|(n, _)| n == node).map(|(_, d)| d)
             .ok_or_else(|| Error::new(format!("no such node '{node}'")))?;
         let spec = nodes::get(&def.node_type).ok_or_else(|| Error::new("unsupported node"))?;
-        let target = spec.params.iter().find(|p| p.name == base).map(|p| (p.default)()).or(controller).ok_or_else(|| Error::new(format!("unknown parameter {path:?}")))?;
+        let target = spec.params.iter().find(|p| p.name == base).map(|p| (p.default)()).or(controller).or(promoted).ok_or_else(|| Error::new(format!("unknown parameter {path:?}")))?;
         if component.is_some() && !target.as_array().is_some_and(|a| a.len()==3) {
             return Err(Error::new(format!("parameter {path:?} has no vector component")));
         }

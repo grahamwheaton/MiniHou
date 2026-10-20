@@ -184,6 +184,13 @@ pub struct NodeCatalogueEntry {
 
 mod packages {
     include!(concat!(env!("OUT_DIR"), "/node_packages.rs"));
+    pub(super) fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {
+        subnet::public_params(node)
+    }
+}
+
+pub(crate) fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {
+    packages::subnet_public_params(node)
 }
 
 pub fn package_catalogue() -> &'static [NodeCatalogueEntry] { packages::CATALOGUE }
