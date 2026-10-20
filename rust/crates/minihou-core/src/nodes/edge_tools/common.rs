@@ -190,6 +190,7 @@ pub(crate) fn remap(
         .enumerate()
         .map(|(i, p)| ((p[0], p[1]), i))
         .collect();
+    remap_edge_attributes(before, after, sources)?;
     for (name, attr) in &before.vertex {
         if !name.starts_with("edge_group_") && name != "creaseweight" {
             continue;
@@ -211,6 +212,45 @@ pub(crate) fn remap(
     }
     Ok(())
 }
+
+pub(crate) fn remap_edge_attributes(
+    before: &Geometry,
+    after: &mut Geometry,
+    sources: Option<&[usize]>,
+) -> Result<()> {
+    let old_pairs = before.topology.edge_pairs();
+    let lookup: BTreeMap<_, _> = old_pairs.iter().copied().enumerate().map(|(i, p)| (p, i)).collect();
+    let indices: Vec<_> = after.topology.edge_pairs().into_iter().map(|(a, b)| {
+        let (a, b) = if let Some(src) = sources {
+            (src[a as usize] as i32, src[b as usize] as i32)
+        } else { (a, b) };
+        lookup.get(&(a.min(b), a.max(b))).copied()
+    }).collect();
+    for (name, attr) in &before.edge {
+        // These edge tags and groups have separate semantics; leave their existing behavior alone.
+        if matches!(name.as_str(), "crease_edge" | "sharp_edge") || name.starts_with("group_") {
+            continue;
+        }
+        if attr.rows() != old_pairs.len() {
+            return Err(Error::new(format!("edge attribute {name:?} has invalid dimensions")));
+        }
+        let mut mapped = attr.zeros_like(indices.len());
+        match (&attr.data, &mut mapped.data) {
+            (AttrData::F32(src), AttrData::F32(dst)) => for (row, old) in indices.iter().enumerate() {
+                if let Some(old) = old { dst[row * attr.width..(row + 1) * attr.width]
+                    .copy_from_slice(&src[old * attr.width..(old + 1) * attr.width]); }
+            },
+            (AttrData::I32(src), AttrData::I32(dst)) => for (row, old) in indices.iter().enumerate() {
+                if let Some(old) = old { dst[row * attr.width..(row + 1) * attr.width]
+                    .copy_from_slice(&src[old * attr.width..(old + 1) * attr.width]); }
+            },
+            _ => unreachable!(),
+        }
+        after.edge.insert(name.clone(), Arc::new(mapped));
+    }
+    debug_assert!(after.edge.values().all(|a| a.rows() == after.topology.nedges()));
+    Ok(())
+}
 pub(crate) fn rebuild_edges(
     g: &Geometry,
     faces: &[Vec<usize>],
@@ -220,4 +260,24 @@ pub(crate) fn rebuild_edges(
     let mut out = rebuild(g, faces, sources, closed)?;
     remap(g, &mut out, None)?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebuild_edges_keeps_bevel_weight_on_surviving_pairs() {
+        let mut g = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., 0.],
+            vec![0, 1, 2, 3], vec![0, 4], None,
+        ).unwrap();
+        assert_eq!(g.topology.edge_pairs(), vec![(0, 1), (0, 3), (1, 2), (2, 3)]);
+        g.edge.insert("bevel_weight_edge".into(), Arc::new(Attr::f32(1, vec![0.2, 0.3, 0.4, 0.5])));
+        let out = rebuild_edges(&g, &[vec![0, 1, 2]], &[0], None).unwrap();
+        assert_eq!(out.topology.edge_pairs(), vec![(0, 1), (0, 2), (1, 2)]);
+        assert_eq!(out.edge["bevel_weight_edge"].as_f32().unwrap(), &[0.2, 0., 0.4]);
+        assert_eq!(out.edge["bevel_weight_edge"].rows(), out.topology.nedges());
+        out.validate().unwrap();
+    }
 }
