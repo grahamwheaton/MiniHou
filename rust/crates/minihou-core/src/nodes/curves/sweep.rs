@@ -427,4 +427,3 @@ pub(super) fn sweep(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
     Ok(out)
 }
-
