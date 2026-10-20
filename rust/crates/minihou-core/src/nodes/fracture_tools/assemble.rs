@@ -318,4 +318,3 @@ fn match_pattern(pattern: &[u8], name: &[u8]) -> bool {
         [c, rest @ ..] => name.first() == Some(c) && match_pattern(rest, &name[1..]),
     }
 }
-
