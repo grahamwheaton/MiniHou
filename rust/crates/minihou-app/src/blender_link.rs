@@ -12,6 +12,9 @@ pub use install::*;
 pub mod connection;
 pub(crate) use connection::{join_until, send_frame, serve_client};
 
+#[path = "blender_link/scene_sync.rs"]
+pub mod scene_sync;
+
 pub(crate) static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // The UI owns documents/history; socket threads only exchange immutable snapshots and requests.
@@ -213,16 +216,7 @@ impl LinkServer {
         &mut self,
         editor: &mut minihou_app::EditorDocument,
     ) -> Vec<minihou_app::Edit> {
-        let Some(path) = self.active_live.clone() else {
-            return vec![];
-        };
-        let request = LinkRequest {
-            peer: 0,
-            message: json!({"type":"live_remove","path":path}),
-            arrays: Arrays::new(),
-            completion: None,
-        };
-        self.handle_live(&request, editor).unwrap_or_default()
+        scene_sync::restore_editor(self, editor)
     }
     /// The UI reports whether its own (non-Blender) document has unsaved edits.
     pub fn set_open_dirty(&self, dirty: bool) {
@@ -238,19 +232,7 @@ impl LinkServer {
         resolution: minihou_app::graph_embed::Resolution,
         editor: &mut minihou_app::EditorDocument,
     ) -> io::Result<Vec<minihou_app::Edit>> {
-        let id = conflict["instance_id"].as_str().unwrap_or("").to_string();
-        let mut edits = Vec::new();
-        if resolution.adopts_embedded() && conflict["kind"] == "live" {
-            let request = LinkRequest {
-                peer: 0,
-                message: json!({"type":"live_replace","path":conflict["path"],"graph":conflict["graph"]}),
-                arrays: Arrays::new(),
-                completion: None,
-            };
-            edits = self.handle_live(&request, editor)?;
-        }
-        self.shared.embed_resolutions.lock().unwrap().insert(id, resolution.as_str().into());
-        Ok(edits)
+        scene_sync::resolve_embed(self, conflict, resolution, editor)
     }
     pub fn poll(&self) -> Vec<LinkRequest> {
         self.requests.try_iter().collect()
@@ -288,32 +270,7 @@ impl LinkServer {
         }
     }
     pub fn document_changed(&self, doc: &Document, path: &Path) {
-        let interface = minihou_app::link_interface(doc.value());
-        let watch = link_protocol::watch_objects(doc.value());
-        let path = path.to_string_lossy();
-        if let Some(key) = &self.active_live {
-            self.shared
-                .live_documents
-                .lock()
-                .unwrap()
-                .insert(key.clone(), doc.value().clone());
-        }
-        let mut snapshot = self.shared.snapshot.lock().unwrap();
-        if snapshot.document != *doc.value()
-            || snapshot.interface != interface
-            || snapshot.graph_path.as_str() != path.as_ref()
-            || snapshot.watch != watch
-        {
-            if snapshot.graph_path.as_str() != path.as_ref() {
-                snapshot.geometry = None;
-                snapshot.error = None;
-            }
-            snapshot.document = doc.value().clone();
-            snapshot.watch = watch;
-            snapshot.interface = interface;
-            snapshot.graph_path = path.into_owned();
-            snapshot.version += 1;
-        }
+        scene_sync::document_changed(self, doc, path);
     }
     pub fn cooked<T>(&self, response: &minihou_app::CookResponse<T>) {
         let mut snapshot = self.shared.snapshot.lock().unwrap();
@@ -339,162 +296,7 @@ impl LinkServer {
         request: &LinkRequest,
         editor: &mut minihou_app::EditorDocument,
     ) -> io::Result<Vec<minihou_app::Edit>> {
-        let result = (|| -> minihou_app::Result<Vec<minihou_app::Edit>> {
-            use minihou_app::Edit;
-            use minihou_core::nodes::blender_input::ExternalInput;
-            let h = &request.message;
-            let key = h["path"].as_str().ok_or("missing live path")?.to_owned();
-            let current = self.active_live.as_deref() == Some(&key);
-            if h["type"] == "live_remove" {
-                self.shared.live_documents.lock().unwrap().remove(&key);
-                self.live_editors.remove(&key);
-                if current {
-                    self.active_live = None;
-                    self.shared.live_active.store(false, Ordering::Relaxed);
-                    if let Some(original) = self.saved_editor.take() {
-                        *editor = original;
-                        self.document_changed(&editor.doc, &editor.path);
-                        let (frame, fps) = self.saved_time.take().unwrap_or((1., 24.));
-                        self.frame = frame;
-                        self.fps = fps;
-                        return Ok(vec![
-                            Edit::Replace(editor.doc.value().clone()),
-                            Edit::Time { frame, fps },
-                        ]);
-                    }
-                }
-                return Ok(vec![]);
-            }
-            if h["type"] == "live_replace" {
-                // graph_embed_v1: Blender's embedded graph replaces the bound document (undoable).
-                let doc = Document::parse(h["graph"].to_string())?;
-                self.shared.live_documents.lock().unwrap().insert(key.clone(), doc.value().clone());
-                if current {
-                    editor.history.replace(&mut editor.doc, doc);
-                    self.document_changed(&editor.doc, &editor.path);
-                    return Ok(vec![Edit::Replace(editor.doc.value().clone())]);
-                }
-                if let Some(cached) = self.live_editors.get_mut(&key) {
-                    cached.history.replace(&mut cached.doc, doc);
-                }
-                return Ok(vec![]);
-            }
-            if h["type"] != "live_activate" && !current {
-                if let Some(overrides)=h["overrides"].as_object() {
-                    let graph=self.shared.live_documents.lock().unwrap().get(&key).cloned().unwrap_or(h["graph"].clone());
-                    let mut doc=Document::parse(graph.to_string())?;
-                    for(name,value)in overrides { let edit=minihou_app::link_param_edit(doc.value(),&json!({"name":name,"value":value}))?;doc.edit(&edit)?; }
-                    self.shared.live_documents.lock().unwrap().insert(key.clone(),doc.value().clone());
-                    if let Some(cached)=self.live_editors.get_mut(&key){cached.history.replace(&mut cached.doc,doc);}
-                }
-                return Ok(vec![]);
-            }
-            // Input updates never replace a graph edited in the native app. Merge only
-            // explicitly changed Blender controls into the current document on this thread.
-            let mut doc=if current {editor.doc.clone()}else{Document::parse(h["graph"].to_string())?};
-            if let Some(overrides)=h["overrides"].as_object(){for(name,value)in overrides{
-                let edit=minihou_app::link_param_edit(doc.value(),&json!({"name":name,"value":value}))?;doc.edit(&edit)?;
-            }}
-            // Validate every transient feed before changing the selected document.
-            let input = request
-                .arrays
-                .iter()
-                .filter(|(k, _)| !k.starts_with("source:"))
-                .map(|(k, a)| (k.clone(), a.clone()))
-                .collect();
-            let geo = link_protocol::decode_object(h, &input)?;
-            let mut edits = vec![Edit::External {
-                name: "modifier_input".into(),
-                input: ExternalInput::Object {
-                    geo: Arc::new(geo),
-                    matrix: None,
-                    info: Value::Null,
-                },
-            }];
-            for (nid, n) in doc.value()["nodes"].as_object().into_iter().flatten() {
-                if n["type"] == "object_input" {
-                    let binding = n["params"]["binding"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(nid);
-                    edits.push(Edit::External {
-                        name: format!("object_input:{binding}"),
-                        input: ExternalInput::Missing(
-                            "Choose an object in this modifier's Object input picker in Blender"
-                                .into(),
-                        ),
-                    });
-                }
-            }
-            // Blender Object nodes follow their group picker while the modifier is live (empty: waiting).
-            let pickers = minihou_app::modifier_inputs::pickers(doc.value());
-            for (node, _) in &pickers {
-                edits.push(Edit::External { name: minihou_core::nodes::blender_input::picker_external(node), input: ExternalInput::Missing(String::new()) });
-            }
-            if let Some(sources) = h["sources"].as_array() {
-                for (i, name) in sources.iter().enumerate() {
-                    let prefix = format!("source:{i}/");
-                    let arrays = request
-                        .arrays
-                        .iter()
-                        .filter_map(|(k, a)| {
-                            k.strip_prefix(&prefix).map(|k| (k.to_string(), a.clone()))
-                        })
-                        .collect();
-                    if let Some((node, _)) = pickers.iter().find(|(_, uid)| minihou_app::modifier_inputs::picker_key(uid) == name.as_str().unwrap_or("")) {
-                        edits.push(Edit::External {
-                            name: minihou_core::nodes::blender_input::picker_external(node),
-                            input: ExternalInput::Object { geo: Arc::new(link_protocol::decode_object(&Value::Null, &arrays)?), matrix: minihou_app::modifier_inputs::reference_matrix(&h["references"][name.as_str().unwrap_or("")]), info: h["references"][name.as_str().unwrap_or("")].clone() },
-                        });
-                    }
-                    edits.push(Edit::External {
-                        name: format!("object_input:{}", name.as_str().ok_or("bad source name")?),
-                        input: ExternalInput::Object {
-                            geo: Arc::new(link_protocol::decode_object(h, &arrays)?),
-                            matrix: None,
-                            info: Value::Null,
-                        },
-                    });
-                }
-            }
-            let graph_changed = !current || editor.doc.value() != doc.value();
-            if !current {
-                let mut new = self.live_editors.remove(&key).unwrap_or_else(|| {
-                    minihou_app::EditorDocument::new(doc.clone(), PathBuf::from(&key))
-                });
-                new.history.replace(&mut new.doc, doc);
-                if let Some(label) = h["label"].as_str().filter(|s| !s.is_empty()) {
-                    new.blender_label = Some(label.chars().take(200).collect());
-                }
-                let old = std::mem::replace(editor, new);
-                if let Some(old_key) = self.active_live.take() {
-                    self.live_editors.insert(old_key, old);
-                } else if self.saved_editor.is_none() {
-                    self.saved_editor = Some(old);
-                    self.saved_time = Some((self.frame, self.fps));
-                }
-            } else {
-                editor.history.replace(&mut editor.doc, doc);
-            }
-            self.active_live = Some(key);
-            self.shared.live_active.store(true, Ordering::Relaxed);
-            self.document_changed(&editor.doc, &editor.path);
-            if graph_changed {
-                edits.insert(0, Edit::Replace(editor.doc.value().clone()));
-            }
-            let (frame, fps) = (
-                h["frame"].as_f64().unwrap_or(1.),
-                h["fps"].as_f64().unwrap_or(24.),
-            );
-            self.frame = frame;
-            self.fps = fps;
-            edits.push(Edit::Time { frame, fps });
-            Ok(edits)
-        })();
-        if let Some(completion) = &request.completion {
-            let _ = completion.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
-        }
-        result.map_err(|e| io::Error::other(e.to_string()))
+        scene_sync::handle_live(self, request, editor)
     }
     pub fn set_frame(&mut self, message: &Value) -> io::Result<bool> {
         let frame = match message.get("frame") {
