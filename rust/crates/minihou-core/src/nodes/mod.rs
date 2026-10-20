@@ -17,7 +17,6 @@ mod groups;
 mod group;
 mod curves;
 mod fence;
-mod lsystem;
 mod copy_to_points;
 mod instance;
 mod foreach;
@@ -234,7 +233,6 @@ pub fn registry() -> &'static [NodeSpec] {
         modify::MATCH_SIZE,
         modify::DELETE,
         merge::MERGE,
-        lsystem::LSYSTEM,
         curves::CONVERT_LINE,
         curves::POLYPATH,
         curves::CARVE,

@@ -58,14 +58,6 @@ Full brief supplied by the user (2026-10-17). Not started. Category: Groups / Se
 
 ---
 
-# Low-importance todo: L-system is 2D
-
-- **Problem:** the Rust `lsystem` node produces 2D output, but the pre-Rust (Python) version already fixed this. Make the Rust node match the Python behaviour (3D output, same turtle semantics as the fixed Python node).
-- **Priority:** low. Not started.
-- **How to start later:** compare the Python fix in `minihou/nodes` (grep `lsystem`) with the Rust node in `rust/crates/minihou-core/src/nodes/`, then add a golden test against the Python output.
-
----
-
 # Queued: Array node full Blender parity (incl. gizmos)
 
 The current `array` node (count, relative and constant offset, merge distance) is only a first step. Blender's Array modifier, per the user's screenshots (2026-10-17), needs:
