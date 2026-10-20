@@ -40,4 +40,7 @@ Replace hard-coded limits with defaults that adapt to the machine's RAM, CPU thr
 5. Replace the Rayon chunk sizes.
 
 ## Status
-Planned. Not started. Sequenced after the file split.
+Step 1 implemented in `minihou-core::limits::Limits`. It records RAM and Rayon
+capacity, stores supplied GPU buffer limits, and holds the existing budgets as
+defaults. RAM-derived budgets have the existing defaults as floors. Runtime
+callers still use their original values; steps 2–5 remain planned.
