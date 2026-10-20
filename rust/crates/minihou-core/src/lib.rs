@@ -18,6 +18,7 @@ pub mod controller;
 pub mod coplanar;
 pub mod heightfield;
 pub mod lod;
+pub mod limits;
 pub mod loop_topology;
 pub mod math;
 pub mod noise;

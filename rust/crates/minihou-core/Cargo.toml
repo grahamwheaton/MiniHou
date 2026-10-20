@@ -14,3 +14,4 @@ serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtr
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 base64 = "0.22"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sysinfo = "0.32"
