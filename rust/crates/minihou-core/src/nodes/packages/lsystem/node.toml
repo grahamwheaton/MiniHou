@@ -1,0 +1,5 @@
+id = "lsystem"
+name = "L-System"
+category = "Create"
+description = "Grow plants and fractals from rewriting rules and a 3-D turtle."
+keywords = "plant tree fractal lsystem turtle"
