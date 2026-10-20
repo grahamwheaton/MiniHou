@@ -41,6 +41,34 @@ const NORMAL_LINES: usize = 60_000;
 /// Corner order of `Scene::bbp`; the 12 edges as index pairs.
 const BOX_EDGES: [u32; 24] = [0,1, 1,3, 3,2, 2,0, 4,5, 5,7, 7,6, 6,4, 0,4, 1,5, 2,6, 3,7];
 impl Scene {
+    /// Add a selected node's preview after the displayed outputs, preserving their point ids.
+    pub fn append_selected(&mut self, other: &Scene) -> std::ops::Range<u32> {
+        let start = (self.p.len() / 3) as u32;
+        self.p.extend_from_slice(&other.p);
+        self.n.extend_from_slice(&other.n);
+        self.point.extend(other.point.iter().map(|id| id + start));
+        self.line.extend(other.line.iter().map(|id| id + start));
+        self.tri.extend(other.tri.iter().map(|id| id + start));
+        self.edge.extend(other.edge.iter().map(|id| id + start));
+        self.normal_points.extend(other.normal_points.iter().map(|id| id + start));
+        self.nlp.extend_from_slice(&other.nlp);
+        self.nln.extend_from_slice(&other.nln);
+        for tri in &other.textured {
+            let mut tri = tri.clone();
+            tri.points = tri.points.map(|id| id + start);
+            self.textured.push(tri);
+        }
+        if self.cd.is_some() || other.cd.is_some() {
+            let colors = self.cd.get_or_insert_with(|| vec![0.72; start as usize * 3]);
+            colors.extend(other.cd.as_deref().map_or_else(|| vec![0.72; other.p.len()], |cd| cd.to_vec()));
+        }
+        let (lo, hi) = crate::picking::position_bounds(&self.p);
+        self.center = [0, 1, 2].map(|k| (lo[k] + hi[k]) * 0.5);
+        self.radius = (0..3).map(|k| (hi[k] - lo[k]).powi(2)).sum::<f32>().sqrt().max(1e-3) * 0.5;
+        for c in 0..8 { for k in 0..3 { self.bbp[c*3+k] = if (c >> k) & 1 == 1 { hi[k] } else { lo[k] }; } }
+        self.pick_bvh = std::sync::Arc::new(crate::picking::Bvh::new(&self.p, &self.tri));
+        start..(self.p.len() / 3) as u32
+    }
     /// The same scene showing only `level` (0..1) of its triangles and edges (the viewport proxy); points, normals and bounds stay.
     pub fn proxied(&self, level: f32) -> Scene {
         Scene {

@@ -322,6 +322,14 @@ pub(crate) fn resolve_displayed_node<'a>(value: &Value, selected: &str, display_
     display_ranges.iter().find(|(id, _)| feeds_node(value, selected, id)).map(|(id, _)| id.as_str())
 }
 
+fn include_selected_preview(scene: &mut Scene, ranges: &mut Vec<(String, std::ops::Range<u32>)>, selected: &str, preview: Option<&minihou_core::Geometry>) -> bool {
+    if selected.is_empty() || ranges.iter().any(|(id, _)| id == selected) { return false; }
+    let Some(preview) = preview else { return false; };
+    let range = scene.append_selected(&Scene::new(preview));
+    ranges.push((selected.to_owned(), range));
+    true
+}
+
 /// Where a viewport modelling node (extrude, push/pull, bevel...) is inserted. Element ids come from the displayed
 /// scene, so the node must take the displayed geometry: the selected node only when it exists and is what the
 /// display shows (itself, or the node feeding a displayed output); otherwise the display (e.g. after an undo removed
@@ -516,7 +524,9 @@ struct App {
     prefs: Preferences, keymap: Keymap, prefs_open: bool, viewport_hover: bool, network_hover: bool,
     /// The last cooked scene at full detail, and the proxy level it is currently uploaded at.
     display_ranges: Vec<(String, std::ops::Range<u32>)>,
-    scene: Option<Scene>, shown_level: f32, geo_rev: u64,
+    /// The selected preview follows these ranges; output-node resolution uses only this prefix.
+    output_range_count: usize,
+    scene: Option<Scene>, selected_preview: bool, shown_level: f32, geo_rev: u64,
     lod_uploaded: bool, last_lod_view: Option<([[f32;4];4], [u32;2], bool)>, last_lod_select: Instant,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
@@ -713,7 +723,7 @@ impl App {
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,target_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
+            display_ranges:Vec::new(),output_range_count:0,scene:None,selected_preview:false,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,target_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,pending_duplicate_move:None,duplicate_move_peers:Vec::new(),embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,pending_restore_selection:None,model_before_selection:None,sel_baseline:Default::default(),extrude_keep:None };
         app.prefs = Preferences::load();
@@ -755,6 +765,7 @@ impl App {
                 self.cooking.lod = None;
                 self.geo = None;
                 self.display_ranges.clear();
+                self.output_range_count = 0;
                 self.selection_dirty = true;
             }
         }
@@ -1018,7 +1029,7 @@ impl App {
         // while a field is being picked the displayed pick source is the active object (the selected node is not displayed)
         if let Some(pick) = &self.param_pick { return active_range(&pick.source, &self.display_ranges).map(|_| pick.source.as_str()); }
         if self.object_hidden || !self.selected_set.contains(&self.selected) { return None; }
-        resolve_displayed_node(self.editor.doc.value(), &self.selected, &self.display_ranges)
+        resolve_displayed_node(self.editor.doc.value(), &self.selected, &self.display_ranges[..self.output_range_count])
     }
     fn active_selection(&self) -> Option<picking::Selection> {
         Some(selection_in_range(&self.selection,self.scene.as_ref()?,active_range(self.active_object()?,&self.display_ranges)?))
@@ -2816,8 +2827,11 @@ impl eframe::App for App {
             if display_is_empty(self.editor.doc.value()) {
                 self.cooking.geometry=None;self.cooking.lod=None;self.geo=None;
             }
-            if let Some(scene) = accepted.filter(|_| !display_is_empty(self.editor.doc.value())) {
+            if let Some(mut scene) = accepted.filter(|_| !display_is_empty(self.editor.doc.value())) {
                 self.display_ranges = display_ranges;
+                self.output_range_count = self.display_ranges.len();
+                let preview = self.cooking.preview.as_ref().filter(|(id, _, _)| id == &self.selected).map(|(_, geo, _)| geo.as_ref());
+                self.selected_preview = include_selected_preview(&mut scene, &mut self.display_ranges, &self.selected, preview);
                 self.picked_field = None;
                 self.selection_dirty = true;
                 let first = self.gpu.is_none();
@@ -2825,7 +2839,7 @@ impl eframe::App for App {
                 self.materials.register_graph(self.editor.doc.value()); let _=self.materials.register_sidecar(&self.editor.path);
                 let textured=scene.has_textured_slots();
                 let level = if textured {1.0}else{self.proxy_level(scene.triangles())};
-                let use_lod = !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+                let use_lod = !self.selected_preview && !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
                 if use_lod {
                     if let Some(gpu) = &mut self.gpu { gpu.upload_lod(&self.state.device, &scene); }
                     else { self.gpu = Some(Gpu::new_lod(&self.state.device, &scene)); }
@@ -2881,7 +2895,7 @@ impl eframe::App for App {
         if let Some(scene) = &self.scene {
             let textured=scene.has_textured_slots();
             let level = if textured {1.0}else{self.proxy_level(scene.triangles())};
-            let use_lod = !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+            let use_lod = !self.selected_preview && !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
             if use_lod != self.lod_uploaded {
                 if let Some(gpu) = &mut self.gpu {
                     if use_lod { gpu.upload_lod(&self.state.device, scene); }
@@ -3839,6 +3853,39 @@ mod tools_tests {
         let back = picking::pick_triangle(&points, &triangles, [0.2,0.2,-5.], [0.,0.,1.]).unwrap();
         assert_eq!(picked_object(&ranges, &triangles, back), Some("grid"));
         assert!(picking::pick_triangle(&points, &triangles, [3.,3.,5.], [0.,0.,-1.]).is_none());
+    }
+    #[test]
+    fn selected_hidden_node_adds_pickable_preview_only_while_selected() {
+        let make = |z: f32| {
+            let geo = minihou_core::Geometry::from_arrays(
+                vec![0.,0.,z, 1.,0.,z, 0.,1.,z], vec![0,1,2], vec![0,3], None).unwrap();
+            geo
+        };
+        let displayed = make(0.);
+        let hidden = make(2.);
+        let mut scene = Scene::new(&displayed);
+        let mut ranges = vec![("output".to_owned(), 0..3)];
+        assert!(include_selected_preview(&mut scene, &mut ranges, "garden_path", Some(&hidden)));
+        assert_eq!(ranges, vec![("output".into(), 0..3), ("garden_path".into(), 3..6)]);
+        let hit = pick_displayed(&scene, [0.2,0.2,5.], [0.,0.,-1.], viewport::ObjectVisibility::HideOthers,
+            &ranges, &std::collections::BTreeSet::from(["garden_path".to_owned()])).unwrap();
+        assert_eq!(picked_object(&ranges, scene.triangle_indices(), hit), Some("garden_path"));
+        assert!(!include_selected_preview(&mut scene, &mut ranges, "", Some(&hidden)));
+        assert!(!include_selected_preview(&mut scene, &mut ranges, "output", Some(&displayed)));
+        let mut deselected_scene = Scene::new(&displayed);
+        let mut deselected_ranges = vec![("output".to_owned(), 0..3)];
+        assert!(!include_selected_preview(&mut deselected_scene, &mut deselected_ranges, "", Some(&hidden)));
+        assert_eq!(deselected_ranges, vec![("output".into(), 0..3)]);
+        assert_eq!(deselected_scene.positions().len(), 9);
+
+        let curve = minihou_core::Geometry::from_arrays(
+            vec![0.,0.,2., 1.,0.,2., 1.,1.,2.], vec![0,1,2], vec![0,3], Some(vec![false])).unwrap();
+        let mut curve_scene = Scene::new(&displayed);
+        let mut curve_ranges = vec![("output".to_owned(), 0..3)];
+        assert!(include_selected_preview(&mut curve_scene, &mut curve_ranges, "garden_path", Some(&curve)));
+        assert_eq!(curve_ranges[1].1, 3..6);
+        assert!(curve_scene.line_primitive_indices().chunks_exact(2)
+            .any(|edge| edge.iter().all(|id| curve_ranges[1].1.contains(id))));
     }
     #[test]
     fn active_origin_follows_its_transform_chain_instead_of_scene_bounds() {
