@@ -13,6 +13,8 @@ pub mod display_modes;
 mod face_markers;
 pub use display_modes::{Mode, ObjectVisibility, MatCap, ObjectColor};
 use display_modes::split_indices;
+mod point_colors;
+use point_colors::point_colors;
 
 /// Renderer switches; stats and the orientation widget are painted by the UI.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -171,25 +173,6 @@ fn instance_slot_name_resolves_to_manifest_binding() {
     registry.register_descriptor("peer3:blender:instance:0",materials::Descriptor::parse(
         &serde_json::json!({"version":1,"name":"imagepaste-261017-142014"})).unwrap());
     assert!(matches!(registry.resolve(&scene.textured[0].slot).state,State::Ok));
-}
-/// `Cd` as one RGB per point: point Cd as is; vertex and primitive Cd averaged onto the points they touch.
-fn point_colors(g:&Geometry) -> Option<Vec<f32>> {
-    let t=&g.topology; let n=g.npoints;
-    let rgb=|a:&minihou_core::geometry::Attr,i:usize| -> Option<[f32;3]> {
-        let v=a.as_f32()?; let w=a.width; if w<3 { return None; }
-        let s=v.get(i*w..i*w+3)?; Some([s[0],s[1],s[2]])
-    };
-    if let Some(a)=g.point.get("Cd") { if a.as_f32().is_some() && a.width>=3 && a.rows()>=n {
-        return Some((0..n).flat_map(|i|rgb(a,i).unwrap_or([0.72;3])).collect());
-    } }
-    let (mut sum,mut cnt)=(vec![0f32;n*3],vec![0u32;n]);
-    let mut add=|pt:i32,c:[f32;3]| { let k=pt as usize; if k<n { for j in 0..3 { sum[k*3+j]+=c[j]; } cnt[k]+=1; } };
-    if let Some(a)=g.vertex.get("Cd") { for (i,&pt) in t.vertex_point.iter().enumerate() { if let Some(c)=rgb(a,i) { add(pt,c); } } }
-    else if let Some(a)=g.prim.get("Cd") { for prim in 0..t.nprims() {
-        if let Some(c)=rgb(a,prim) { for &pt in &t.vertex_point[t.prim_offsets[prim] as usize..t.prim_offsets[prim+1] as usize] { add(pt,c); } }
-    } }
-    else { return None; }
-    Some((0..n).flat_map(|i|{ let c=cnt[i].max(1) as f32; if cnt[i]==0 {[0.72;3]} else {[sum[i*3]/c,sum[i*3+1]/c,sum[i*3+2]/c]} }).collect())
 }
 /// Standalone points and non-surface primitive segments survive every proxy cut.
 fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
