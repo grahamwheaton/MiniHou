@@ -7,7 +7,7 @@ use crate::{
     topo,
 };
 use std::{collections::BTreeMap, sync::Arc};
-pub const SUBDIVIDE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const SUBDIVIDE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "subdivide",
     inputs: GEO,
     params: crate::params!("depth":1;"algorithm":"catmull_clark";"use_creases":true;"creases":"";"override_crease_weight":false;"crease_weight":1.;"outgrp_creases":false;"outgrp_creases_name":"creases"),

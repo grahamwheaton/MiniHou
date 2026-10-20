@@ -2,7 +2,7 @@
 use crate::{error::{Error, Result}, geometry::Geometry,
     nodes::{InputSpec, Inputs, NodeSpec}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "cache",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("mode": "auto"),

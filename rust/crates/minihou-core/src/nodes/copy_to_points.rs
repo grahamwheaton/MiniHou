@@ -17,7 +17,7 @@ pub(crate) fn copy_limit_bytes()->u64{
 fn limit_from_preferences(v:Option<&serde_json::Value>)->u64{
     v.and_then(|v|v.get("copy_memory_limit_mib")).and_then(|v|v.as_u64()).filter(|n|(16..=16384).contains(n)).unwrap_or(256)*1024*1024
 }
-pub const COPY_TO_POINTS:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"copy_to_points",inputs:&[
+pub const COPY_TO_POINTS:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"copy_to_points",inputs:&[
     InputSpec{name:"source",multi:false,optional:false},InputSpec{name:"points",multi:false,optional:false}],
     params:crate::params!("orient":true;"use_pscale":true;"pack_instances":true),cook:copy};
 fn row(g:&Geometry,name:&str,i:usize,width:usize)->Option<Vec<f64>>{

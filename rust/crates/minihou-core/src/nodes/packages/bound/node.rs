@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use serde_json::json;
 use crate::{nodes::{InputSpec, Inputs, NodeSpec}, error::Result, geometry::Geometry, params::Params};
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "bound",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("padding": [0.0, 0.0, 0.0]; "oriented": false, unsupported;),

@@ -15,7 +15,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-pub const POLYBEVEL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const POLYBEVEL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "polybevel",
     inputs: &[
         InputSpec {

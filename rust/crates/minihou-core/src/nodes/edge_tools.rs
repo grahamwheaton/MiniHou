@@ -233,13 +233,13 @@ pub(crate) fn rebuild_edges(
     remap(g, &mut out, None)?;
     Ok(out)
 }
-pub const CREASE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const CREASE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "crease",
     inputs: GEO,
     params: crate::params!("domain":"edges";"group":"";"sharpness":2.),
     cook: crease,
 };
-pub const EDGE_GROUP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const EDGE_GROUP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "edge_group",
     inputs: &[
         InputSpec {
@@ -256,19 +256,19 @@ pub const EDGE_GROUP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: 
     params: crate::params!("name":"edges";"method":"pattern";"pattern":"*";"combine":"replace"),
     cook: edge_group,
 };
-pub const EDGE_GROUP_PROMOTE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const EDGE_GROUP_PROMOTE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "edge_group_promote",
     inputs: GEO,
     params: crate::params!("pattern":"*";"name":"edge_points";"to":"points"),
     cook: promote,
 };
-pub const DISSOLVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const DISSOLVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "dissolve_edges",
     inputs: GEO,
     params: crate::params!("group":"";"angle":0.1;"preserve_seams":true),
     cook: dissolve,
 };
-pub const POLYBRIDGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const POLYBRIDGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "polybridge",
     inputs: GEO,
     params: crate::params!("source":"";"destination":"";"segments":1;"twist":0;"reverse":false;"outgrp_bridge":false;"outgrp_bridge_name":"bridgepolys"),

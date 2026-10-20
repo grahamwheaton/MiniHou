@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, AttrTable, Geometry, Topology, MAX_ELEMENTS};
 use crate::params::Params;
 
-pub const MERGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const MERGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "merge",
     inputs: &[InputSpec { name: "geos", multi: true, optional: false }],
     params: &[],

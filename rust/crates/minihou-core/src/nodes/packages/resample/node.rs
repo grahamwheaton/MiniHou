@@ -9,7 +9,7 @@ use crate::{
     params::Params,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "resample",
     inputs: GEO,
     params: crate::params!("by":"length";"length":0.1;"segments":20;"group":""),

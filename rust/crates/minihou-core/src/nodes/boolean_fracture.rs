@@ -9,7 +9,7 @@ use crate::{
     topo,
 };
 use std::sync::Arc;
-pub const BOOLEAN_FRACTURE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const BOOLEAN_FRACTURE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "boolean_fracture",
     inputs: &[
         InputSpec {

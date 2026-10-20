@@ -17,7 +17,7 @@ type Q = [f64; 10];
 fn einsum(a: V, b: V) -> f64 {
     (a[0] * b[0] + a[2] * b[2]) + a[1] * b[1]
 }
-pub const POLYREDUCE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const POLYREDUCE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "polyreduce",
     inputs: GEO,
     params: crate::params!("percentage":25.;"target":0;"keep_borders":true),

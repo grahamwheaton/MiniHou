@@ -57,7 +57,7 @@ pub fn resolve_graph(graph: &Graph) -> ResolvedChannels {
             }
         }
         if def.node_type == "subnet" {
-            for name in graph.to_value()["nodes"][id]["promoted_params"].as_array().into_iter().flatten().filter_map(|p| p["name"].as_str()) {
+            for name in graph.promoted_params(id).into_iter().filter_map(|p| p["name"].as_str()) {
                 let address=Address{node:id.clone(),param:name.into(),component:None};
                 if let Ok(value)=r.resolve(&address) { values.insert(name.into(),value); }
             }

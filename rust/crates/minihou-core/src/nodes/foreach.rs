@@ -2,7 +2,7 @@
 use std::sync::Arc;
 use super::{Inputs,NodeSpec,GEO};
 use crate::{error::{Error,Result},geometry::{AttrData,Geometry},params::Params};
-pub const FOR_EACH:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"for_each",inputs:GEO,params:crate::params!(
+pub const FOR_EACH:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"for_each",inputs:GEO,params:crate::params!(
     "body":"";"params":"{}";"piece":"connectivity";"attribute":"class";"max_pieces":1000),cook:for_each};
 thread_local!{static DEPTH:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};}
 struct Depth;

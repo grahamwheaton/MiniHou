@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{params::Params, Attr, AttrData, Error, Geometry, Result};
 use std::sync::Arc;
-pub const WRANGLE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const WRANGLE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "wrangle",
     inputs: &[
         InputSpec {

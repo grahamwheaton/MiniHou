@@ -7,7 +7,7 @@ use crate::geometry::{Attr, Geometry};
 use crate::math;
 use crate::params::Params;
 
-pub const COPY_TRANSFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const COPY_TRANSFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "copy_transform",
     inputs: GEO,
     params: crate::params!(

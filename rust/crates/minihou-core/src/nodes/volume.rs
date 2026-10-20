@@ -10,22 +10,22 @@ const AB: &[InputSpec] = &[
 const POINTS_IN: &[InputSpec] = &[
     InputSpec { name: "points", multi: false, optional: false },
 ];
-pub const SDF_SHAPE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const SDF_SHAPE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "sdf_shape", inputs: &[],
     params: crate::params!("shape":"sphere";"radius":0.5;"size":[1.,1.,1.];"depth":1.;"minor_radius":0.15;"radius2":0.2;"sides":6;"bevel":0.;"center":[0.,0.,0.];"rotate":[0.,0.,0.];"voxel_size":0.04;"smooth":0),
     cook: shape,
 };
-pub const SDF_BOOLEAN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const SDF_BOOLEAN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "sdf_boolean", inputs: AB,
     params: crate::params!("operation":"union";"voxel_size":0.05;"smooth":0.;"transfer_attribs":true),
     cook: boolean,
 };
-pub const REMESH: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const REMESH: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "remesh", inputs: GEO,
     params: crate::params!("voxel_size": 0.05; "offset": 0.0; "smooth": 0; "transfer": ""),
     cook: remesh,
 };
-pub const POINTS_TO_SURFACE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const POINTS_TO_SURFACE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "points_to_surface", inputs: POINTS_IN,
     params: crate::params!("radius": 0.2; "blend": 1.0; "voxel_size": 0.05; "smooth": 0; "transfer": "Cd"),
     cook: points_to_surface,

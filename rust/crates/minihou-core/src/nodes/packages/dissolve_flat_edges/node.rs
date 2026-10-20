@@ -5,7 +5,7 @@ use crate::params::Params;
 use crate::{normals, topo};
 use std::collections::BTreeMap;
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "dissolve_flat_edges",
     inputs: GEO,
     params: crate::params!(

@@ -1,6 +1,16 @@
 //! Picking mesh elements in the viewport and highlight geometry for the current selection.
 use crate::ui::SelectionMode;
 
+/// Bounds of the viewport point buffer, including an appended selected preview.
+pub fn position_bounds(positions: &[f32]) -> ([f32; 3], [f32; 3]) {
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    for point in positions.chunks_exact(3) {
+        for k in 0..3 { lo[k] = lo[k].min(point[k]); hi[k] = hi[k].max(point[k]); }
+    }
+    if positions.len() < 3 { ([0.; 3], [0.; 3]) } else { (lo, hi) }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct SnapFeature { pub point: [f32; 3], pub triangle: [[f32; 3]; 3], pub kind: crate::ui::SnapTo }
 

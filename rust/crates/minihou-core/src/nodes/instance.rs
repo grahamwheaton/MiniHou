@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::Params;
 
-pub const INSTANCE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const INSTANCE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "instance",
     inputs: &[InputSpec {
         name: "points",

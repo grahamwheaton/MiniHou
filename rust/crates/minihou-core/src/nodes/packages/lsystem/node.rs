@@ -14,6 +14,7 @@ use crate::{
 pub(super) const NODE: NodeSpec = NodeSpec {
     outputs: &["geometry"],
     cook_multi: None,
+    cook_sidecar: None,
     name: "lsystem",
     inputs: &[
         InputSpec { name: "leaf_j", multi: false, optional: true },
