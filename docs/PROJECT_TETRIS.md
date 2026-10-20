@@ -104,3 +104,5 @@ Use one scratch worktree and one commit series **per file job**, all from the sa
 - Batch 2 (Bob, scheduled tasks BobT2*): running.
 - Batch 2 merged 2026-10-20 19:30: modeling_tools.rs, polyfill.rs, uv/unwrap.rs, scatter.rs (Bob, scheduled tasks BobT2*). Full suite 1435 passed.
 - Batch 3 (pushpull, fracture_tools, modify, edge_tools): starting on Bob.
+- Batch 3 merged 2026-10-20 19:50: pushpull.rs, fracture_tools.rs, modify.rs, edge_tools.rs (Bob, scheduled tasks BobT3*). Full suite 1435 passed.
+- Batch 4 (curves, procedural_systems, usd_io, session): next.
