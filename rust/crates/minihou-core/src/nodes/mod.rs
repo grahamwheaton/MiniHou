@@ -16,7 +16,6 @@ mod generate;
 mod groups;
 mod group;
 mod curves;
-mod fence;
 mod copy_to_points;
 mod instance;
 mod foreach;
@@ -214,7 +213,6 @@ pub fn registry() -> &'static [NodeSpec] {
         generate::GRID,
         generate::BOX,
         generate::CURVE,
-        fence::FENCE,
         generate::CIRCLE,
         generate::SPHERE,
         generate::TUBE,
@@ -358,6 +356,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
+        assert!(get("fence").is_none());
         let ids: Vec<_> = package_catalogue().iter().map(|n| n.id).collect();
         assert!(!ids.is_empty());
         assert!(ids.windows(2).all(|pair| pair[0] < pair[1]), "package ids must be strictly sorted and unique");
