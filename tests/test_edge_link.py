@@ -1,5 +1,7 @@
 """Pair-keyed Blender edge transfer with small bpy collection mocks."""
+import ast
 import importlib
+from pathlib import Path
 import sys
 import types
 import unittest
@@ -52,6 +54,47 @@ def custom_attribute_object():
 
 
 class EdgeLinkTests(unittest.TestCase):
+    def test_automatic_connection_tries_live_default_before_stale_records(self):
+        source = Path(test_rust_link.ROOT / "blender_addon/minihou_link/modifiers.py")
+        function = next(node for node in ast.parse(source.read_text(encoding="utf-8")).body
+                        if isinstance(node, ast.FunctionDef) and node.name == "_connection")
+        attempts = []
+
+        class FakeClient:
+            def __init__(self, host, port, timeout):
+                self.address = (host, port)
+                self.timeout = timeout
+                self.sock = types.SimpleNamespace(settimeout=lambda value: None)
+
+            def connect(self):
+                attempts.append((self.address, self.timeout))
+                if self.address != ("127.0.0.1", 8765):
+                    raise OSError("dead endpoint")
+                return {"capabilities": ["live_modifier_v1", "object_inputs_v1"]}
+
+            def close(self):
+                self.sock = None
+
+        stale = [("127.0.0.1", port) for port in range(9000, 9015)]
+        discovery = types.ModuleType(PKG + ".discovery")
+        discovery.candidates = lambda: stale
+        instance_client = types.ModuleType(PKG + ".instance_client")
+        instance_client.InstanceClient = FakeClient
+        state = {"__package__": PKG, "bpy": types.SimpleNamespace(context=types.SimpleNamespace(
+            preferences=types.SimpleNamespace(addons={}))), "_client": None, "_endpoint": None,
+            "_settings": lambda host, port: ("127.0.0.1", 8765)}
+
+        def disconnect():
+            state["_client"] = state["_endpoint"] = None
+
+        state["disconnect"] = disconnect
+        with patch.dict(sys.modules, {PKG + ".discovery": discovery,
+                                      PKG + ".instance_client": instance_client}):
+            exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), state)
+            client = state["_connection"]()
+        self.assertIs(client, state["_client"])
+        self.assertEqual(attempts, [(("127.0.0.1", 8765), 0.4)])
+
     def test_read_object_preserves_custom_mesh_attributes(self):
         obj, graph = custom_attribute_object()
         _, arrays = reader.read_object(obj, graph)

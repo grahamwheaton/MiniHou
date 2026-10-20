@@ -348,7 +348,7 @@ def _connection(host=None, port=None):
         disconnect()
         from .instance_client import InstanceClient
         from .discovery import candidates
-        choices = list(dict.fromkeys(candidates() + [endpoint])) if automatic else [endpoint]
+        choices = list(dict.fromkeys([("127.0.0.1", 8765)] + candidates() + [endpoint])) if automatic else [endpoint]
         for address in choices:
             client = InstanceClient(*address, timeout=0.4 if automatic else 30.0)
             try:
