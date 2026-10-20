@@ -160,11 +160,28 @@ fn join_edges(g: &Geometry) -> Result<Geometry> {
     for (source, dest, rows, count) in [(&g.vertex,&mut out.vertex,&corners,out.topology.nvertices()),(&g.prim,&mut out.prim,&prims,out.topology.nprims())] {
         for (name,a) in source { let mut attr=a.zeros_like(count); match (&a.data,&mut attr.data) { (crate::AttrData::F32(v),crate::AttrData::F32(o))=>for (i,&r) in rows.iter().enumerate(){o[i*a.width..(i+1)*a.width].copy_from_slice(&v[r*a.width..(r+1)*a.width]);}, (crate::AttrData::I32(v),crate::AttrData::I32(o))=>for (i,&r) in rows.iter().enumerate(){o[i*a.width..(i+1)*a.width].copy_from_slice(&v[r*a.width..(r+1)*a.width]);}, _=>unreachable!() }; dest.insert(name.clone(),Arc::new(attr)); }
     }
+    super::edge_tools::remap_edge_attributes(g, &mut out, None)?;
+    debug_assert!(out.edge.values().all(|a| a.rows() == out.topology.nedges()));
     Ok(out)
 }
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn join_edges_keeps_bevel_weight_on_joined_segments() {
+        let mut g = Geometry::from_arrays(
+            vec![0.,0.,0., 1.,0.,0., 2.,0.,0., 0.,1.,0., 1.,1.,0., 0.,2.,0.],
+            vec![0,1, 1,2, 3,4,5], vec![0,2,4,7], Some(vec![false,false,true]),
+        ).unwrap();
+        let pairs = g.topology.edge_pairs();
+        assert_eq!(pairs, vec![(0,1),(1,2),(3,4),(3,5),(4,5)]);
+        g.edge.insert("bevel_weight_edge".into(), Arc::new(Attr::f32(1, vec![0.1,0.2,0.3,0.4,0.5])));
+        let out = join_edges(&g).unwrap();
+        assert_eq!(out.nprims(), 2);
+        assert_eq!(out.topology.edge_pairs(), pairs);
+        assert_eq!(out.edge["bevel_weight_edge"].as_f32().unwrap(), &[0.1,0.2,0.3,0.4,0.5]);
+        assert_eq!(out.edge["bevel_weight_edge"].rows(), out.topology.nedges());
+        out.validate().unwrap();
+    }
     #[test] fn object_input_binding_is_local_and_invalidates_session_cache() {
         use serde_json::json;
         let doc=json!({"display":"src","nodes":{"src":{"type":"object_input"}}});

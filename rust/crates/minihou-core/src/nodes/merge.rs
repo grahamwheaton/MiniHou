@@ -51,7 +51,9 @@ pub(super) fn merge(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
     let mut out = Geometry { npoints, topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed }), ..Default::default() };
     out.point = concat_tables(geos.iter().map(|g| (&g.point, g.npoints)).collect(), "point")?;
     out.vertex = concat_tables(geos.iter().map(|g| (&g.vertex, g.nvertices())).collect(), "vertex")?;
+    out.edge = concat_tables(geos.iter().map(|g| (&g.edge, g.topology.nedges())).collect(), "edge")?;
     out.prim = concat_tables(geos.iter().map(|g| (&g.prim, g.nprims())).collect(), "prim")?;
+    debug_assert!(out.edge.values().all(|a| a.rows() == out.topology.nedges()));
     super::packed::merge_packed(&geos, &mut out);
     for g in &geos {
         for (k, v) in &g.detail {
@@ -66,6 +68,9 @@ fn concat_tables(parts: Vec<(&AttrTable, usize)>, domain: &str) -> Result<AttrTa
     let mut names: Vec<&String> = Vec::new();
     for (t, _) in &parts {
         for n in t.keys() {
+            if domain == "edge" && (matches!(n.as_str(), "crease_edge" | "sharp_edge") || n.starts_with("group_")) {
+                continue;
+            }
             if !names.contains(&n) {
                 names.push(n);
             }
@@ -101,6 +106,18 @@ fn concat_tables(parts: Vec<(&AttrTable, usize)>, domain: &str) -> Result<AttrTa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_keeps_bevel_weight_in_concatenated_edge_order() {
+        let mut a = Geometry::from_arrays(vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2], vec![0,3], None).unwrap();
+        a.edge.insert("bevel_weight_edge".into(), Arc::new(Attr::f32(1, vec![0.1,0.2,0.3])));
+        let b = Geometry::from_arrays(vec![2.,0.,0., 3.,0.,0., 2.,1.,0.], vec![0,1,2], vec![0,3], None).unwrap();
+        let out = merge(&[vec![Arc::new(a), Arc::new(b)]], &Params::resolve(&[], None).unwrap()).unwrap();
+        assert_eq!(out.topology.edge_pairs(), vec![(0,1),(0,2),(1,2),(3,4),(3,5),(4,5)]);
+        assert_eq!(out.edge["bevel_weight_edge"].as_f32().unwrap(), &[0.1,0.2,0.3,0.,0.,0.]);
+        assert_eq!(out.edge["bevel_weight_edge"].rows(), out.topology.nedges());
+        out.validate().unwrap();
+    }
 
     #[test]
     fn material_identity_remaps_faces_and_keeps_uv_seam() {

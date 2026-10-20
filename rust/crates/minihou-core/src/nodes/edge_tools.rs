@@ -16,7 +16,7 @@ mod groups;
 mod dissolve;
 mod bridge;
 pub(super) use common::{values, write_values, wildcard, remap};
-pub(crate) use common::{edge_mask, rebuild_edges};
+pub(crate) use common::{edge_mask, rebuild_edges, remap_edge_attributes};
 pub(super) use dissolve::root;
 pub(super) use bridge::chain;
 use groups::{crease, edge_group, promote};
