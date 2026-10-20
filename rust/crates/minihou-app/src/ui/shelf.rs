@@ -169,7 +169,7 @@ mod tests {
         for id in ["box", "transform", "example_offset"] {
             assert!(tabs().iter().any(|tab| tab.tools.iter().any(|tool| tool.node_type == id)), "missing {id}");
         }
-        for (legacy, merged) in shelf_data::TABS.iter().zip(tabs()) {
+        for (legacy, merged) in shelf_data::legacy_tabs().iter().zip(tabs()) {
             assert_eq!(legacy.name, merged.name);
             // The legacy shelf prefix has a deliberate user-facing order.
             assert_eq!(legacy.tools.iter().map(|t| (t.label, t.node_type, t.icon)).collect::<Vec<_>>(),
@@ -205,7 +205,7 @@ mod tests {
                 for node in minihou_core::nodes::package_catalogue() {
                     let tab = tabs().iter().find(|tab| tab.name == node.category).unwrap();
                     let tool = tab.tools.iter().rev().find(|tool| tool.node_type == node.id && tool.label == node.name).unwrap();
-                    let legacy = shelf_data::TABS.iter().find(|legacy| legacy.name == node.category).unwrap()
+                    let legacy = shelf_data::legacy_tabs().iter().find(|legacy| legacy.name == node.category).unwrap()
                         .tools.iter().any(|legacy| legacy.node_type == node.id);
                     if !legacy {
                         assert_eq!(tool.icon, node.id, "{}", node.id);

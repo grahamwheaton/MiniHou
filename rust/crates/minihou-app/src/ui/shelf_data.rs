@@ -1,235 +1,80 @@
-//! Port of the static shelf lists in the web editor.
+//! Shelf presentation order. Node details come from the package catalogue;
+//! the layout records existing placements and legacy display overrides.
+use minihou_core::nodes::{package_catalogue, NodeCatalogueEntry};
+use serde::Deserialize;
+use std::sync::OnceLock;
+
 #[derive(Clone, Copy)]
 pub(super) struct Tool { pub label: &'static str, pub node_type: &'static str, pub icon: &'static str }
 #[derive(Clone, Copy)]
 pub(super) struct Tab { pub name: &'static str, pub tools: &'static [Tool] }
-pub(super) const TABS: &[Tab] = &[
-    Tab { name: "Create", tools: &[
-        Tool { label: "Box", node_type: "box", icon: "box" },
-        Tool { label: "Sphere", node_type: "sphere", icon: "sphere" },
-        Tool { label: "Tube", node_type: "tube", icon: "tube" },
-        Tool { label: "Torus", node_type: "torus", icon: "torus" },
-        Tool { label: "Grid", node_type: "grid", icon: "grid" },
-        Tool { label: "Null", node_type: "null", icon: "null" },
-        Tool { label: "Circle", node_type: "circle", icon: "circle" },
-        Tool { label: "Bezier", node_type: "bezier", icon: "curve" },
-        Tool { label: "Polyline", node_type: "curve", icon: "curve" },
-        Tool { label: "Rectangle", node_type: "sketch_rectangle", icon: "box" },
-        Tool { label: "Polygon", node_type: "sketch_polygon", icon: "circle" },
-        Tool { label: "Helix", node_type: "helix", icon: "helix" },
-        Tool { label: "L-System", node_type: "lsystem", icon: "lsystem" },
-        Tool { label: "Lattice Grid", node_type: "lattice_grid", icon: "lattice" },
-        Tool { label: "Metaball", node_type: "points_to_surface", icon: "points_to_surface" },
-        Tool { label: "Blender Object", node_type: "blender_object", icon: "file" },
-        Tool { label: "Blender Image", node_type: "blender_image", icon: "file" },
-        Tool { label: "Image File", node_type: "image_file", icon: "file" },
-        Tool { label: "USD Import", node_type: "usd_import", icon: "file" },
-        Tool { label: "Host Mesh", node_type: "modifier_input", icon: "host" },
-        Tool { label: "Controller", node_type: "controller", icon: "null" },
-        Tool { label: "Object Input", node_type: "object_input", icon: "host" },
-    ] },
-    Tab { name: "Modify", tools: &[
-        Tool { label: "LOD Bake", node_type: "lod_bake", icon: "null" },
-        Tool { label: "Transform", node_type: "transform", icon: "transform" },
-        Tool { label: "Merge", node_type: "merge", icon: "merge" },
-        Tool { label: "Duplicate", node_type: "copy_transform", icon: "duplicate" },
-        Tool { label: "Copy to Points", node_type: "copy_to_points", icon: "copy_to_points" },
-        Tool { label: "Instance", node_type: "instance", icon: "instance" },
-        Tool { label: "Switch", node_type: "switch", icon: "switch" },
-        Tool { label: "Match Size", node_type: "match_size", icon: "match_size" },
-        Tool { label: "Blast", node_type: "blast", icon: "blast" },
-        Tool { label: "Delete", node_type: "delete", icon: "delete" },
-        Tool { label: "Fuse", node_type: "fuse", icon: "fuse" },
-        Tool { label: "Clean", node_type: "clean", icon: "clean" },
-        Tool { label: "Sort", node_type: "sort", icon: "sort" },
-        Tool { label: "Null", node_type: "null", icon: "null" },
-        Tool { label: "Output", node_type: "output", icon: "output" },
-        Tool { label: "Scene Objects", node_type: "scene_objects", icon: "output" },
-        Tool { label: "Image Out", node_type: "image_out", icon: "output" },
-        Tool { label: "USD Export", node_type: "usd_export", icon: "output" },
-        Tool { label: "Input", node_type: "input", icon: "host" },
-    ] },
-    Tab { name: "Model", tools: &[
-        Tool { label: "Boolean", node_type: "boolean", icon: "boolean" },
-        Tool { label: "Clip", node_type: "clip", icon: "clip" },
-        Tool { label: "Mirror", node_type: "mirror", icon: "mirror" },
-        Tool { label: "Array", node_type: "array", icon: "copy_to_points" },
-        Tool { label: "Subdivide", node_type: "subdivide", icon: "subdivide" },
-        Tool { label: "Skin", node_type: "skin", icon: "skin" },
-        Tool { label: "Skin Profiles", node_type: "skin_profiles", icon: "skin" },
-        Tool { label: "Revolve", node_type: "revolve", icon: "revolve" },
-        Tool { label: "Sweep", node_type: "sweep", icon: "sweep" },
-        Tool { label: "PolyReduce", node_type: "polyreduce", icon: "polyreduce" },
-        Tool { label: "Convex Hull", node_type: "convex_hull", icon: "convex_hull" },
-        Tool { label: "Remesh", node_type: "remesh", icon: "remesh" },
-    ] },
-    Tab { name: "Polygon", tools: &[
-        Tool { label: "PolyExtrude", node_type: "polyextrude", icon: "polyextrude" },
-        Tool { label: "Push / Pull", node_type: "pushpull", icon: "polyextrude" },
-        Tool { label: "Inset", node_type: "inset", icon: "polyexpand2d" },
-        Tool { label: "Outset", node_type: "outset", icon: "polyexpand2d" },
-        Tool { label: "PolyBevel", node_type: "polybevel", icon: "polybevel" },
-        Tool { label: "Solidify", node_type: "solidify", icon: "polyextrude" },
-        Tool { label: "PolySplit", node_type: "polysplit", icon: "polysplit" },
-        Tool { label: "Loop Cut", node_type: "loop_cut", icon: "polysplit" },
-        Tool { label: "Edge Slide", node_type: "edge_slide", icon: "edge_flip" },
-        Tool { label: "Knife", node_type: "knife", icon: "polysplit" },
-        Tool { label: "PolyFill", node_type: "polyfill", icon: "polyfill" },
-        Tool { label: "PolyBridge", node_type: "polybridge", icon: "polybridge" },
-        Tool { label: "PolyExpand2D", node_type: "polyexpand2d", icon: "polyexpand2d" },
-        Tool { label: "Dissolve", node_type: "dissolve", icon: "dissolve" },
-        Tool { label: "Divide", node_type: "divide", icon: "divide" },
-        Tool { label: "Grid Fill", node_type: "grid_fill", icon: "polyfill" },
-        Tool { label: "Recalculate Normals", node_type: "recalc_normals", icon: "reverse" },
-        Tool { label: "Tris to Quads", node_type: "tris_to_quads", icon: "dissolve" },
-        Tool { label: "Bridge", node_type: "bridge", icon: "polybridge" },
-        Tool { label: "Normal", node_type: "normal", icon: "normal" },
-    ] },
-    Tab { name: "Edges", tools: &[
-        Tool { label: "Dissolve Edges", node_type: "dissolve_edges", icon: "dissolve" },
-        Tool { label: "Edge Collapse", node_type: "edge_collapse", icon: "edge_collapse" },
-        Tool { label: "Edge Flip", node_type: "edge_flip", icon: "edge_flip" },
-        Tool { label: "Edge Cusp", node_type: "edge_cusp", icon: "edge_cusp" },
-        Tool { label: "Crease", node_type: "crease", icon: "crease" },
-        Tool { label: "Edge Group", node_type: "edge_group", icon: "group" },
-        Tool { label: "Edge Group Promote", node_type: "edge_group_promote", icon: "group" },
-    ] },
-    Tab { name: "Deform", tools: &[
-        Tool { label: "Bend", node_type: "bend", icon: "bend" },
-        Tool { label: "Twist", node_type: "twist", icon: "twist" },
-        Tool { label: "Linear Taper", node_type: "linear_taper", icon: "taper" },
-        Tool { label: "Squash and Stretch", node_type: "squash_stretch", icon: "squash" },
-        Tool { label: "Soft Transform", node_type: "soft_transform", icon: "transform" },
-        Tool { label: "Soft Peak", node_type: "soft_peak", icon: "peak" },
-        Tool { label: "Smooth", node_type: "smooth", icon: "smooth" },
-        Tool { label: "Mountain", node_type: "noise", icon: "noise" },
-        Tool { label: "Lattice", node_type: "lattice", icon: "lattice" },
-        Tool { label: "Point Deform", node_type: "point_deform", icon: "lattice" },
-        Tool { label: "Path Deform", node_type: "path_deform", icon: "curve" },
-        Tool { label: "Point Jitter", node_type: "point_jitter", icon: "scatter" },
-        Tool { label: "Point Relax", node_type: "point_relax", icon: "scatter" },
-        Tool { label: "Blend", node_type: "blend", icon: "blend" },
-        Tool { label: "Exploded View", node_type: "exploded_view", icon: "fracture" },
-    ] },
-    Tab { name: "Texture", tools: &[
-        Tool { label: "UV Project", node_type: "uv_project", icon: "uv" },
-        Tool { label: "UV Flatten", node_type: "uv_flatten", icon: "uv" },
-        Tool { label: "UV Transform", node_type: "uv_transform", icon: "uv" },
-        Tool { label: "Color", node_type: "color", icon: "color" },
-    ] },
-    Tab { name: "Groups", tools: &[
-        Tool { label: "Group Create", node_type: "group_create", icon: "group" },
-        Tool { label: "Group Expand", node_type: "group_expand", icon: "group" },
-        Tool { label: "Grow / Shrink", node_type: "grow", icon: "group" },
-        Tool { label: "Select Path", node_type: "select_path", icon: "group" },
-        Tool { label: "Select Loop", node_type: "select_loop", icon: "group" },
-        Tool { label: "Select Ring", node_type: "select_ring", icon: "group" },
-        Tool { label: "Group Promote", node_type: "group_promote", icon: "group" },
-        Tool { label: "Group by Range", node_type: "group_range", icon: "group" },
-        Tool { label: "Blast", node_type: "blast", icon: "blast" },
-        Tool { label: "Delete", node_type: "delete", icon: "delete" },
-    ] },
-    Tab { name: "Attributes", tools: &[
-        Tool { label: "Wrangle", node_type: "wrangle", icon: "code" },
-        Tool { label: "Attribute Create", node_type: "attribute_create", icon: "attr" },
-        Tool { label: "Attribute Transfer", node_type: "attribute_transfer", icon: "attr" },
-        Tool { label: "Attribute Promote", node_type: "attribute_promote", icon: "attr" },
-        Tool { label: "Attribute Randomize", node_type: "attribute_randomize", icon: "attr" },
-        Tool { label: "Attribute Blur", node_type: "attribute_blur", icon: "attr" },
-        Tool { label: "Attribute Paint", node_type: "attrib_paint", icon: "attr" },
-        Tool { label: "Measure", node_type: "measure", icon: "measure" },
-        Tool { label: "Connectivity", node_type: "connectivity", icon: "connectivity" },
-        Tool { label: "Ray", node_type: "ray", icon: "ray" },
-        Tool { label: "Falloff", node_type: "falloff", icon: "falloff" },
-        Tool { label: "Occlusion", node_type: "occlusion", icon: "occlusion" },
-        Tool { label: "Python", node_type: "python", icon: "code" },
-    ] },
-    Tab { name: "Curves", tools: &[
-        Tool { label: "Bezier", node_type: "bezier", icon: "curve" },
-        Tool { label: "Polyline", node_type: "curve", icon: "curve" },
-        Tool { label: "Helix", node_type: "helix", icon: "helix" },
-        Tool { label: "Simplify Curve", node_type: "curve_simplify", icon: "curve_simplify" },
-        Tool { label: "Contour", node_type: "contour", icon: "curve" },
-        Tool { label: "Slice", node_type: "slice", icon: "curve" },
-        Tool { label: "Carve", node_type: "carve", icon: "carve" },
-        Tool { label: "Convert Line", node_type: "convert_line", icon: "line" },
-        Tool { label: "PolyPath", node_type: "polypath", icon: "curve" },
-        Tool { label: "Sweep", node_type: "sweep", icon: "sweep" },
-    ] },
-    Tab { name: "Points", tools: &[
-        Tool { label: "Scatter", node_type: "scatter", icon: "scatter" },
-        Tool { label: "Fuse", node_type: "fuse", icon: "fuse" },
-        Tool { label: "Delaunay", node_type: "delaunay", icon: "hull" },
-        Tool { label: "Point Jitter", node_type: "point_jitter", icon: "scatter" },
-        Tool { label: "Point Relax", node_type: "point_relax", icon: "scatter" },
-        Tool { label: "Points to Surface", node_type: "points_to_surface", icon: "points_to_surface" },
-    ] },
-    Tab { name: "Rigid Bodies", tools: &[
-        Tool { label: "RBD Material Fracture", node_type: "rbd_material_fracture", icon: "fracture" },
-        Tool { label: "Voronoi Fracture", node_type: "voronoi_fracture", icon: "fracture" },
-        Tool { label: "Voronoi Fracture Points", node_type: "voronoi_fracture_points", icon: "scatter" },
-        Tool { label: "Voronoi Split", node_type: "voronoi_split", icon: "fracture" },
-        Tool { label: "Voronoi Adjacency", node_type: "voronoi_adjacency", icon: "constraint" },
-        Tool { label: "Boolean Fracture", node_type: "boolean_fracture", icon: "fracture" },
-        Tool { label: "Convex Decomposition", node_type: "convex_decomposition", icon: "hull" },
-        Tool { label: "Assemble", node_type: "assemble", icon: "duplicate" },
-        Tool { label: "RBD Configure", node_type: "rbd_configure", icon: "solver" },
-        Tool { label: "RBD Solver", node_type: "rbd_solver", icon: "solver" },
-        Tool { label: "Exploded View", node_type: "exploded_view", icon: "fracture" },
-    ] },
-    Tab { name: "Constraints", tools: &[
-        Tool { label: "RBD Constraint", node_type: "rbd_constraint", icon: "constraint" },
-        Tool { label: "Glue Cluster", node_type: "glue_cluster", icon: "constraint" },
-        Tool { label: "RBD Constraint Properties", node_type: "rbd_constraint_properties", icon: "constraint" },
-        Tool { label: "Voronoi Adjacency", node_type: "voronoi_adjacency", icon: "constraint" },
-    ] },
-    Tab { name: "Terrain FX", tools: &[
-        Tool { label: "Grid", node_type: "grid", icon: "grid" },
-        Tool { label: "Mountain", node_type: "noise", icon: "noise" },
-        Tool { label: "Heightfield Erode", node_type: "heightfield_erode", icon: "terrain" },
-        Tool { label: "Scatter", node_type: "scatter", icon: "scatter" },
-    ] },
-    Tab { name: "Volume", tools: &[
-        Tool { label: "Remesh", node_type: "remesh", icon: "remesh" },
-        Tool { label: "SDF Shape", node_type: "sdf_shape", icon: "sdf_shape" },
-        Tool { label: "SDF Boolean", node_type: "sdf_boolean", icon: "boolean" },
-        Tool { label: "Points to Surface", node_type: "points_to_surface", icon: "points_to_surface" },
-    ] },
-    Tab { name: "PCG", tools: &[
-    ] },
-    Tab { name: "Procedural", tools: &[
-        Tool { label: "Building Rules", node_type: "building_rules", icon: "box" },
-        Tool { label: "Region Identify", node_type: "region_identify", icon: "connectivity" },
-        Tool { label: "Region Transform", node_type: "region_transform", icon: "transform" },
-        Tool { label: "Goal Length", node_type: "goal_length", icon: "constraint" },
-        Tool { label: "Goal Collision", node_type: "goal_collision", icon: "constraint" },
-        Tool { label: "Goal Surface", node_type: "goal_surface", icon: "constraint" },
-        Tool { label: "Goal Gravity", node_type: "goal_gravity", icon: "constraint" },
-        Tool { label: "Goal Pin", node_type: "goal_pin", icon: "constraint" },
-        Tool { label: "Goal Solve", node_type: "goal_solve", icon: "solver" },
-    ] },
-    Tab { name: "Flow", tools: &[
-        Tool { label: "Repeat", node_type: "loop_block", icon: "loop" },
-        Tool { label: "Loop Begin", node_type: "loop_begin", icon: "loop" },
-        Tool { label: "Loop End", node_type: "loop_end", icon: "loop" },
-        Tool { label: "For Each", node_type: "for_each", icon: "loop" },
-        Tool { label: "Solver", node_type: "solver", icon: "loop" },
-        Tool { label: "Switch", node_type: "switch", icon: "switch" },
-    ] },
-    Tab { name: "Measure", tools: &[
-    ] },
-    Tab { name: "Library", tools: &[
-    ] },
-];
+
+#[derive(Deserialize)]
+struct Placement { id: String, label: Option<String>, icon: Option<String> }
+#[derive(Deserialize)]
+struct LayoutTab { name: String, tools: Vec<Placement> }
+
+fn layout() -> &'static [LayoutTab] {
+    static LAYOUT: OnceLock<Vec<LayoutTab>> = OnceLock::new();
+    LAYOUT.get_or_init(|| serde_json::from_str(include_str!("shelf_layout.json")).expect("shelf layout"))
+}
+
+fn permanent(value: &str) -> &'static str { Box::leak(value.to_owned().into_boxed_str()) }
+
+fn build(catalogue: &[NodeCatalogueEntry], append_new: bool) -> Vec<Tab> {
+    layout().iter().map(|tab| {
+        let mut tools: Vec<Tool> = tab.tools.iter().map(|placement| {
+            let package = catalogue.iter().find(|node| node.id == placement.id);
+            Tool {
+                label: package.map(|node| node.name).or_else(|| placement.label.as_deref()).map(permanent).unwrap_or_else(|| permanent(&placement.id)),
+                node_type: permanent(&placement.id),
+                icon: placement.icon.as_deref().map(permanent).unwrap_or_else(|| permanent(&placement.id)),
+            }
+        }).collect();
+        if append_new {
+            for node in catalogue.iter().filter(|node| node.category == tab.name) {
+                if tools.iter().any(|tool| tool.node_type == node.id) { continue; }
+                tools.push(Tool { label: node.name, node_type: node.id, icon: node.id });
+            }
+        }
+        Tab { name: permanent(&tab.name), tools: Box::leak(tools.into_boxed_slice()) }
+    }).collect()
+}
+
+pub(super) fn legacy_tabs() -> &'static [Tab] {
+    static LEGACY: OnceLock<Vec<Tab>> = OnceLock::new();
+    LEGACY.get_or_init(|| build(package_catalogue(), false))
+}
 
 pub(super) fn tabs() -> &'static [Tab] {
-    static MERGED: std::sync::OnceLock<Vec<Tab>> = std::sync::OnceLock::new();
-    MERGED.get_or_init(|| TABS.iter().map(|tab| {
-        let mut tools = tab.tools.to_vec();
-        for node in minihou_core::nodes::package_catalogue().iter().filter(|node| node.category == tab.name) {
-            if tools.iter().any(|tool| tool.node_type == node.id) { continue; }
-            tools.push(Tool { label: node.name, node_type: node.id, icon: node.id });
-        }
-        Tab { name: tab.name, tools: Box::leak(tools.into_boxed_slice()) }
-    }).collect())
+    static TABS: OnceLock<Vec<Tab>> = OnceLock::new();
+    TABS.get_or_init(|| build(package_catalogue(), true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_shelf_matches_existing_positions_labels_and_icons() {
+        let expected: serde_json::Value = serde_json::from_str(include_str!("shelf_snapshot.json")).unwrap();
+        let actual: Vec<_> = tabs().iter().map(|tab| serde_json::json!({
+            "name": tab.name,
+            "tools": tab.tools.iter().map(|tool| [tool.label, tool.node_type, tool.icon]).collect::<Vec<_>>()
+        })).collect();
+        assert_eq!(serde_json::json!(actual), expected);
+    }
+
+    #[test]
+    fn newly_registered_package_appears_without_a_shelf_entry() {
+        let added = NodeCatalogueEntry { id: "future_package", name: "Future Package", category: "Create", description: "", keywords: "" };
+        let mut catalogue: Vec<_> = package_catalogue().iter().map(|node| NodeCatalogueEntry {
+            id: node.id, name: node.name, category: node.category, description: node.description, keywords: node.keywords,
+        }).collect();
+        catalogue.push(added);
+        let generated = build(&catalogue, true);
+        let create = generated.iter().find(|tab| tab.name == "Create").unwrap();
+        assert_eq!(create.tools.last().map(|tool| (tool.label, tool.node_type, tool.icon)),
+            Some(("Future Package", "future_package", "future_package")));
+    }
 }

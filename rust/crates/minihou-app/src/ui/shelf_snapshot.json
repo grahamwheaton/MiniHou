@@ -1,0 +1,1292 @@
+[
+  {
+    "name": "Create",
+    "tools": [
+      [
+        "Box",
+        "box",
+        "box"
+      ],
+      [
+        "Sphere",
+        "sphere",
+        "sphere"
+      ],
+      [
+        "Tube",
+        "tube",
+        "tube"
+      ],
+      [
+        "Torus",
+        "torus",
+        "torus"
+      ],
+      [
+        "Grid",
+        "grid",
+        "grid"
+      ],
+      [
+        "Null",
+        "null",
+        "null"
+      ],
+      [
+        "Circle",
+        "circle",
+        "circle"
+      ],
+      [
+        "Bezier",
+        "bezier",
+        "curve"
+      ],
+      [
+        "Polyline",
+        "curve",
+        "curve"
+      ],
+      [
+        "Rectangle",
+        "sketch_rectangle",
+        "box"
+      ],
+      [
+        "Polygon",
+        "sketch_polygon",
+        "circle"
+      ],
+      [
+        "Helix",
+        "helix",
+        "helix"
+      ],
+      [
+        "L-System",
+        "lsystem",
+        "lsystem"
+      ],
+      [
+        "Lattice Grid",
+        "lattice_grid",
+        "lattice"
+      ],
+      [
+        "Metaball",
+        "points_to_surface",
+        "points_to_surface"
+      ],
+      [
+        "Blender Object",
+        "blender_object",
+        "file"
+      ],
+      [
+        "Blender Image",
+        "blender_image",
+        "file"
+      ],
+      [
+        "Image File",
+        "image_file",
+        "file"
+      ],
+      [
+        "USD Import",
+        "usd_import",
+        "file"
+      ],
+      [
+        "Host Mesh",
+        "modifier_input",
+        "host"
+      ],
+      [
+        "Controller",
+        "controller",
+        "null"
+      ],
+      [
+        "Object Input",
+        "object_input",
+        "host"
+      ],
+      [
+        "Line",
+        "line",
+        "line"
+      ],
+      [
+        "Point",
+        "point",
+        "point"
+      ]
+    ]
+  },
+  {
+    "name": "Modify",
+    "tools": [
+      [
+        "LOD Bake",
+        "lod_bake",
+        "null"
+      ],
+      [
+        "Transform",
+        "transform",
+        "transform"
+      ],
+      [
+        "Merge",
+        "merge",
+        "merge"
+      ],
+      [
+        "Duplicate",
+        "copy_transform",
+        "duplicate"
+      ],
+      [
+        "Copy to Points",
+        "copy_to_points",
+        "copy_to_points"
+      ],
+      [
+        "Instance",
+        "instance",
+        "instance"
+      ],
+      [
+        "Switch",
+        "switch",
+        "switch"
+      ],
+      [
+        "Match Size",
+        "match_size",
+        "match_size"
+      ],
+      [
+        "Blast",
+        "blast",
+        "blast"
+      ],
+      [
+        "Delete",
+        "delete",
+        "delete"
+      ],
+      [
+        "Fuse",
+        "fuse",
+        "fuse"
+      ],
+      [
+        "Clean",
+        "clean",
+        "clean"
+      ],
+      [
+        "Sort",
+        "sort",
+        "sort"
+      ],
+      [
+        "Null",
+        "null",
+        "null"
+      ],
+      [
+        "Output",
+        "output",
+        "output"
+      ],
+      [
+        "Scene Objects",
+        "scene_objects",
+        "output"
+      ],
+      [
+        "Image Out",
+        "image_out",
+        "output"
+      ],
+      [
+        "USD Export",
+        "usd_export",
+        "output"
+      ],
+      [
+        "Input",
+        "input",
+        "host"
+      ],
+      [
+        "Bound",
+        "bound",
+        "bound"
+      ],
+      [
+        "Cache",
+        "cache",
+        "cache"
+      ],
+      [
+        "Example Offset",
+        "example_offset",
+        "example_offset"
+      ],
+      [
+        "Extract Centroid",
+        "extract_centroid",
+        "extract_centroid"
+      ],
+      [
+        "Facet",
+        "facet",
+        "facet"
+      ],
+      [
+        "Loop Circle",
+        "loop_circle",
+        "loop_circle"
+      ],
+      [
+        "Loop Curve",
+        "loop_curve",
+        "loop_curve"
+      ],
+      [
+        "Loop Flatten",
+        "loop_flatten",
+        "loop_flatten"
+      ],
+      [
+        "Loop Relax",
+        "loop_relax",
+        "loop_relax"
+      ],
+      [
+        "Loop Space",
+        "loop_space",
+        "loop_space"
+      ],
+      [
+        "Normal",
+        "normal",
+        "normal"
+      ],
+      [
+        "Pack",
+        "pack",
+        "pack"
+      ],
+      [
+        "Peak",
+        "peak",
+        "peak"
+      ],
+      [
+        "Flip Faces",
+        "reverse",
+        "reverse"
+      ],
+      [
+        "Split",
+        "split",
+        "split"
+      ],
+      [
+        "Unpack",
+        "unpack",
+        "unpack"
+      ],
+      [
+        "Vertex Bevel",
+        "vertex_bevel",
+        "vertex_bevel"
+      ]
+    ]
+  },
+  {
+    "name": "Model",
+    "tools": [
+      [
+        "Boolean",
+        "boolean",
+        "boolean"
+      ],
+      [
+        "Clip",
+        "clip",
+        "clip"
+      ],
+      [
+        "Mirror",
+        "mirror",
+        "mirror"
+      ],
+      [
+        "Array",
+        "array",
+        "copy_to_points"
+      ],
+      [
+        "Subdivide",
+        "subdivide",
+        "subdivide"
+      ],
+      [
+        "Skin",
+        "skin",
+        "skin"
+      ],
+      [
+        "Skin Profiles",
+        "skin_profiles",
+        "skin"
+      ],
+      [
+        "Revolve",
+        "revolve",
+        "revolve"
+      ],
+      [
+        "Sweep",
+        "sweep",
+        "sweep"
+      ],
+      [
+        "PolyReduce",
+        "polyreduce",
+        "polyreduce"
+      ],
+      [
+        "Convex Hull",
+        "convex_hull",
+        "convex_hull"
+      ],
+      [
+        "Remesh",
+        "remesh",
+        "remesh"
+      ]
+    ]
+  },
+  {
+    "name": "Polygon",
+    "tools": [
+      [
+        "PolyExtrude",
+        "polyextrude",
+        "polyextrude"
+      ],
+      [
+        "Push / Pull",
+        "pushpull",
+        "polyextrude"
+      ],
+      [
+        "Inset",
+        "inset",
+        "polyexpand2d"
+      ],
+      [
+        "Outset",
+        "outset",
+        "polyexpand2d"
+      ],
+      [
+        "PolyBevel",
+        "polybevel",
+        "polybevel"
+      ],
+      [
+        "Solidify",
+        "solidify",
+        "polyextrude"
+      ],
+      [
+        "PolySplit",
+        "polysplit",
+        "polysplit"
+      ],
+      [
+        "Loop Cut",
+        "loop_cut",
+        "polysplit"
+      ],
+      [
+        "Edge Slide",
+        "edge_slide",
+        "edge_flip"
+      ],
+      [
+        "Knife",
+        "knife",
+        "polysplit"
+      ],
+      [
+        "PolyFill",
+        "polyfill",
+        "polyfill"
+      ],
+      [
+        "PolyBridge",
+        "polybridge",
+        "polybridge"
+      ],
+      [
+        "PolyExpand2D",
+        "polyexpand2d",
+        "polyexpand2d"
+      ],
+      [
+        "Dissolve",
+        "dissolve",
+        "dissolve"
+      ],
+      [
+        "Divide",
+        "divide",
+        "divide"
+      ],
+      [
+        "Grid Fill",
+        "grid_fill",
+        "polyfill"
+      ],
+      [
+        "Recalculate Normals",
+        "recalc_normals",
+        "reverse"
+      ],
+      [
+        "Tris to Quads",
+        "tris_to_quads",
+        "dissolve"
+      ],
+      [
+        "Bridge",
+        "bridge",
+        "polybridge"
+      ],
+      [
+        "Normal",
+        "normal",
+        "normal"
+      ],
+      [
+        "Clean",
+        "clean",
+        "clean"
+      ],
+      [
+        "Dissolve Flat Edges",
+        "dissolve_flat_edges",
+        "dissolve_flat_edges"
+      ]
+    ]
+  },
+  {
+    "name": "Edges",
+    "tools": [
+      [
+        "Dissolve Edges",
+        "dissolve_edges",
+        "dissolve"
+      ],
+      [
+        "Edge Collapse",
+        "edge_collapse",
+        "edge_collapse"
+      ],
+      [
+        "Edge Flip",
+        "edge_flip",
+        "edge_flip"
+      ],
+      [
+        "Edge Cusp",
+        "edge_cusp",
+        "edge_cusp"
+      ],
+      [
+        "Crease",
+        "crease",
+        "crease"
+      ],
+      [
+        "Edge Group",
+        "edge_group",
+        "group"
+      ],
+      [
+        "Edge Group Promote",
+        "edge_group_promote",
+        "group"
+      ]
+    ]
+  },
+  {
+    "name": "Deform",
+    "tools": [
+      [
+        "Bend",
+        "bend",
+        "bend"
+      ],
+      [
+        "Twist",
+        "twist",
+        "twist"
+      ],
+      [
+        "Linear Taper",
+        "linear_taper",
+        "taper"
+      ],
+      [
+        "Squash and Stretch",
+        "squash_stretch",
+        "squash"
+      ],
+      [
+        "Soft Transform",
+        "soft_transform",
+        "transform"
+      ],
+      [
+        "Soft Peak",
+        "soft_peak",
+        "peak"
+      ],
+      [
+        "Smooth",
+        "smooth",
+        "smooth"
+      ],
+      [
+        "Mountain",
+        "noise",
+        "noise"
+      ],
+      [
+        "Lattice",
+        "lattice",
+        "lattice"
+      ],
+      [
+        "Point Deform",
+        "point_deform",
+        "lattice"
+      ],
+      [
+        "Path Deform",
+        "path_deform",
+        "curve"
+      ],
+      [
+        "Point Jitter",
+        "point_jitter",
+        "scatter"
+      ],
+      [
+        "Point Relax",
+        "point_relax",
+        "scatter"
+      ],
+      [
+        "Blend",
+        "blend",
+        "blend"
+      ],
+      [
+        "Exploded View",
+        "exploded_view",
+        "fracture"
+      ],
+      [
+        "Bulge",
+        "bulge",
+        "bulge"
+      ],
+      [
+        "Fractal",
+        "fractal",
+        "fractal"
+      ],
+      [
+        "Ripple",
+        "ripple",
+        "ripple"
+      ],
+      [
+        "Waves",
+        "waves",
+        "waves"
+      ]
+    ]
+  },
+  {
+    "name": "Texture",
+    "tools": [
+      [
+        "UV Project",
+        "uv_project",
+        "uv"
+      ],
+      [
+        "UV Flatten",
+        "uv_flatten",
+        "uv"
+      ],
+      [
+        "UV Transform",
+        "uv_transform",
+        "uv"
+      ],
+      [
+        "Color",
+        "color",
+        "color"
+      ],
+      [
+        "Image Density",
+        "image_density",
+        "image_density"
+      ]
+    ]
+  },
+  {
+    "name": "Groups",
+    "tools": [
+      [
+        "Group Create",
+        "group_create",
+        "group"
+      ],
+      [
+        "Group Expand",
+        "group_expand",
+        "group"
+      ],
+      [
+        "Grow / Shrink",
+        "grow",
+        "group"
+      ],
+      [
+        "Select Path",
+        "select_path",
+        "group"
+      ],
+      [
+        "Select Loop",
+        "select_loop",
+        "group"
+      ],
+      [
+        "Select Ring",
+        "select_ring",
+        "group"
+      ],
+      [
+        "Group Promote",
+        "group_promote",
+        "group"
+      ],
+      [
+        "Group by Range",
+        "group_range",
+        "group"
+      ],
+      [
+        "Blast",
+        "blast",
+        "blast"
+      ],
+      [
+        "Delete",
+        "delete",
+        "delete"
+      ],
+      [
+        "Boundary Select",
+        "boundary_select",
+        "boundary_select"
+      ],
+      [
+        "Advanced Flood Fill",
+        "flood_fill",
+        "flood_fill"
+      ],
+      [
+        "Select Sharp Edges",
+        "select_sharp_edges",
+        "select_sharp_edges"
+      ]
+    ]
+  },
+  {
+    "name": "Attributes",
+    "tools": [
+      [
+        "Wrangle",
+        "wrangle",
+        "code"
+      ],
+      [
+        "Attribute Create",
+        "attribute_create",
+        "attr"
+      ],
+      [
+        "Attribute Transfer",
+        "attribute_transfer",
+        "attr"
+      ],
+      [
+        "Attribute Promote",
+        "attribute_promote",
+        "attr"
+      ],
+      [
+        "Attribute Randomize",
+        "attribute_randomize",
+        "attr"
+      ],
+      [
+        "Attribute Blur",
+        "attribute_blur",
+        "attr"
+      ],
+      [
+        "Attribute Paint",
+        "attrib_paint",
+        "attr"
+      ],
+      [
+        "Measure",
+        "measure",
+        "measure"
+      ],
+      [
+        "Connectivity",
+        "connectivity",
+        "connectivity"
+      ],
+      [
+        "Ray",
+        "ray",
+        "ray"
+      ],
+      [
+        "Falloff",
+        "falloff",
+        "falloff"
+      ],
+      [
+        "Occlusion",
+        "occlusion",
+        "occlusion"
+      ],
+      [
+        "Python",
+        "python",
+        "code"
+      ],
+      [
+        "Attribute Delete",
+        "attribute_delete",
+        "attribute_delete"
+      ],
+      [
+        "Attribute Rename",
+        "attribute_rename",
+        "attribute_rename"
+      ],
+      [
+        "Color",
+        "color",
+        "color"
+      ],
+      [
+        "Set Material",
+        "set_material",
+        "set_material"
+      ],
+      [
+        "Smooth",
+        "smooth",
+        "smooth"
+      ],
+      [
+        "Sort",
+        "sort",
+        "sort"
+      ]
+    ]
+  },
+  {
+    "name": "Curves",
+    "tools": [
+      [
+        "Bezier",
+        "bezier",
+        "curve"
+      ],
+      [
+        "Polyline",
+        "curve",
+        "curve"
+      ],
+      [
+        "Helix",
+        "helix",
+        "helix"
+      ],
+      [
+        "Simplify Curve",
+        "curve_simplify",
+        "curve_simplify"
+      ],
+      [
+        "Contour",
+        "contour",
+        "curve"
+      ],
+      [
+        "Slice",
+        "slice",
+        "curve"
+      ],
+      [
+        "Carve",
+        "carve",
+        "carve"
+      ],
+      [
+        "Convert Line",
+        "convert_line",
+        "line"
+      ],
+      [
+        "PolyPath",
+        "polypath",
+        "curve"
+      ],
+      [
+        "Sweep",
+        "sweep",
+        "sweep"
+      ],
+      [
+        "Fillet",
+        "fillet",
+        "fillet"
+      ],
+      [
+        "Resample",
+        "resample",
+        "resample"
+      ]
+    ]
+  },
+  {
+    "name": "Points",
+    "tools": [
+      [
+        "Scatter",
+        "scatter",
+        "scatter"
+      ],
+      [
+        "Fuse",
+        "fuse",
+        "fuse"
+      ],
+      [
+        "Delaunay",
+        "delaunay",
+        "hull"
+      ],
+      [
+        "Point Jitter",
+        "point_jitter",
+        "scatter"
+      ],
+      [
+        "Point Relax",
+        "point_relax",
+        "scatter"
+      ],
+      [
+        "Points to Surface",
+        "points_to_surface",
+        "points_to_surface"
+      ]
+    ]
+  },
+  {
+    "name": "Rigid Bodies",
+    "tools": [
+      [
+        "RBD Material Fracture",
+        "rbd_material_fracture",
+        "fracture"
+      ],
+      [
+        "Voronoi Fracture",
+        "voronoi_fracture",
+        "fracture"
+      ],
+      [
+        "Voronoi Fracture Points",
+        "voronoi_fracture_points",
+        "scatter"
+      ],
+      [
+        "Voronoi Split",
+        "voronoi_split",
+        "fracture"
+      ],
+      [
+        "Voronoi Adjacency",
+        "voronoi_adjacency",
+        "constraint"
+      ],
+      [
+        "Boolean Fracture",
+        "boolean_fracture",
+        "fracture"
+      ],
+      [
+        "Convex Decomposition",
+        "convex_decomposition",
+        "hull"
+      ],
+      [
+        "Assemble",
+        "assemble",
+        "duplicate"
+      ],
+      [
+        "RBD Configure",
+        "rbd_configure",
+        "solver"
+      ],
+      [
+        "RBD Solver",
+        "rbd_solver",
+        "solver"
+      ],
+      [
+        "Exploded View",
+        "exploded_view",
+        "fracture"
+      ]
+    ]
+  },
+  {
+    "name": "Constraints",
+    "tools": [
+      [
+        "RBD Constraint",
+        "rbd_constraint",
+        "constraint"
+      ],
+      [
+        "Glue Cluster",
+        "glue_cluster",
+        "constraint"
+      ],
+      [
+        "RBD Constraint Properties",
+        "rbd_constraint_properties",
+        "constraint"
+      ],
+      [
+        "Voronoi Adjacency",
+        "voronoi_adjacency",
+        "constraint"
+      ]
+    ]
+  },
+  {
+    "name": "Terrain FX",
+    "tools": [
+      [
+        "Grid",
+        "grid",
+        "grid"
+      ],
+      [
+        "Mountain",
+        "noise",
+        "noise"
+      ],
+      [
+        "Heightfield Erode",
+        "heightfield_erode",
+        "terrain"
+      ],
+      [
+        "Scatter",
+        "scatter",
+        "scatter"
+      ]
+    ]
+  },
+  {
+    "name": "Volume",
+    "tools": [
+      [
+        "Remesh",
+        "remesh",
+        "remesh"
+      ],
+      [
+        "SDF Shape",
+        "sdf_shape",
+        "sdf_shape"
+      ],
+      [
+        "SDF Boolean",
+        "sdf_boolean",
+        "boolean"
+      ],
+      [
+        "Points to Surface",
+        "points_to_surface",
+        "points_to_surface"
+      ]
+    ]
+  },
+  {
+    "name": "PCG",
+    "tools": [
+      [
+        "PCG Bounds",
+        "pcg_bounds",
+        "pcg_bounds"
+      ],
+      [
+        "PCG Copy Points",
+        "pcg_copy_points",
+        "pcg_copy_points"
+      ],
+      [
+        "PCG Debug",
+        "pcg_debug",
+        "pcg_debug"
+      ],
+      [
+        "PCG Density Filter",
+        "pcg_density_filter",
+        "pcg_density_filter"
+      ],
+      [
+        "PCG Density Noise",
+        "pcg_density_noise",
+        "pcg_density_noise"
+      ],
+      [
+        "PCG Difference",
+        "pcg_difference",
+        "pcg_difference"
+      ],
+      [
+        "PCG Distance",
+        "pcg_distance",
+        "pcg_distance"
+      ],
+      [
+        "PCG Intersection",
+        "pcg_intersection",
+        "pcg_intersection"
+      ],
+      [
+        "PCG Points",
+        "pcg_points",
+        "pcg_points"
+      ],
+      [
+        "PCG Projection",
+        "pcg_projection",
+        "pcg_projection"
+      ],
+      [
+        "PCG Self Prune",
+        "pcg_self_prune",
+        "pcg_self_prune"
+      ],
+      [
+        "PCG Spawner",
+        "pcg_spawner",
+        "pcg_spawner"
+      ],
+      [
+        "PCG Spline Sampler",
+        "pcg_spline_sampler",
+        "pcg_spline_sampler"
+      ],
+      [
+        "PCG Surface Sampler",
+        "pcg_surface_sampler",
+        "pcg_surface_sampler"
+      ],
+      [
+        "PCG Transform",
+        "pcg_transform",
+        "pcg_transform"
+      ],
+      [
+        "PCG Union",
+        "pcg_union",
+        "pcg_union"
+      ],
+      [
+        "PCG Volume Sampler",
+        "pcg_volume_sampler",
+        "pcg_volume_sampler"
+      ]
+    ]
+  },
+  {
+    "name": "Procedural",
+    "tools": [
+      [
+        "Building Rules",
+        "building_rules",
+        "box"
+      ],
+      [
+        "Region Identify",
+        "region_identify",
+        "connectivity"
+      ],
+      [
+        "Region Transform",
+        "region_transform",
+        "transform"
+      ],
+      [
+        "Goal Length",
+        "goal_length",
+        "constraint"
+      ],
+      [
+        "Goal Collision",
+        "goal_collision",
+        "constraint"
+      ],
+      [
+        "Goal Surface",
+        "goal_surface",
+        "constraint"
+      ],
+      [
+        "Goal Gravity",
+        "goal_gravity",
+        "constraint"
+      ],
+      [
+        "Goal Pin",
+        "goal_pin",
+        "constraint"
+      ],
+      [
+        "Goal Solve",
+        "goal_solve",
+        "solver"
+      ]
+    ]
+  },
+  {
+    "name": "Flow",
+    "tools": [
+      [
+        "Repeat",
+        "loop_block",
+        "loop"
+      ],
+      [
+        "Loop Begin",
+        "loop_begin",
+        "loop"
+      ],
+      [
+        "Loop End",
+        "loop_end",
+        "loop"
+      ],
+      [
+        "For Each",
+        "for_each",
+        "loop"
+      ],
+      [
+        "Solver",
+        "solver",
+        "loop"
+      ],
+      [
+        "Switch",
+        "switch",
+        "switch"
+      ],
+      [
+        "Switch-If",
+        "switchif",
+        "switchif"
+      ]
+    ]
+  },
+  {
+    "name": "Measure",
+    "tools": [
+      [
+        "Measure Area",
+        "measure_area",
+        "measure_area"
+      ],
+      [
+        "Measure Bounds",
+        "measure_bounds",
+        "measure_bounds"
+      ],
+      [
+        "Measure Distance",
+        "measure_distance",
+        "measure_distance"
+      ],
+      [
+        "Measure Length",
+        "measure_length",
+        "measure_length"
+      ],
+      [
+        "Measure Volume",
+        "measure_volume",
+        "measure_volume"
+      ]
+    ]
+  },
+  {
+    "name": "Library",
+    "tools": [
+      [
+        "Controller",
+        "controller",
+        "controller"
+      ],
+      [
+        "Subnet",
+        "subnet",
+        "subnet"
+      ]
+    ]
+  }
+]

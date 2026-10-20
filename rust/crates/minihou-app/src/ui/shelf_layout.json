@@ -1,0 +1,870 @@
+[
+  {
+    "name": "Create",
+    "tools": [
+      {
+        "id": "box",
+        "label": "Box"
+      },
+      {
+        "id": "sphere",
+        "label": "Sphere"
+      },
+      {
+        "id": "tube",
+        "label": "Tube"
+      },
+      {
+        "id": "torus",
+        "label": "Torus"
+      },
+      {
+        "id": "grid",
+        "label": "Grid"
+      },
+      {
+        "id": "null",
+        "label": "Null"
+      },
+      {
+        "id": "circle",
+        "label": "Circle"
+      },
+      {
+        "id": "bezier",
+        "icon": "curve"
+      },
+      {
+        "id": "curve",
+        "label": "Polyline"
+      },
+      {
+        "id": "sketch_rectangle",
+        "label": "Rectangle",
+        "icon": "box"
+      },
+      {
+        "id": "sketch_polygon",
+        "label": "Polygon",
+        "icon": "circle"
+      },
+      {
+        "id": "helix"
+      },
+      {
+        "id": "lsystem"
+      },
+      {
+        "id": "lattice_grid",
+        "label": "Lattice Grid",
+        "icon": "lattice"
+      },
+      {
+        "id": "points_to_surface",
+        "label": "Metaball"
+      },
+      {
+        "id": "blender_object",
+        "label": "Blender Object",
+        "icon": "file"
+      },
+      {
+        "id": "blender_image",
+        "label": "Blender Image",
+        "icon": "file"
+      },
+      {
+        "id": "image_file",
+        "label": "Image File",
+        "icon": "file"
+      },
+      {
+        "id": "usd_import",
+        "label": "USD Import",
+        "icon": "file"
+      },
+      {
+        "id": "modifier_input",
+        "label": "Host Mesh",
+        "icon": "host"
+      },
+      {
+        "id": "controller",
+        "icon": "null"
+      },
+      {
+        "id": "object_input",
+        "label": "Object Input",
+        "icon": "host"
+      }
+    ]
+  },
+  {
+    "name": "Modify",
+    "tools": [
+      {
+        "id": "lod_bake",
+        "label": "LOD Bake",
+        "icon": "null"
+      },
+      {
+        "id": "transform",
+        "label": "Transform"
+      },
+      {
+        "id": "merge",
+        "label": "Merge"
+      },
+      {
+        "id": "copy_transform",
+        "label": "Duplicate",
+        "icon": "duplicate"
+      },
+      {
+        "id": "copy_to_points",
+        "label": "Copy to Points"
+      },
+      {
+        "id": "instance",
+        "label": "Instance"
+      },
+      {
+        "id": "switch"
+      },
+      {
+        "id": "match_size"
+      },
+      {
+        "id": "blast"
+      },
+      {
+        "id": "delete",
+        "label": "Delete"
+      },
+      {
+        "id": "fuse"
+      },
+      {
+        "id": "clean"
+      },
+      {
+        "id": "sort"
+      },
+      {
+        "id": "null",
+        "label": "Null"
+      },
+      {
+        "id": "output",
+        "label": "Output"
+      },
+      {
+        "id": "scene_objects",
+        "label": "Scene Objects",
+        "icon": "output"
+      },
+      {
+        "id": "image_out",
+        "label": "Image Out",
+        "icon": "output"
+      },
+      {
+        "id": "usd_export",
+        "label": "USD Export",
+        "icon": "output"
+      },
+      {
+        "id": "input",
+        "label": "Input",
+        "icon": "host"
+      }
+    ]
+  },
+  {
+    "name": "Model",
+    "tools": [
+      {
+        "id": "boolean",
+        "label": "Boolean"
+      },
+      {
+        "id": "clip",
+        "label": "Clip"
+      },
+      {
+        "id": "mirror",
+        "label": "Mirror"
+      },
+      {
+        "id": "array",
+        "label": "Array",
+        "icon": "copy_to_points"
+      },
+      {
+        "id": "subdivide",
+        "label": "Subdivide"
+      },
+      {
+        "id": "skin",
+        "label": "Skin"
+      },
+      {
+        "id": "skin_profiles",
+        "label": "Skin Profiles",
+        "icon": "skin"
+      },
+      {
+        "id": "revolve",
+        "label": "Revolve"
+      },
+      {
+        "id": "sweep",
+        "label": "Sweep"
+      },
+      {
+        "id": "polyreduce",
+        "label": "PolyReduce"
+      },
+      {
+        "id": "convex_hull",
+        "label": "Convex Hull"
+      },
+      {
+        "id": "remesh",
+        "label": "Remesh"
+      }
+    ]
+  },
+  {
+    "name": "Polygon",
+    "tools": [
+      {
+        "id": "polyextrude",
+        "label": "PolyExtrude"
+      },
+      {
+        "id": "pushpull",
+        "label": "Push / Pull",
+        "icon": "polyextrude"
+      },
+      {
+        "id": "inset",
+        "label": "Inset",
+        "icon": "polyexpand2d"
+      },
+      {
+        "id": "outset",
+        "label": "Outset",
+        "icon": "polyexpand2d"
+      },
+      {
+        "id": "polybevel",
+        "label": "PolyBevel"
+      },
+      {
+        "id": "solidify",
+        "label": "Solidify",
+        "icon": "polyextrude"
+      },
+      {
+        "id": "polysplit",
+        "label": "PolySplit"
+      },
+      {
+        "id": "loop_cut",
+        "label": "Loop Cut",
+        "icon": "polysplit"
+      },
+      {
+        "id": "edge_slide",
+        "label": "Edge Slide",
+        "icon": "edge_flip"
+      },
+      {
+        "id": "knife",
+        "label": "Knife",
+        "icon": "polysplit"
+      },
+      {
+        "id": "polyfill",
+        "label": "PolyFill"
+      },
+      {
+        "id": "polybridge",
+        "label": "PolyBridge"
+      },
+      {
+        "id": "polyexpand2d",
+        "label": "PolyExpand2D"
+      },
+      {
+        "id": "dissolve",
+        "label": "Dissolve"
+      },
+      {
+        "id": "divide",
+        "label": "Divide"
+      },
+      {
+        "id": "grid_fill",
+        "label": "Grid Fill",
+        "icon": "polyfill"
+      },
+      {
+        "id": "recalc_normals",
+        "label": "Recalculate Normals",
+        "icon": "reverse"
+      },
+      {
+        "id": "tris_to_quads",
+        "label": "Tris to Quads",
+        "icon": "dissolve"
+      },
+      {
+        "id": "bridge",
+        "label": "Bridge",
+        "icon": "polybridge"
+      },
+      {
+        "id": "normal"
+      }
+    ]
+  },
+  {
+    "name": "Edges",
+    "tools": [
+      {
+        "id": "dissolve_edges",
+        "label": "Dissolve Edges",
+        "icon": "dissolve"
+      },
+      {
+        "id": "edge_collapse",
+        "label": "Edge Collapse"
+      },
+      {
+        "id": "edge_flip",
+        "label": "Edge Flip"
+      },
+      {
+        "id": "edge_cusp",
+        "label": "Edge Cusp"
+      },
+      {
+        "id": "crease",
+        "label": "Crease"
+      },
+      {
+        "id": "edge_group",
+        "label": "Edge Group",
+        "icon": "group"
+      },
+      {
+        "id": "edge_group_promote",
+        "label": "Edge Group Promote",
+        "icon": "group"
+      }
+    ]
+  },
+  {
+    "name": "Deform",
+    "tools": [
+      {
+        "id": "bend"
+      },
+      {
+        "id": "twist",
+        "label": "Twist"
+      },
+      {
+        "id": "linear_taper",
+        "label": "Linear Taper",
+        "icon": "taper"
+      },
+      {
+        "id": "squash_stretch",
+        "label": "Squash and Stretch",
+        "icon": "squash"
+      },
+      {
+        "id": "soft_transform",
+        "label": "Soft Transform",
+        "icon": "transform"
+      },
+      {
+        "id": "soft_peak",
+        "label": "Soft Peak",
+        "icon": "peak"
+      },
+      {
+        "id": "smooth"
+      },
+      {
+        "id": "noise",
+        "label": "Mountain"
+      },
+      {
+        "id": "lattice",
+        "label": "Lattice"
+      },
+      {
+        "id": "point_deform",
+        "label": "Point Deform",
+        "icon": "lattice"
+      },
+      {
+        "id": "path_deform",
+        "label": "Path Deform",
+        "icon": "curve"
+      },
+      {
+        "id": "point_jitter",
+        "icon": "scatter"
+      },
+      {
+        "id": "point_relax",
+        "icon": "scatter"
+      },
+      {
+        "id": "blend",
+        "label": "Blend"
+      },
+      {
+        "id": "exploded_view",
+        "label": "Exploded View",
+        "icon": "fracture"
+      }
+    ]
+  },
+  {
+    "name": "Texture",
+    "tools": [
+      {
+        "id": "uv_project",
+        "label": "UV Project",
+        "icon": "uv"
+      },
+      {
+        "id": "uv_flatten",
+        "label": "UV Flatten",
+        "icon": "uv"
+      },
+      {
+        "id": "uv_transform",
+        "label": "UV Transform",
+        "icon": "uv"
+      },
+      {
+        "id": "color"
+      }
+    ]
+  },
+  {
+    "name": "Groups",
+    "tools": [
+      {
+        "id": "group_create",
+        "icon": "group"
+      },
+      {
+        "id": "group_expand",
+        "icon": "group"
+      },
+      {
+        "id": "grow",
+        "label": "Grow / Shrink",
+        "icon": "group"
+      },
+      {
+        "id": "select_path",
+        "label": "Select Path",
+        "icon": "group"
+      },
+      {
+        "id": "select_loop",
+        "label": "Select Loop",
+        "icon": "group"
+      },
+      {
+        "id": "select_ring",
+        "label": "Select Ring",
+        "icon": "group"
+      },
+      {
+        "id": "group_promote",
+        "icon": "group"
+      },
+      {
+        "id": "group_range",
+        "label": "Group by Range",
+        "icon": "group"
+      },
+      {
+        "id": "blast"
+      },
+      {
+        "id": "delete",
+        "label": "Delete"
+      }
+    ]
+  },
+  {
+    "name": "Attributes",
+    "tools": [
+      {
+        "id": "wrangle",
+        "label": "Wrangle",
+        "icon": "code"
+      },
+      {
+        "id": "attribute_create",
+        "icon": "attr"
+      },
+      {
+        "id": "attribute_transfer",
+        "icon": "attr"
+      },
+      {
+        "id": "attribute_promote",
+        "icon": "attr"
+      },
+      {
+        "id": "attribute_randomize",
+        "icon": "attr"
+      },
+      {
+        "id": "attribute_blur",
+        "icon": "attr"
+      },
+      {
+        "id": "attrib_paint",
+        "label": "Attribute Paint",
+        "icon": "attr"
+      },
+      {
+        "id": "measure"
+      },
+      {
+        "id": "connectivity"
+      },
+      {
+        "id": "ray",
+        "label": "Ray"
+      },
+      {
+        "id": "falloff",
+        "label": "Falloff"
+      },
+      {
+        "id": "occlusion",
+        "label": "Occlusion"
+      },
+      {
+        "id": "python",
+        "label": "Python",
+        "icon": "code"
+      }
+    ]
+  },
+  {
+    "name": "Curves",
+    "tools": [
+      {
+        "id": "bezier",
+        "icon": "curve"
+      },
+      {
+        "id": "curve",
+        "label": "Polyline"
+      },
+      {
+        "id": "helix"
+      },
+      {
+        "id": "curve_simplify",
+        "label": "Simplify Curve"
+      },
+      {
+        "id": "contour",
+        "label": "Contour",
+        "icon": "curve"
+      },
+      {
+        "id": "slice",
+        "label": "Slice",
+        "icon": "curve"
+      },
+      {
+        "id": "carve",
+        "label": "Carve"
+      },
+      {
+        "id": "convert_line",
+        "label": "Convert Line",
+        "icon": "line"
+      },
+      {
+        "id": "polypath",
+        "label": "PolyPath",
+        "icon": "curve"
+      },
+      {
+        "id": "sweep",
+        "label": "Sweep"
+      }
+    ]
+  },
+  {
+    "name": "Points",
+    "tools": [
+      {
+        "id": "scatter",
+        "label": "Scatter"
+      },
+      {
+        "id": "fuse"
+      },
+      {
+        "id": "delaunay",
+        "label": "Delaunay",
+        "icon": "hull"
+      },
+      {
+        "id": "point_jitter",
+        "icon": "scatter"
+      },
+      {
+        "id": "point_relax",
+        "icon": "scatter"
+      },
+      {
+        "id": "points_to_surface",
+        "label": "Points to Surface"
+      }
+    ]
+  },
+  {
+    "name": "Rigid Bodies",
+    "tools": [
+      {
+        "id": "rbd_material_fracture",
+        "label": "RBD Material Fracture",
+        "icon": "fracture"
+      },
+      {
+        "id": "voronoi_fracture",
+        "label": "Voronoi Fracture",
+        "icon": "fracture"
+      },
+      {
+        "id": "voronoi_fracture_points",
+        "label": "Voronoi Fracture Points",
+        "icon": "scatter"
+      },
+      {
+        "id": "voronoi_split",
+        "label": "Voronoi Split",
+        "icon": "fracture"
+      },
+      {
+        "id": "voronoi_adjacency",
+        "label": "Voronoi Adjacency",
+        "icon": "constraint"
+      },
+      {
+        "id": "boolean_fracture",
+        "label": "Boolean Fracture",
+        "icon": "fracture"
+      },
+      {
+        "id": "convex_decomposition",
+        "label": "Convex Decomposition",
+        "icon": "hull"
+      },
+      {
+        "id": "assemble",
+        "label": "Assemble",
+        "icon": "duplicate"
+      },
+      {
+        "id": "rbd_configure",
+        "label": "RBD Configure",
+        "icon": "solver"
+      },
+      {
+        "id": "rbd_solver",
+        "label": "RBD Solver",
+        "icon": "solver"
+      },
+      {
+        "id": "exploded_view",
+        "label": "Exploded View",
+        "icon": "fracture"
+      }
+    ]
+  },
+  {
+    "name": "Constraints",
+    "tools": [
+      {
+        "id": "rbd_constraint",
+        "label": "RBD Constraint",
+        "icon": "constraint"
+      },
+      {
+        "id": "glue_cluster",
+        "label": "Glue Cluster",
+        "icon": "constraint"
+      },
+      {
+        "id": "rbd_constraint_properties",
+        "label": "RBD Constraint Properties",
+        "icon": "constraint"
+      },
+      {
+        "id": "voronoi_adjacency",
+        "label": "Voronoi Adjacency",
+        "icon": "constraint"
+      }
+    ]
+  },
+  {
+    "name": "Terrain FX",
+    "tools": [
+      {
+        "id": "grid",
+        "label": "Grid"
+      },
+      {
+        "id": "noise",
+        "label": "Mountain"
+      },
+      {
+        "id": "heightfield_erode",
+        "label": "Heightfield Erode",
+        "icon": "terrain"
+      },
+      {
+        "id": "scatter",
+        "label": "Scatter"
+      }
+    ]
+  },
+  {
+    "name": "Volume",
+    "tools": [
+      {
+        "id": "remesh",
+        "label": "Remesh"
+      },
+      {
+        "id": "sdf_shape",
+        "label": "SDF Shape"
+      },
+      {
+        "id": "sdf_boolean",
+        "label": "SDF Boolean",
+        "icon": "boolean"
+      },
+      {
+        "id": "points_to_surface",
+        "label": "Points to Surface"
+      }
+    ]
+  },
+  {
+    "name": "PCG",
+    "tools": []
+  },
+  {
+    "name": "Procedural",
+    "tools": [
+      {
+        "id": "building_rules",
+        "label": "Building Rules",
+        "icon": "box"
+      },
+      {
+        "id": "region_identify",
+        "label": "Region Identify",
+        "icon": "connectivity"
+      },
+      {
+        "id": "region_transform",
+        "label": "Region Transform",
+        "icon": "transform"
+      },
+      {
+        "id": "goal_length",
+        "label": "Goal Length",
+        "icon": "constraint"
+      },
+      {
+        "id": "goal_collision",
+        "label": "Goal Collision",
+        "icon": "constraint"
+      },
+      {
+        "id": "goal_surface",
+        "label": "Goal Surface",
+        "icon": "constraint"
+      },
+      {
+        "id": "goal_gravity",
+        "label": "Goal Gravity",
+        "icon": "constraint"
+      },
+      {
+        "id": "goal_pin",
+        "label": "Goal Pin",
+        "icon": "constraint"
+      },
+      {
+        "id": "goal_solve",
+        "label": "Goal Solve",
+        "icon": "solver"
+      }
+    ]
+  },
+  {
+    "name": "Flow",
+    "tools": [
+      {
+        "id": "loop_block",
+        "label": "Repeat",
+        "icon": "loop"
+      },
+      {
+        "id": "loop_begin",
+        "label": "Loop Begin",
+        "icon": "loop"
+      },
+      {
+        "id": "loop_end",
+        "label": "Loop End",
+        "icon": "loop"
+      },
+      {
+        "id": "for_each",
+        "label": "For Each",
+        "icon": "loop"
+      },
+      {
+        "id": "solver",
+        "label": "Solver",
+        "icon": "loop"
+      },
+      {
+        "id": "switch"
+      }
+    ]
+  },
+  {
+    "name": "Measure",
+    "tools": []
+  },
+  {
+    "name": "Library",
+    "tools": []
+  }
+]
