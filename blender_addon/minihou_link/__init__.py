@@ -67,10 +67,8 @@ class MINIHOU_Preferences(bpy.types.AddonPreferences):
         update=lambda self, context: modifiers.disconnect())
     show_sidebar: BoolProperty(name="Show legacy sidebar tools", default=False)
 
-    external_python: StringProperty(name="External Python / Portable Runtime", subtype="FILE_PATH",
-        description="Prepared Python 3.11+ executable with MiniHou and numpy; never Blender's executable")
-    project_root: StringProperty(name="MiniHou Project Folder", subtype="DIR_PATH",
-        description="Folder containing minihou/__main__.py and the node library")
+    rust_app: StringProperty(name="MiniHou Rust App", subtype="FILE_PATH",
+        description="Optional minihou-app executable; empty uses rust/target/debug or release")
 
     def draw(self, context):
         self.layout.prop(self, "auto_connect_minihou")
@@ -80,10 +78,11 @@ class MINIHOU_Preferences(bpy.types.AddonPreferences):
             self.layout.prop(self, "manual_port")
             self.layout.prop(context.scene, "minihou_http_port", text="Editor Port")
         self.layout.prop(self, "show_sidebar")
-        self.layout.label(text="Advanced: launch an external Python engine from Blender")
-        self.layout.prop(self, "external_python")
-        self.layout.prop(self, "project_root")
-        self.layout.label(text="Prepare dependencies in the external runtime, not Blender.")
+        self.layout.label(text="Advanced: launch the MiniHou Rust app from Blender")
+        self.layout.prop(self, "rust_app")
+        server = _server.snapshot()
+        if server["state"] == "error":
+            self.layout.label(text=server["detail"][:240], icon="ERROR")
 
 
 def _server_redraw():
@@ -94,14 +93,13 @@ def _server_redraw():
 class MINIHOU_OT_start_server(bpy.types.Operator):
     bl_idname = "minihou.start_server"
     bl_label = "Start Server"
-    bl_description = "Start configured external Python, or reuse a compatible engine for this graph"
+    bl_description = "Start the MiniHou Rust app, or reuse a compatible engine for this graph"
 
     def execute(self, context):
         addon = context.preferences.addons.get(__package__)
         prefs = addon.preferences if addon else None
         try:
-            _server.start(bpy.path.abspath(prefs.external_python) if prefs and prefs.external_python else "",
-                          bpy.path.abspath(prefs.project_root) if prefs and prefs.project_root else "",
+            _server.start(bpy.path.abspath(prefs.rust_app) if prefs and prefs.rust_app else "",
                           bpy.path.abspath(context.scene.minihou_graph_path),
                           host=context.window_manager.minihou_host, port=context.window_manager.minihou_port,
                           http_port=context.scene.minihou_http_port)
@@ -275,14 +273,13 @@ class MINIHOU_PT_main(bpy.types.Panel):
         box.prop(context.scene, "minihou_http_port", text="Editor Port")
         addon = context.preferences.addons.get(__package__)
         if addon:
-            box.prop(addon.preferences, "external_python")
-            box.prop(addon.preferences, "project_root")
+            box.prop(addon.preferences, "rust_app")
         server = _server.snapshot()
         row = box.row(align=True)
         row.enabled = server["state"] not in {"starting", "stopping"}
         row.operator("minihou.start_server", icon="PLAY")
         edit = row.row(align=True)
-        edit.enabled = server["state"] == "ready"
+        edit.enabled = server["state"] == "ready" and bool(server["editor_url"])
         edit.operator("minihou.open_editor", icon="URL")
         if server["owned"] or server["state"] == "ready":
             box.operator("minihou.stop_server", icon="PAUSE",
