@@ -84,6 +84,7 @@ def main():
     for divisions in (1,2,3,4):add('polybevel','box',{'divisions':divisions,'outgrp_pointfilletpolys':True,'outgrp_offsetedges':True,'outgrp_offsetpoints':True})
     add('polybevel','box',{'edges':'0-1','divisions':2});add('polybevel','grid',{'distance':0,'outgrp_offsetpoints':True})
     cuts=json.dumps([dict(matrix=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],a=[1,-1],b=[1,3],through=True)])
+    # 61_knife_quad is overridden by the Rust knife fix; preserve its expected block after regeneration.
     add('knife',params={'cuts':cuts});add('knife','triangles',{'cuts':cuts})
     out=[]
     with rust.disabled(),accel.disabled():
