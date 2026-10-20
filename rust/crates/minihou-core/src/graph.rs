@@ -478,6 +478,52 @@ mod subnet_graph_tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn fresh_subnet_input_to_output_cooks_without_error() {
+        let doc = json!({"display":"sub","nodes":{"sub":{"type":"subnet","inner":{
+            "nodes":{"in":{"type":"input"},"out":{"type":"output","inputs":{"geo":"in"}}},
+            "output":"out"}}}});
+        let graph = Graph::from_value(&doc).unwrap();
+        assert_eq!(graph.cook(None).unwrap().npoints, 0);
+        assert_eq!(crate::session::Session::new(graph).cook(None).unwrap().npoints, 0);
+    }
+
+    #[test]
+    fn input_custom_parameter_is_public_and_drives_inner_node() {
+        let doc = json!({"display":"sub","nodes":{"sub":{"type":"subnet","inner":{
+            "nodes":{
+                "seed":{"type":"point"},
+                "in":{"type":"input","inputs":{"preview":"seed"},"custom_params":[
+                    {"name":"offset","default":1.0,"node":"move","param":"translate.x"}]},
+                "move":{"type":"transform","inputs":{"geo":"in"}},
+                "out":{"type":"output","inputs":{"geo":"move"},"custom_params":[
+                    {"name":"rise","default":0.0,"node":"move","param":"translate.y"}]}
+            },"output":"out"}}}});
+        let graph = Graph::from_value(&doc).unwrap();
+        assert_eq!(graph.promoted_param("sub", "offset").unwrap()["default"], json!(1.0));
+        assert_eq!(graph.promoted_param("sub", "rise").unwrap()["default"], json!(0.0));
+        let mut session = crate::session::Session::new(graph);
+        session.set_param("sub", "offset", json!(3.0)).unwrap();
+        session.set_param("sub", "rise", json!(4.0)).unwrap();
+        assert_eq!(session.graph().to_value()["nodes"]["sub"]["params"], json!({"offset":3.0,"rise":4.0}));
+        let result = session.cook(None).unwrap();
+        assert_eq!(result.p()[0], 3.0);
+        assert_eq!(result.p()[1], 4.0);
+        assert_eq!(session.resolved_channels().params["sub"]["offset"], json!(3.0));
+    }
+
+    #[test]
+    fn output_accepts_an_inner_stream_node() {
+        let doc = json!({"display":"sub","nodes":{"sub":{"type":"subnet",
+            "output_sockets":[{"index":0,"name":"geo"}],"inner":{
+            "nodes":{"point":{"type":"point"},"move":{"type":"transform","inputs":{"geo":"point"},
+                "params":{"translate":[2.0,0.0,0.0]}},"out":{"type":"subnet_output","port_index":0,
+                "inputs":{"geo":"move"}}}}}}});
+        let graph = Graph::from_value(&doc).unwrap();
+        assert_eq!(graph.cook(None).unwrap().p()[0], 2.0);
+        assert_eq!(crate::session::Session::new(graph).cook(None).unwrap().p()[0], 2.0);
+    }
+
     fn grouped_box() -> Value {
         json!({"version": 1, "display": "out", "nodes": {
             "subnet1": {"type": "subnet", "inner": {"nodes": {
