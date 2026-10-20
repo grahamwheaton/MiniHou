@@ -9,6 +9,7 @@ impl App {
             self.file_status = format!("The Rust core has no {node_type} node yet");
             return;
         };
+        if node_type == "subnet" { crate::subnet_edit::initialize(&mut value, &id); }
         // grow / select_path / select_loop / select_ring / edge_slide / group_create start from the viewport's element selection
         let params = self.selection_node_params(node_type);
         if node_type == "boundary_select" {

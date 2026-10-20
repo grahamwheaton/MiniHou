@@ -1,4 +1,4 @@
-//! Ctrl+G: collapse selected nodes into one `subnet` node that keeps them as its inner graph, or expand it again.
+//! Subnet creation, grouping, and ungrouping for the network editor.
 //! Inner external reads are "$in0", "$in1" ... (the order of the subnet's `geo` wires); see `minihou_core::graph::expand_subnets`.
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
@@ -24,6 +24,25 @@ fn map_refs(node: &mut Value, f: &mut dyn FnMut(&str) -> String) {
 
 fn fresh(nodes: &Map<String, Value>, ty: &str) -> String {
     (1..).map(|n| format!("{ty}{n}")).find(|id| !nodes.contains_key(id)).unwrap()
+}
+
+/// Give a newly added subnet a visible pass-through pair. Existing inner graphs are preserved.
+pub fn initialize(value: &mut Value, id: &str) {
+    let node = &mut value["nodes"][id];
+    if node["type"] != "subnet" || node["inner"]["nodes"].is_object() { return; }
+    let source = match &node["inputs"]["geo"] {
+        Value::Array(refs) => refs.first().cloned().unwrap_or(Value::Null),
+        source => source.clone(),
+    };
+    node["input_sockets"] = json!([{"index": 0, "name": "Input 1"}]);
+    node["output_sockets"] = json!([{"index": 0, "name": "Output 1"}]);
+    if !source.is_null() {
+        node["inputs"] = json!({"in0": source});
+    }
+    node["inner"] = json!({"nodes": {
+        "input1": {"type": "subnet_input", "port_index": 0, "pos": [0.0, 0.0]},
+        "output1": {"type": "subnet_output", "port_index": 0, "inputs": {"geo": "input1"}, "pos": [0.0, 120.0]}
+    }, "output": "output1"});
 }
 
 /// Ctrl+G on the selection: one selected subnet is expanded, otherwise the selection is collapsed. Returns the new graph and
@@ -126,6 +145,16 @@ mod tests {
             "out": {"type": "output", "inputs": {"geo": "nrm"}}}})
     }
     fn cook(v: &Value) -> Vec<f32> { minihou_core::graph::Graph::from_value(v).unwrap().cook(None).unwrap().p().to_vec() }
+    #[test]
+    fn new_subnet_contains_connected_boundaries_and_passes_geometry() {
+        let mut v = sample();
+        v["nodes"]["sub"] = json!({"type": "subnet", "inputs": {"geo": "box1"}});
+        initialize(&mut v, "sub");
+        assert_eq!(v["nodes"]["sub"]["inner"]["nodes"]["output1"]["inputs"]["geo"], "input1");
+        assert_eq!(v["nodes"]["sub"]["inputs"]["in0"], "box1");
+        v["display"] = json!("sub");
+        assert_eq!(cook(&v), cook(&json!({"nodes": {"box1": v["nodes"]["box1"]}, "display": "box1"})));
+    }
     #[test]
     fn group_keeps_inner_graph_and_cooks_the_same() {
         let v = sample();

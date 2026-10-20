@@ -464,6 +464,7 @@ impl App {
                 UiAction::AddNode { node_type, after } => self.add_node(ctx, &node_type, after.as_deref()),
                 UiAction::AddNetworkNode { node_type, pos, wire } => {
                     if let Some((mut value, id)) = graph_edit::add(self.editor.doc.value(), &node_type, None) {
+                        if node_type == "subnet" { subnet_edit::initialize(&mut value, &id); }
                         if node_type == "boundary_select" {
                             let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary");
                             merge_params(&mut value, &id, json!({"output_group_name": name}));
@@ -498,6 +499,7 @@ impl App {
                 }
                 UiAction::AddConnectedNode { node_type, connection, pos } => {
                     if let Some((mut value, id)) = graph_edit::add_connected(self.editor.doc.value(), &node_type, &connection, pos) {
+                        if node_type == "subnet" { subnet_edit::initialize(&mut value, &id); }
                         if node_type == "boundary_select" {
                             let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary");
                             merge_params(&mut value, &id, json!({"output_group_name": name}));

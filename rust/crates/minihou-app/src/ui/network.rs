@@ -267,12 +267,21 @@ pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -
         UiAction::DeleteNode(node) => inner=crate::graph_edit::delete(&inner,&node)?,
         UiAction::AddNetworkNode {node_type,pos,wire} => {
             let (mut next,id)=crate::graph_edit::add(&inner,&node_type,None)?;
+            if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
             next["nodes"][&id]["pos"]=serde_json::json!(pos);
             if let Some(wire)=wire {next=crate::graph_edit::insert_existing(&next,&id,&wire)?;}
             inner=next;
         }
-        UiAction::AddConnectedNode {node_type,connection,pos} => inner=crate::graph_edit::add_connected(&inner,&node_type,&connection,pos)?.0,
-        UiAction::AddNode {node_type,after} => inner=crate::graph_edit::add(&inner,&node_type,after.as_deref())?.0,
+        UiAction::AddConnectedNode {node_type,connection,pos} => {
+            let (mut next,id)=crate::graph_edit::add_connected(&inner,&node_type,&connection,pos)?;
+            if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
+            inner=next;
+        },
+        UiAction::AddNode {node_type,after} => {
+            let (mut next,id)=crate::graph_edit::add(&inner,&node_type,after.as_deref())?;
+            if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
+            inner=next;
+        },
         UiAction::ConnectNodes {from,to,port} => inner=crate::graph_edit::connect(&inner,&from,&to,port.as_deref())?,
         UiAction::DisconnectAll(node) => inner=crate::graph_edit::disconnect_all(&inner,&node)?,
         UiAction::DisconnectInput {node,port} => inner=crate::graph_edit::disconnect(&inner,&node,&port)?,
