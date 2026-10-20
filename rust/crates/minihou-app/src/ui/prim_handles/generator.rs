@@ -422,4 +422,3 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
 
     (grips, ring)
 }
-
