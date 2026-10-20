@@ -7,7 +7,7 @@ use crate::{
     params::Params,
 };
 
-pub const LATTICE_GRID: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const LATTICE_GRID: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "lattice_grid",
     inputs: &[],
     params: crate::params!(
@@ -84,14 +84,14 @@ const DEFORM_INPUTS: &[InputSpec] = &[
     InputSpec { name: "deformed", multi: false, optional: false },
 ];
 
-pub const LATTICE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const LATTICE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "lattice",
     inputs: DEFORM_INPUTS,
     params: crate::params!("group": ""; "outside": "clamp"; "strength": 1.0),
     cook: lattice,
 };
 
-pub const POINT_DEFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const POINT_DEFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "point_deform",
     inputs: DEFORM_INPUTS,
     params: crate::params!("radius": 0.0; "max_points": 16; "group": ""; "strength": 1.0),
@@ -567,7 +567,7 @@ fn invert_3x3(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     }
 }
 
-pub const SOFT_TRANSFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const SOFT_TRANSFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "soft_transform",
     inputs: GEO,
     params: crate::params!(

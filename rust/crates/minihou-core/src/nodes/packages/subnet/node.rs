@@ -2,7 +2,7 @@
 //! `<subnet>/<inner>` nodes when the graph is cooked (see `graph::expand_subnets`); this node just passes the inner output on.
 use crate::{error::{Error, Result}, geometry::Geometry, nodes::{InputSpec, Inputs, NodeSpec}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "subnet",
     inputs: &[InputSpec { name: "geo", multi: true, optional: false }],
     params: &[],

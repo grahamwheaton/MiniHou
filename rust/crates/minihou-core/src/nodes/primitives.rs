@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::geometry::{Attr, Geometry, Topology};
 use crate::params::Params;
 
-pub const FUSE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const FUSE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "fuse",
     inputs: &[
         InputSpec {

@@ -1,5 +1,5 @@
 use crate::{nodes::{Inputs, NodeSpec}, error::{Error, Result}, geometry::Geometry, params::Params};
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "line", inputs: &[],
     params: crate::params!("origin": [0.0, 0.0, 0.0]; "direction": [0.0, 0.0, 1.0]; "length": 1.0; "points": 10;),
     cook: line,

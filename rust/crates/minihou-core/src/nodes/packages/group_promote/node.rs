@@ -2,7 +2,7 @@ use std::sync::Arc;
 use crate::{nodes::{Inputs, NodeSpec, GEO}, error::{Error, Result}, geometry::{Attr, Geometry}, params::Params};
 use crate::nodes::group::flags;
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "group_promote", inputs: GEO,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "group_promote", inputs: GEO,
     params: crate::params!("name": "group1"; "to": "points"), cook: promote };
 fn promote(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = NODE.one(inputs,0)?;

@@ -14,7 +14,7 @@ const EPS: f64 = 1e-8;
 type V2 = [f64; 2];
 type Tri = [V2; 3];
 type Weights = Vec<(usize, f64)>;
-pub const KNIFE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const KNIFE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "knife",
     inputs: GEO,
     params: crate::params!("cuts":"[]"; "cut_through":false; "snap_tolerance":10.0),

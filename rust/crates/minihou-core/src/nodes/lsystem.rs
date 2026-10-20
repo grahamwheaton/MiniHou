@@ -3,7 +3,7 @@ use std::{collections::BTreeMap,sync::Arc};
 use super::{InputSpec,Inputs,NodeSpec,model::{add,mul}};
 use crate::{error::{Error,Result},geometry::{Attr,Geometry},params::Params};
 
-pub const LSYSTEM:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"lsystem",inputs:&[
+pub const LSYSTEM:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"lsystem",inputs:&[
     InputSpec{name:"leaf_j",multi:false,optional:true},InputSpec{name:"leaf_k",multi:false,optional:true},
     InputSpec{name:"leaf_m",multi:false,optional:true},InputSpec{name:"meta_test",multi:false,optional:true}],params:crate::params!(
     "type":"skeleton";"geometry_type":"skeleton";"generations":4.;"start_position":[0.,0.,0.];"random_scale":0.;

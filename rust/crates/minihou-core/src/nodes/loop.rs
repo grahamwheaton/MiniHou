@@ -3,8 +3,8 @@ use std::{cell::Cell, collections::{HashMap, HashSet}, rc::Rc, sync::Arc, time::
 use crate::{Error, Geometry, Graph, Result, graph::run_node_outputs, params::Params};
 use super::{InputSpec, Inputs, NodeSpec};
 
-pub const LOOP_BEGIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "loop_begin", inputs: super::GEO, params: &[], cook: begin };
-pub const LOOP_END: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "loop_end", inputs: &[
+pub const LOOP_BEGIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "loop_begin", inputs: super::GEO, params: &[], cook: begin };
+pub const LOOP_END: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "loop_end", inputs: &[
     InputSpec { name: "geo", multi: false, optional: false },
     InputSpec { name: "begin", multi: false, optional: false },
 ], params: crate::params!("iterations": 3), cook: end };

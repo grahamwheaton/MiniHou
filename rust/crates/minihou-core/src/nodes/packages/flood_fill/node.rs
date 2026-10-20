@@ -3,7 +3,7 @@ use std::{cmp::{Ordering, Reverse}, collections::{BinaryHeap, VecDeque}, sync::A
 
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, nodes::{InputSpec, Inputs, NodeOutputs, NodeSpec}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry", "frontier"], cook_multi: Some(cook_multi),
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry", "frontier"], cook_multi: Some(cook_multi), cook_sidecar: None,
     name: "flood_fill",
     inputs: &[InputSpec { name: "geometry", multi: false, optional: false }],
     params: crate::params!(

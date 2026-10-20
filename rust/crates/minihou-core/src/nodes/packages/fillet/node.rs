@@ -6,7 +6,7 @@ use crate::{
     params::Params,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "fillet",
     inputs: GEO,
     params: crate::params!("radius":0.2;"divisions":6;"min_angle":1.;"group":""),

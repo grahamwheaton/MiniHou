@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap,BTreeSet},sync::Arc};
 use serde_json::{json,Value};
 use crate::{Geometry,Attr,AttrData,Error,Result,params::Params};
 use super::{Inputs,NodeSpec,blender_input::numbers};
-pub const SCENE_OBJECTS:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"scene_objects",inputs:super::GEO,params:crate::params!("mode":"instances";"prefix":"MiniHou";"collection":"";"source":"";"id_attrib":"id";"piece_attrib":"piece";"attributes":"uv Cd N material_index";"max_objects":2000),cook:scene_objects};
+pub const SCENE_OBJECTS:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"scene_objects",inputs:super::GEO,params:crate::params!("mode":"instances";"prefix":"MiniHou";"collection":"";"source":"";"id_attrib":"id";"piece_attrib":"piece";"attributes":"uv Cd N material_index";"max_objects":2000),cook:scene_objects};
 #[derive(Clone,Debug)]pub struct Manifest{pub header:Value,pub arrays:BTreeMap<String,Attr>}
 fn scene_objects(inputs:&Inputs,p:&Params)->Result<Geometry>{let g=inputs[0].first().ok_or_else(||Error::new("input 'geo' is not connected"))?;build_manifest("",p,g,"")?;Ok((**g).clone())}
 fn gather(a:&Attr,rows:&[usize])->Attr{match &a.data{AttrData::F32(v)=>Attr::f32(a.width,rows.iter().flat_map(|&i|v[i*a.width..(i+1)*a.width].iter().copied()).collect()),AttrData::I32(v)=>Attr::i32(a.width,rows.iter().flat_map(|&i|v[i*a.width..(i+1)*a.width].iter().copied()).collect())}}

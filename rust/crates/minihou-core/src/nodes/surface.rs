@@ -9,7 +9,7 @@ use crate::{
     topo,
 };
 
-pub const CONVEX_HULL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const CONVEX_HULL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "convex_hull",
     inputs: GEO,
     params: crate::params!(
@@ -23,7 +23,7 @@ pub const CONVEX_HULL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
     cook: convex_hull,
 };
 
-pub const BRIDGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const BRIDGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "bridge",
     inputs: GEO,
     params: crate::params!(
@@ -36,7 +36,7 @@ pub const BRIDGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None
     cook: bridge,
 };
 
-pub const REVOLVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const REVOLVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "revolve",
     inputs: GEO,
     params: crate::params!(
@@ -52,7 +52,7 @@ pub const REVOLVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: Non
     cook: revolve,
 };
 
-pub const SKIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const SKIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "skin",
     inputs: GEO,
     params: crate::params!(

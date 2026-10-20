@@ -22,7 +22,7 @@ const MAX_FRAMES: usize = 1000;
 /// Inputs remembered at once (least recently used dropped first).
 const MAX_MEMOS: usize = 32;
 
-pub const SOLVER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const SOLVER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "solver",
     inputs: GEO,
     params: crate::params!("body": ""; "params": "{}"; "start_frame": 1; "substeps": 1),

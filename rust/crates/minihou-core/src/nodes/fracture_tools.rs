@@ -66,7 +66,7 @@ pub(super) fn contacts(g: &Geometry, pieces: &[i32], max_gap: f64) -> Vec<(usize
     }).collect()
 }
 
-pub const VORONOI_ADJACENCY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const VORONOI_ADJACENCY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "voronoi_adjacency",
     inputs: &[
         InputSpec { name: "geo", multi: false, optional: false },
@@ -153,7 +153,7 @@ fn voronoi_adjacency(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(out)
 }
 
-pub const ASSEMBLE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const ASSEMBLE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "assemble",
     inputs: GEO,
     params: crate::params!(
@@ -486,7 +486,7 @@ fn match_pattern(pattern: &[u8], name: &[u8]) -> bool {
     }
 }
 
-pub const GLUE_CLUSTER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const GLUE_CLUSTER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "glue_cluster",
     inputs: GEO,
     params: crate::params!(

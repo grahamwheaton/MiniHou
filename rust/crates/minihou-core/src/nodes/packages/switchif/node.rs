@@ -21,7 +21,7 @@ pub const INPUTS: &[InputSpec] = &[
 
 pub(super) const NODE: NodeSpec = NodeSpec {
     outputs: &["geometry"],
-    cook_multi: None,
+    cook_multi: None, cook_sidecar: None,
     name: "switchif",
     inputs: INPUTS,
     params: crate::params!(

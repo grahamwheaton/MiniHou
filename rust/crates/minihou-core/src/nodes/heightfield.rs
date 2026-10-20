@@ -13,7 +13,7 @@ const HF_INPUTS: &[InputSpec] = &[
     InputSpec { name: "mask", multi: false, optional: true },
 ];
 
-pub const HEIGHTFIELD_ERODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const HEIGHTFIELD_ERODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "heightfield_erode",
     inputs: HF_INPUTS,
     params: crate::params!(

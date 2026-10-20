@@ -26,7 +26,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::geometry::{AttrData, Geometry};
 use crate::graph::{run_node_outputs, Graph};
-use crate::{lod::{ClusterLod, BuildError}, params::Params, preview};
+use crate::params::Params;
 use crate::nodes;
 
 /// What the last cook did: which nodes ran, which were served from the cache, and how long each cook took (ms).
@@ -591,36 +591,21 @@ impl Run<'_> {
             None=>run_node_outputs(id, def, spec, &inputs, self.resolved.params.get(id))?.0.into_iter().map(Arc::new).collect(),
         } };
         let geo = outputs.first().cloned().ok_or_else(|| Error::new(format!("node '{id}' produced no outputs")))?;
-        let mut side: Option<Arc<dyn Any + Send + Sync>> = None;
-        let mut side_bytes = 0;
-        if def.node_type == "lod_bake" && !def.bypass {
+        let sidecar = if def.bypass {
+            None
+        } else if let Some(cook_sidecar) = spec.cook_sidecar {
             let params = Params::resolve(spec.params, self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e| e.in_node(id, &def.node_type))?;
-            let cluster_size = params.i("cluster_size").map_err(|e| e.in_node(id, &def.node_type))?;
-            let min_triangles = params.i("min_triangles").map_err(|e| e.in_node(id, &def.node_type))?;
-            let error_px = params.f("error_px").map_err(|e| e.in_node(id, &def.node_type))?;
-            if !(16..=128).contains(&cluster_size) || min_triangles < 0 || !(error_px as f32).is_finite() || error_px <= 0.0 {
-                return Err(Error::new("cluster_size must be 16..128, min_triangles must be nonnegative, and error_px must be positive and finite").in_node(id, &def.node_type));
-            }
-            if params.b("enabled").map_err(|e| e.in_node(id, &def.node_type))? {
-                let g = inputs[0].first().expect("validated by pass-through");
-                let (tris, _) = preview::fan_triangles(&g.topology.vertex_point, &g.topology.prim_offsets, g.topology.closed.as_deref());
-                if tris.len() / 3 >= min_triangles as usize && !tris.is_empty() {
-                    let positions: Vec<[f32; 3]> = g.p().as_chunks::<3>().0.to_vec();
-                    let triangles = tris.as_chunks::<3>().0.to_vec();
-                    let mut lod = ClusterLod::build_with_cluster_size(positions, triangles, cluster_size as usize)
-                        .map_err(|e| Error::new(match e { BuildError::InvalidIndices => "invalid triangle indices", BuildError::NonFinitePosition => "non-finite position", BuildError::EmptyMesh => "empty mesh" }).in_node(id, &def.node_type))?;
-                    lod.error_px = error_px as f32;
-                    side_bytes = lod.bytes();
-                    side = Some(Arc::new(lod));
-                }
-            }
-        }
+            cook_sidecar(&inputs, &params).map_err(|e| e.in_node(id, &def.node_type))?
+        } else {
+            None
+        };
         self.stats.cooked.push(id.to_string());
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.stats.node_ms.push((id.to_string(), ms));
         self.stats.nodes.push(NodeCookDiagnostic::new(id, false, ms, &geo));
         if cache_off { return outputs.get(output).cloned().ok_or_else(|| Error::new(format!("node '{id}' has no output {output}"))); }
-        let bytes = outputs.iter().map(|g| geometry_bytes(g)).sum::<usize>() + side_bytes;
+        let bytes = outputs.iter().map(|g| geometry_bytes(g)).sum::<usize>() + sidecar.as_ref().map_or(0, |(_, bytes)| *bytes);
+        let side = sidecar.map(|(payload, _)| payload);
         let selected = outputs.get(output).cloned().ok_or_else(|| Error::new(format!("node '{id}' has no output {output}")))?;
         if let Some(old) = self.cache.insert(key, Entry { node: id.to_string(), geo: geo.clone(), outputs, side, bytes, used: self.clock }) {
             *self.bytes -= old.bytes;

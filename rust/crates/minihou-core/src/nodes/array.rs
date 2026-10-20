@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Geometry, Topology};
 use crate::params::Params;
 
-pub const ARRAY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
+pub const ARRAY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "array",
     inputs: GEO,
     params: crate::params!("count": 2; "relative_offset": [1., 0., 0.]; "constant_offset": [0., 0., 0.]; "merge_distance": 0.0),

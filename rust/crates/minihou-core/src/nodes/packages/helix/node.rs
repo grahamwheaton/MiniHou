@@ -1,6 +1,6 @@
 use crate::{nodes::{Inputs, NodeSpec}, error::{Error, Result}, geometry::Geometry, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "helix", inputs: &[], params: crate::params!(
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "helix", inputs: &[], params: crate::params!(
     "radius": 1.0; "radius_end": -1.0; "height": 2.0; "turns": 3.0; "points": 120), cook: helix };
 fn helix(_: &Inputs,p: &Params) -> Result<Geometry> {
     let n=p.i("points")?; if n<2 { return Err(Error::new("points must be at least 2")); } crate::nodes::curves::count(n as usize)?;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::{GEO,Inputs,NodeSpec,model::{self,add,cross,dot,len,mul,positions,range,sub}};
 use crate::{error::{Error,Result},geometry::{Attr,Geometry},params::Params,topo};
 
-pub const CONVEX_DECOMPOSITION:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"convex_decomposition",inputs:GEO,
+pub const CONVEX_DECOMPOSITION:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"convex_decomposition",inputs:GEO,
     params:crate::params!("max_concavity":0.02;"max_pieces":32;"min_volume":0.001;"search":16;"piece_attrib":"piece";
         "outgrp_inside":true;"outgrp_inside_name":"inside";"outgrp_outside":false;"outgrp_outside_name":"outside";
         "outgrp_cutpoints":false;"outgrp_cutpoints_name":"cutpoints";"outgrp_cutedges":false;"outgrp_cutedges_name":"cutedges"),cook:cook};
