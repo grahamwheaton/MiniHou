@@ -61,8 +61,46 @@ mod tests;
 /// Generated registry metadata; unknown parameters retain the generic widget.
 pub fn param_meta(node_type: &str, name: &str) -> Option<&'static Value> {
     static META: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    META.get_or_init(|| serde_json::from_str(include_str!("param_meta.json")).expect("generated metadata"))
-        .get(node_type)?.get(name)
+    param_meta_from(META.get_or_init(|| serde_json::from_str(include_str!("param_meta.json")).expect("generated metadata")), node_type, name)
+}
+fn param_meta_from<'a>(metadata: &'a Value, node_type: &str, name: &str) -> Option<&'a Value> {
+    if let Some(meta) = metadata.get(node_type).and_then(|node| node.get(name)) {
+        return Some(meta);
+    }
+    static DECLARED: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    DECLARED.get_or_init(|| {
+        let mut nodes = serde_json::Map::new();
+        for spec in minihou_core::nodes::registry() {
+            let mut params = serde_json::Map::new();
+            for param in spec.params {
+                let default = (param.default)();
+                let kind = match param_kind(&default) {
+                    ParamKind::Bool => "bool",
+                    ParamKind::Integer => "int",
+                    ParamKind::Float => "float",
+                    ParamKind::String => "str",
+                    ParamKind::Vec3 => "vec3",
+                    ParamKind::Unsupported => "unsupported",
+                };
+                params.insert(param.name.to_owned(), serde_json::json!({
+                    "default": default, "kind": kind, "doc": ""
+                }));
+            }
+            nodes.insert(spec.name.to_owned(), Value::Object(params));
+        }
+        Value::Object(nodes)
+    }).get(node_type)?.get(name)
+}
+#[cfg(test)]
+#[test]
+fn missing_metadata_uses_declared_parameter() {
+    let declared = minihou_core::nodes::get("grid").unwrap().params.iter()
+        .find(|param| param.name == "columns").unwrap();
+    let empty = serde_json::json!({});
+    let fallback = param_meta_from(&empty, "grid", "columns").unwrap();
+    assert_eq!(fallback["default"], (declared.default)());
+    assert_eq!(fallback["kind"], "int");
+    assert!(param_meta_from(&empty, "grid", "unknown").is_none());
 }
 pub fn metadata_kind(meta: &Value, default: &Value) -> ParamKind {
     match meta["kind"].as_str() {
