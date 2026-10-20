@@ -238,7 +238,7 @@ pub fn external_edit(h:&Value,arrays:&Arrays)->io::Result<crate::Edit>{
 pub fn watch_objects(doc:&Value)->Value{
     let mut objects=std::collections::BTreeSet::new();let mut images=std::collections::BTreeSet::new();
     if let Some(nodes)=doc["nodes"].as_object(){for n in nodes.values(){
-        match n["type"].as_str(){Some("blender_object")=>{if let Some(s)=n["params"]["object"].as_str().filter(|s|!s.is_empty()&&!["MiniHou_Output","MiniHou_Proxy"].contains(s)){objects.insert(s.to_string());}},Some("blender_image")=>{if let Some(s)=n["params"]["image"].as_str().filter(|s|!s.is_empty()){images.insert(s.to_string());}},_=>{}}
+        match n["type"].as_str(){Some("blender_object")=>{if let Some(s)=n["params"]["object"].as_str().filter(|s|!s.is_empty()&&!s.starts_with('@')&&!["MiniHou_Output","MiniHou_Proxy"].contains(s)){objects.insert(s.to_string());}},Some("blender_image")=>{if let Some(s)=n["params"]["image"].as_str().filter(|s|!s.is_empty()){images.insert(s.to_string());}},_=>{}}
     }}json!({"type":"watch_objects","objects":objects,"images":images})
 }
 fn stable_manifest(mut header:Value,arrays:Arrays)->(Value,Arrays){
@@ -368,7 +368,7 @@ mod tests {
     }
     #[test]
     fn watches_deduplicate_and_ignore_own_outputs() {
-        let doc=json!({"nodes":{"a":{"type":"blender_object","params":{"object":"Cube"}},"b":{"type":"blender_object","params":{"object":"Cube"}},"own":{"type":"blender_object","params":{"object":"MiniHou_Proxy"}},"i":{"type":"blender_image","params":{"image":"Paint"}}}});
+        let doc=json!({"nodes":{"a":{"type":"blender_object","params":{"object":"Cube"}},"b":{"type":"blender_object","params":{"object":"Cube"}},"target":{"type":"blender_object","params":{"object":"@target"}},"own":{"type":"blender_object","params":{"object":"MiniHou_Proxy"}},"i":{"type":"blender_image","params":{"image":"Paint"}}}});
         assert_eq!(watch_objects(&doc),json!({"type":"watch_objects","objects":["Cube"],"images":["Paint"]}));
     }
     #[test]

@@ -56,6 +56,10 @@ fn absent(reason: &str) -> bool { reason.starts_with("no object named") || reaso
 /// (`picker:<id>` present), else the object named by its `object` param. Waiting conditions are
 /// [`Error::waiting`]; a picked object that cannot be read stays a real error.
 pub fn resolve_object<'a>(id: &str, p: &Params, store: &'a ExternalInputs) -> Result<&'a ExternalInput> {
+    let name=p.s("object")?;
+    if (name == "@target" || name.is_empty()) && store.contains_key("object:@target") {
+        return Ok(&store["object:@target"]);
+    }
     if let Some(feed)=store.get(&picker_external(id)) {
         return match feed {
             ExternalInput::Object{..}=>Ok(feed),
@@ -64,7 +68,6 @@ pub fn resolve_object<'a>(id: &str, p: &Params, store: &'a ExternalInputs) -> Re
             _=>Err(Error::new("invalid picker input")),
         };
     }
-    let name=p.s("object")?;
     if name.is_empty() { return Err(Error::waiting(format!("no object set. {PICK_HINT} (or type an object name)"))); }
     if ["MiniHou_Output","MiniHou_Proxy"].contains(&name.as_str()) { return Err(Error::new(format!("{name:?} is MiniHou's own output; reading it would feed the result back into itself"))); }
     let data=store.get(&format!("object:{name}")).ok_or_else(|| Error::waiting(format!("waiting for Blender object {name:?}. {PICK_HINT}")))?;
