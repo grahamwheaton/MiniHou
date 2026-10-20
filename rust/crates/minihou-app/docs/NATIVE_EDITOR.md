@@ -104,7 +104,8 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Alt+D | Duplicate linked parameters | Network |
 | Shift+D | Duplicate objects and move | Viewport |
 | Alt+D | Duplicate objects and move | Viewport |
-| Ctrl+G | Group / ungroup nodes | Network |
+| Ctrl+G | Group nodes | Network |
+| Ctrl+U | Ungroup subnet | Network |
 | Ctrl+G | Group Create from selection | Viewport |
 | Ctrl+X | Dissolve nodes | Network |
 | Ctrl+C | Copy nodes | Network |
