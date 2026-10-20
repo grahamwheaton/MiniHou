@@ -112,3 +112,4 @@ Use one scratch worktree and one commit series **per file job**, all from the sa
 - Batch 5 remainder merged 2026-10-20 20:50: usd_io/reader.rs (Bob), and batch 6 prim_handles.rs, viewport_ui.rs (Bob). Full suite 1435 passed. Batch 6 still running: element_select.rs (Jim), params.rs (Flash).
 - Batch 6 merged 2026-10-20 21:05: element_select.rs (Jim), ui/params.rs (Flash). Batch 7 partly merged: ui/sketch.rs, http_ops.rs (Bob). Full suite 1435 passed.
 - Batch 7 remaining: app_frame.rs (after this merge).
+- Batch 7 complete 2026-10-20 21:15: app_frame.rs (Bob). Full suite 1435 passed. PROJECT TETRIS COMPLETE: all 7 batches merged to native-ui.
