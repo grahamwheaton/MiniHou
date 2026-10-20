@@ -1,5 +1,22 @@
 use super::*;
 
+// Keep the shared shader outside the scoped viewport changes. At grazing angles a
+// pixel spans several grid cells; the old smoothstep made every cell look filled.
+fn viewport_shader() -> String {
+    let source = include_str!("../shader.wgsl");
+    let old = "return 1.-smoothstep(0.,width*1.2,edge);";
+    assert!(source.contains(old));
+    source.replace(old, "return (1.-smoothstep(0.,width*1.2,edge)) * (1.-smoothstep(0.25,0.5,width));")
+}
+
+#[cfg(test)]
+#[test]
+fn distant_grid_fades_when_a_pixel_covers_multiple_cells() {
+    let shader = viewport_shader();
+    assert!(shader.contains("smoothstep(0.25,0.5,width)"));
+    assert!(!shader.contains("return 1.-smoothstep(0.,width*1.2,edge);"));
+}
+
 impl Gpu {
     pub fn new_lod(device: &wgpu::Device, sc: &Scene) -> Self {
         Self::new(device,&sc.proxied(0.0))
@@ -64,7 +81,7 @@ impl Gpu {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(viewport_shader().into()),
         });
         const POS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
         const NRM: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![1 => Float32x3];
