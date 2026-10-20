@@ -15,6 +15,9 @@ pub(crate) use connection::{join_until, send_frame, serve_client};
 #[path = "blender_link/scene_sync.rs"]
 pub mod scene_sync;
 
+#[path = "blender_link/status.rs"]
+pub mod status;
+
 pub(crate) static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // The UI owns documents/history; socket threads only exchange immutable snapshots and requests.
@@ -93,30 +96,14 @@ pub struct LinkServer {
     address: std::net::SocketAddr,
 }
 impl LinkServer {
-    pub fn texture_binding_ids(&self)->Vec<String> {
-        self.shared.image_assets.lock().unwrap().manifests.values().flat_map(|m|
-            m["bindings"].as_array().into_iter().flatten().filter_map(|v|v.as_str().map(str::to_owned))
-        ).collect()
+    pub fn texture_binding_ids(&self) -> Vec<String> {
+        status::texture_binding_ids(self)
     }
-    pub fn texture_status(&self)->Vec<String> {
-        let service=self.shared.image_assets.lock().unwrap();
-        let mut result=Vec::new();
-        for (scope,manifest) in &service.manifests {
-            if let Some(diagnostics)=manifest["diagnostics"].as_object() {
-                for (slot,reason) in diagnostics {result.push(format!("{scope} / {slot}: unsupported: {}",reason.as_str().unwrap_or("unknown")));}
-            }
-            if let Some(images)=manifest["images"].as_array() {
-                for hash in images.iter().filter_map(Value::as_str) {if !service.has(hash) {result.push(format!("{scope}: pending image {hash}"));}}
-            }
-        }
-        result
+    pub fn texture_status(&self) -> Vec<String> {
+        status::texture_status(self)
     }
-    pub fn apply_asset_updates(&self, registry:&mut minihou_app::materials::Registry)->bool {
-        let updates=std::mem::take(&mut *self.shared.asset_updates.lock().unwrap());
-        if updates.is_empty(){return false;}
-        let service=self.shared.image_assets.lock().unwrap();
-        for scope in updates {let _=service.bind(&scope,registry);}
-        true
+    pub fn apply_asset_updates(&self, registry: &mut minihou_app::materials::Registry) -> bool {
+        status::apply_asset_updates(self, registry)
     }
     pub fn start(doc: &Document, path: &Path) -> io::Result<Self> {
         Self::bind("127.0.0.1:8765", doc, path)
@@ -254,40 +241,20 @@ impl LinkServer {
                 .is_some_and(|listener| !listener.is_finished())
     }
     pub fn reply(&self, peer: u64, message: Value) {
-        if let Some(p) = self.shared.peers.lock().unwrap().get(&peer) {
-            let _ = p.replies.send(message);
-        }
+        status::reply(self, peer, message);
     }
     /// The Blender graph path bound to the editor document: the live modifier's path while one is live.
     pub fn bound_path(&self) -> Option<&str> {
         self.active_live.as_deref()
     }
     pub fn reply_error(&self, peer: u64, where_: &str, message: &str) {
-        if let Some(p) = self.shared.peers.lock().unwrap().get(&peer) {
-            let _ = p
-                .replies
-                .send(json!({"type":"error","where":where_,"message":message}));
-        }
+        status::reply_error(self, peer, where_, message);
     }
     pub fn document_changed(&self, doc: &Document, path: &Path) {
         scene_sync::document_changed(self, doc, path);
     }
     pub fn cooked<T>(&self, response: &minihou_app::CookResponse<T>) {
-        let mut snapshot = self.shared.snapshot.lock().unwrap();
-        // Sequence numbers belong to this listener, not a document's worker. File Open
-        // starts a new worker whose revision counter can be lower than the previous one.
-        snapshot.version += 1;
-        snapshot.seq += 1;
-        snapshot.error = response.error.clone();
-        if response.geometry.is_none() {
-            return;
-        } // retain the last good result for new subscribers/resync
-        snapshot.good_seq = snapshot.seq;
-        snapshot.extras = response.extras.clone();
-        snapshot.scene = response.scene.clone();
-        snapshot.geometry = response.geometry.clone();
-        snapshot.cook = json!({"ms":response.milliseconds,"cooked":response.stats.cooked,"cached":response.stats.cached,
-            "node_ms":response.stats.node_ms.iter().cloned().collect::<BTreeMap<_,_>>(),"frame":self.frame,"fps":self.fps});
+        status::cooked(self, response);
     }
     /// UI-thread boundary for live modifier documents. Original document/history stay in memory.
     /// All feeds are transient worker edits, never saved into the graph.
@@ -299,21 +266,7 @@ impl LinkServer {
         scene_sync::handle_live(self, request, editor)
     }
     pub fn set_frame(&mut self, message: &Value) -> io::Result<bool> {
-        let frame = match message.get("frame") {
-            Some(v) => v.as_f64().ok_or_else(|| io::Error::other("bad frame"))?,
-            None => 1.0,
-        };
-        let fps = match message.get("fps").filter(|v| !v.is_null()) {
-            Some(v) => v.as_f64().ok_or_else(|| io::Error::other("bad fps"))?,
-            None => self.fps,
-        };
-        if !frame.is_finite() || !fps.is_finite() || fps <= 0.0 {
-            return Err(io::Error::other("frame must be finite and fps positive"));
-        }
-        let changed = frame != self.frame || fps != self.fps;
-        self.frame = frame;
-        self.fps = fps;
-        Ok(changed)
+        status::set_frame(self, message)
     }
 }
 impl Drop for LinkServer {
