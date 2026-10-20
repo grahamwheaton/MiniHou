@@ -18,9 +18,12 @@ pub mod materials;
 pub mod image_assets;
 pub mod params;
 pub mod value_link_ui;
-use minihou_core::{session::Session, lod::ClusterLod, Geometry, Graph};
-use serde_json::{json, Value};
-use std::{collections::HashMap, ops::Range, path::Path, sync::Arc, time::Instant};
+#[cfg(test)]
+use minihou_core::Geometry;
+use serde_json::Value;
+#[cfg(test)]
+use std::sync::Arc;
+
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
