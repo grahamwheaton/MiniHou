@@ -45,14 +45,6 @@ pub fn initialize(value: &mut Value, id: &str) {
     }, "output": "output1"});
 }
 
-/// Ctrl+G on the selection: one selected subnet is expanded, otherwise the selection is collapsed. Returns the new graph and
-/// the ids to select. `None` when nothing can be done (empty/unknown selection, or several selected nodes read by the rest).
-pub fn toggle(value: &Value, ids: &[String]) -> Option<(Value, Vec<String>)> {
-    let nodes = value.get("nodes")?.as_object()?;
-    if ids.len() == 1 && nodes.get(&ids[0])?["type"] == "subnet" { return ungroup(value, &ids[0]); }
-    group(value, ids).map(|(v, id)| (v, vec![id]))
-}
-
 pub fn group(value: &Value, ids: &[String]) -> Option<(Value, String)> {
     let nodes = value.get("nodes")?.as_object()?;
     let sel: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
@@ -163,7 +155,9 @@ pub fn ungroup(value: &Value, id: &str) -> Option<(Value, Vec<String>)> {
     }
     let shown: Vec<String> = minihou_app::display_nodes(value).iter().map(|d| if d == id { out.clone() } else { d.clone() }).collect();
     if !shown.is_empty() { next["display"] = if shown.len() == 1 { json!(shown[0]) } else { json!(shown) }; }
-    Some((next, rename.into_values().collect()))
+    let mut selected: Vec<_> = rename.into_values().collect();
+    selected.sort();
+    Some((next, selected))
 }
 
 #[cfg(test)]
@@ -221,7 +215,7 @@ mod tests {
     fn ungroup_restores_the_original() {
         let v = sample();
         let (g, _) = group(&v, &["xf".into(), "nrm".into()]).unwrap();
-        let (back, sel) = toggle(&g, &["subnet1".into()]).unwrap();
+        let (back, sel) = ungroup(&g, "subnet1").unwrap();
         assert_eq!(sel.len(), 2);
         assert_eq!(back["nodes"], v["nodes"]);
         assert_eq!(back["display"], v["display"]);

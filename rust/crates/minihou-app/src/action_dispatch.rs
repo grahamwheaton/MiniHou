@@ -225,6 +225,27 @@ impl App {
                     None => self.file_status = "Select nodes to group (only one may feed the rest of the network)".into(),
                 }
             }
+            "ungroup_selection" => {
+                if !self.network_hover { return; }
+                if let Some((path, inner, selected, set)) = ui::network::current_scope(ctx, &self.editor.path, self.editor.doc.value()) {
+                    let id = if set.len() == 1 { set.iter().next().cloned() } else if set.is_empty() { Some(selected) } else { None };
+                    if let Some((changed, ids)) = id.and_then(|id| subnet_edit::ungroup(&inner, &id)) {
+                        if let Some(root) = ui::network::embed_scope(self.editor.doc.value(), &path, changed) {
+                            if self.commit_document(root, "ungroup inner subnet") { ui::network::select_inner(ctx, &self.editor.path, ids); }
+                        }
+                    } else { self.file_status = "Select one subnet to ungroup".into(); }
+                    return;
+                }
+                let id = if self.selected_set.len() == 1 { self.selected_set.iter().next().cloned() }
+                    else if self.selected_set.is_empty() { Some(self.selected.clone()) } else { None };
+                if let Some((value, ids)) = id.and_then(|id| subnet_edit::ungroup(self.editor.doc.value(), &id)) {
+                    if self.commit_document(value, "ungroup subnet") {
+                        self.selected = ids.first().cloned().unwrap_or_default();
+                        self.selected_set = ids.into_iter().collect();
+                        if let Ok(g) = Graph::from_value(self.editor.doc.value()) { self.display = g.main_output().unwrap_or_else(|_| self.selected.clone()); }
+                    }
+                } else { self.file_status = "Select one subnet to ungroup".into(); }
+            }
             "duplicate_selection" => { if let Some(id) = self.selected_set.iter().next().cloned() { self.duplicate_node(&id); } }
             "duplicate_linked_selection" => self.duplicate_linked_nodes(),
             "duplicate_objects" => self.duplicate_viewport_objects(),
