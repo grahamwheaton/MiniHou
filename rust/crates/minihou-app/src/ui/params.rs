@@ -18,6 +18,14 @@ pub mod widgets;
 pub use widgets::{boxed, color_widget, drag_number, file_widget, number_field, ramp_widget, render_vector_fields, widget, widget_styled, widget_with_units};
 fn clipboard_id() -> egui::Id { egui::Id::new("value_link_parameter_clipboard") }
 
+fn input_group_names(v: &View<'_>, id: &str, field: &str, mode: super::SelectionMode) -> Vec<String> {
+    let Some((_, node)) = v.graph.nodes.iter().find(|(name, _)| name == id) else { return Vec::new(); };
+    let port_index = if field == "group2" { 1 } else { 0 };
+    let Some(port) = nodes::get(&node.node_type).and_then(|spec| spec.inputs.get(port_index)) else { return Vec::new(); };
+    let Some(source) = node.inputs.iter().find(|(name, _)| name == port.name).and_then(|(_, refs)| refs.first()) else { return Vec::new(); };
+    v.graph.cook(Some(source)).map(|g| pick::input_groups(&g, mode)).unwrap_or_default()
+}
+
 fn open_expression(ctx: &egui::Context, doc: &Value, node: &str, path: &str) {
     let expr = doc["nodes"][node]["channels"][path].as_str().unwrap_or("").to_owned();
     ctx.data_mut(|d| { d.insert_temp(egui::Id::new("link_expression_open"), (node.to_owned(), path.to_owned())); d.insert_temp(egui::Id::new("link_expression_text"), expr); });
@@ -677,7 +685,8 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
             } else if pick_mode.is_some() && kind == ParamKind::String {
                 let active = ui.ctx().data(|d| d.get_temp::<(String,String)>(egui::Id::new("param_pick_active")))
                     .is_some_and(|(node,name)| node == id && name == param.name);
-                let (clicked, hovered) = pick_field(ui, &mut value, layout.control_rect.width(), active, enabled);
+                let (clicked, hovered) = pick_field(ui, &mut value, layout.control_rect.width(), active, enabled,
+                    || input_group_names(v, id, param.name, pick_mode.unwrap()));
                 if hovered && !active {
                     // viewport previews the field's current group while the arrow is hovered (stamped so a stale hover expires)
                     let pass = ui.ctx().cumulative_pass_nr();
