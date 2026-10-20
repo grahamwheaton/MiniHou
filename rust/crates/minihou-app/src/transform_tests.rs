@@ -205,7 +205,15 @@ fn viewport_drag_cooks_move_rotate_scale_for_object_and_point_groups() {
                 if index == 0 { params["group"] = json!(group); params["pivot"] = json!(pivot); }
                 let edits = apply_transform_step(&mut doc, index == 0, value, &target, name, param.clone()).unwrap();
                 assert_eq!(edits.len(), if index == 0 { 2 } else { 1 });
-                for edit in edits { if matches!(edit, Edit::Replace(_)) { replacement_count += 1; } send(&worker, &mut state, edit); }
+                for edit in edits {
+                    if matches!(edit, Edit::Replace(_)) {
+                        replacement_count += 1;
+                        send(&worker, &mut state, edit);
+                        cooked(&worker, &mut state);
+                    } else {
+                        send(&worker, &mut state, edit);
+                    }
+                }
                 let (lo, hi, points) = cooked(&worker, &mut state);
                 assert!(points != original_points, "{name} step {index} point_mode={point_mode} did not move");
                 if index > 0 {
