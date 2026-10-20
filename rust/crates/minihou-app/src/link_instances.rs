@@ -227,14 +227,11 @@ impl InstanceManager {
             entry.graph = graph.clone();
         }
         if entry.input != *arrays || entry.materials != h["materials"] || entry.bindings != h["material_bindings"] {
-            entry.session.set_external(
-                "modifier_input".into(),
-                ExternalInput::Object {
-                    geo: geometry,
-                    matrix: None,
-                    info: Value::Null,
-                },
-            );
+            for key in ["modifier_input", "object:@target", "object_input:@target"] {
+                entry.session.set_external(key.into(), ExternalInput::Object {
+                    geo: geometry.clone(), matrix: None, info: Value::Null,
+                });
+            }
             entry.input = arrays.clone();
             entry.materials = h["materials"].clone();
             entry.bindings = h["material_bindings"].clone();
@@ -246,6 +243,8 @@ impl InstanceManager {
             .nodes
             .iter()
             .filter(|(_, n)| n.node_type == "object_input")
+            .filter(|(_, n)| n.params.as_ref().and_then(|p| p.get("binding"))
+                .and_then(Value::as_str) != Some("@target"))
             .map(|(nid, n)| {
                 let key = n.params
                     .as_ref()
@@ -258,8 +257,16 @@ impl InstanceManager {
             })
             .collect();
         // Blender Object nodes read their implicit group picker (input:@picker:<id>); empty = waiting, never by name.
-        bindings.extend(minihou_app::modifier_inputs::pickers(&graph).into_iter().map(|(node, uid)|
-            (minihou_core::nodes::blender_input::picker_external(&node), minihou_app::modifier_inputs::picker_key(&uid), String::new())));
+        bindings.extend(minihou_app::modifier_inputs::pickers(&graph).into_iter()
+            .filter(|(node, uid)| {
+                let name = graph["nodes"][node]["params"]["object"].as_str().unwrap_or("");
+                let key = minihou_app::modifier_inputs::picker_key(uid);
+                name != "@target" && (!name.is_empty()
+                    || feeds.is_some_and(|sources| sources.contains_key(&key))
+                    || entry.sources.contains_key(&key))
+            })
+            .map(|(node, uid)|
+                (minihou_core::nodes::blender_input::picker_external(&node), minihou_app::modifier_inputs::picker_key(&uid), String::new())));
         for (external, key, empty) in bindings {
             // Keyed by store name too: a renamed node needs its feed set even when Blender's source is unchanged.
             let tag = format!("{external}|{key}");
@@ -706,5 +713,33 @@ mod tests {
             "instance_id":"empty-input","graph":empty_input_graph,"params":{}}), &empty_arrays);
         assert_eq!(header["type"], "instance_result", "{header}");
         assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().npoints, 0);
+    }
+
+    #[test]
+    fn asset_target_uses_instance_geometry_without_watching_source() {
+        let graph = json!({"nodes":{"source":{"type":"blender_object","params":{"object":"@target","space":"object"}},
+            "out":{"type":"output","inputs":{"geo":"source"}}},"display":"out"});
+        assert_eq!(link_protocol::watch_objects(&graph)["objects"], json!([]));
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("asset.json")).unwrap();
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let mut manager = InstanceManager::new(1, server.shared.clone(), sender);
+        let target = Geometry::points_only(vec![7., 0., 0.]).unwrap();
+        let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":1,
+            "instance_id":"B","graph":graph,"params":{}}), &link_protocol::geometry_arrays(&target));
+        assert_eq!(header["type"], "instance_result", "{header}");
+        assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().p(), &[7., 0., 0.]);
+        let unbound = json!({"nodes":{"source":{"type":"blender_object","params":{"object":""}},
+            "out":{"type":"output","inputs":{"geo":"source"}}},"display":"out"});
+        let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":3,
+            "instance_id":"B","graph":unbound,"params":{}}), &link_protocol::geometry_arrays(&target));
+        assert_eq!(header["type"], "instance_result", "{header}");
+        assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().p(), &[7., 0., 0.]);
+        let object_input = json!({"nodes":{"source":{"type":"object_input","params":{"binding":"@target"}},
+            "out":{"type":"output","inputs":{"geo":"source"}}},"display":"out"});
+        let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":2,
+            "instance_id":"B","graph":object_input,"params":{}}), &link_protocol::geometry_arrays(&target));
+        assert_eq!(header["type"], "instance_result", "{header}");
+        assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().p(), &[7., 0., 0.]);
     }
 }

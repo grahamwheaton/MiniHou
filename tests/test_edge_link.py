@@ -58,6 +58,48 @@ def custom_attribute_object():
 
 
 class EdgeLinkTests(unittest.TestCase):
+    def test_read_prefix_sends_drop_target_mesh(self):
+        source = Path(test_rust_link.ROOT / "blender_addon/minihou_link/modifiers.py")
+        function = next(node for node in ast.parse(source.read_text(encoding="utf-8")).body
+                        if isinstance(node, ast.FunctionDef) and node.name == "read_prefix")
+        class Modifiers(list):
+            def remove(self, item):
+                super().remove(item)
+            def new(self, name, kind):
+                item = types.SimpleNamespace(node_group=None)
+                self.append(item)
+                return item
+        class Object:
+            def __init__(self, name, x):
+                self.name, self.x, self.modifiers = name, x, Modifiers([object()])
+            def copy(self):
+                copy = Object(self.name, self.x)
+                copy.modifiers = Modifiers(self.modifiers)
+                return copy
+            def hide_set(self, value):
+                pass
+            def evaluated_get(self, depsgraph):
+                return types.SimpleNamespace(to_mesh=lambda: types.SimpleNamespace(x=self.x, materials=[]),
+                                             to_mesh_clear=lambda: None)
+        class Nodes:
+            def new(self, kind):
+                return types.SimpleNamespace(inputs={"Geometry": object()}, outputs={"Geometry": object()})
+        groups = types.SimpleNamespace(new=lambda *args: types.SimpleNamespace(
+            interface=types.SimpleNamespace(new_socket=lambda *args, **kw: None), nodes=Nodes(),
+            links=types.SimpleNamespace(new=lambda *args: None), users=0), remove=lambda group: None)
+        bpy = types.SimpleNamespace(data=types.SimpleNamespace(node_groups=groups,
+            objects=types.SimpleNamespace(remove=lambda *args, **kw: None)),
+            context=types.SimpleNamespace(scene=types.SimpleNamespace(collection=types.SimpleNamespace(
+                objects=types.SimpleNamespace(link=lambda obj: None))),
+                view_layer=types.SimpleNamespace(update=lambda: None), evaluated_depsgraph_get=lambda: None))
+        state = {"bpy": bpy, "_check_prefix_dependencies": lambda *args: None,
+                 "mesh_reader": types.SimpleNamespace(_read_mesh=lambda obj, value: (
+                     {"point/P": np.array([[value.x, 0, 0]], np.float32)}, None))}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), state)
+        plane_a, plane_b = Object("Plane A", 1), Object("Plane B", 8)
+        self.assertEqual(state["read_prefix"](plane_a, plane_a.modifiers[0])["point/P"][0, 0], 1)
+        self.assertEqual(state["read_prefix"](plane_b, plane_b.modifiers[0])["point/P"][0, 0], 8)
+
     def test_automatic_connection_tries_live_default_before_stale_records(self):
         source = Path(test_rust_link.ROOT / "blender_addon/minihou_link/modifiers.py")
         function = next(node for node in ast.parse(source.read_text(encoding="utf-8")).body

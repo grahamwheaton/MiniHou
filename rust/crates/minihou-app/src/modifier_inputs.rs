@@ -152,7 +152,8 @@ pub fn picker_key(uid: &str) -> String { format!("input:{PICKER_NODE}:{uid}") }
 
 /// Implicit object entries for `blender_object` nodes: named after the node, value = its object param.
 pub fn picker_entries(doc: &Value) -> Vec<Value> {
-    pickers(doc).into_iter().map(|(node, uid)| json!({
+    pickers(doc).into_iter().filter(|(node, _)| doc["nodes"][node]["params"]["object"] != "@target")
+        .map(|(node, uid)| json!({
         "id": uid, "name": node, "kind": "object", "default": "", "node": PICKER_NODE, "graph_node": node,
         "implicit": true, "doc": "MiniHou Blender Object node: pick the object it reads",
         "value": doc["nodes"][&node]["params"]["object"].as_str().unwrap_or(""),
@@ -230,9 +231,11 @@ mod tests {
         let doc = json!({"display":"b","exposed":[],"nodes":{
             "b":{"type":"blender_object","params":{"object":"Cube"}},
             "c":{"type":"blender_object","picker_id":"b"},
+            "target":{"type":"blender_object","params":{"object":"@target"}},
             "input":{"type":"modifier_input","modifier_inputs":[{"id":"input_1","name":"Amount","kind":"float","default":0.0}]}}});
-        assert_eq!(pickers(&doc), vec![("b".into(), "b".into()), ("c".into(), "c".into())], "pasted duplicate id falls back");
+        assert_eq!(pickers(&doc), vec![("b".into(), "b".into()), ("c".into(), "c".into()), ("target".into(), "target".into())], "pasted duplicate id falls back");
         let params = link_interface(&doc)["params"].as_array().unwrap().clone();
+        assert!(!params.iter().any(|p| p["name"] == "target"));
         let picker = params.iter().find(|p| p["name"] == "b").unwrap();
         assert_eq!((picker["kind"].as_str(), picker["node"].as_str(), picker["id"].as_str(), picker["value"].as_str()),
                    (Some("object"), Some(PICKER_NODE), Some("b"), Some("Cube")));

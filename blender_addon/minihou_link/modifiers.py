@@ -239,9 +239,13 @@ def set_object(mod, key, obj):
 def _source_meshes(obj, mod, materials=None):
     sources = {}
     inputs = [(key, get_object(mod, key)) for key in _object_keys(mod)]
+    graph_nodes = json.loads(mod.node_group[GRAPH]).get("nodes", {})
     for p in parameters(mod):
         if p["kind"] not in {"object", "collection"} or not p.get("id"):
             continue
+        if (p.get("node") == "@picker" and
+                graph_nodes.get(p.get("graph_node"), {}).get("params", {}).get("object") == "@target"):
+            continue  # a migrated interface may still have its old picker until the next cook
         ident = proxy.mapping(mod.node_group).get(p["name"])
         if ident is None or not proxy.has_input(mod, ident):
             continue
@@ -566,16 +570,21 @@ def _unique(entries):
     for obj, mod in entries:
         ident = instance_id(mod)
         owner = (obj.as_pointer(), mod.as_pointer())
-        if ident in seen:
+        if not mod.node_group.get(embed.ASSET_OWNER) and _owners.get(ident) == owner:
+            mod.node_group[embed.ASSET_OWNER] = obj.name
+        # A single pasted asset can arrive without its original object in this file.
+        # Its copied Source Object still identifies the old owner in that case.
+        pasted_asset = (mod.node_group.get(embed.ASSET_OWNER) != obj.name
+                        and get_source(mod) not in (None, obj))
+        if ident in seen or pasted_asset:
             old_cache = _cache(mod)
-            old_source = get_source(mod)
             old_values = proxy.read_values(mod, mod.node_group, parameters(mod))
             ng = mod.node_group.copy()
             mod.node_group = ng
             proxy.ensure_plumbing(ng)  # the copy still references the original's plumbing tree
             ident = uuid.uuid4().hex
             ng[KEY] = ident
-            set_source(mod, old_source)
+            set_source(mod, obj)
             proxy.write_values(mod, ng, parameters(mod), old_values)
             cache = _cache(mod)
             empty = cache.data
@@ -754,6 +763,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     or not proxy.is_nested(modifier.node_group)):
                 _interface(modifier, {"interface": parameters(modifier)})
         live = _unique(all_entries)  # copied objects in another scene also need fresh identities
+        embed.repair()  # split copied texts before updating the target-bound graph
         _cleanup(live)
         if not entries:
             return 0

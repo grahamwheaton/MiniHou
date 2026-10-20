@@ -159,6 +159,32 @@ class RustLinkTests(unittest.TestCase):
         self.addCleanup(host.close)
         return host
 
+    def test_asset_chain_binds_target_mesh(self):
+        graph = {"nodes": {"source": {"type": "blender_object", "params": {"object": "@target", "space": "object"}},
+                           "out": {"type": "output", "inputs": {"geo": "source"}}}, "display": "out"}
+        client = self.host().instances()
+        client.set_sources("B", {"input:@picker:source": mesh(1)})
+        header, arrays = client.cook("B", "", {}, mesh(8), graph=graph)
+        self.assertEqual(header["type"], "instance_result")
+        np.testing.assert_array_equal(arrays["point/P"], mesh(8)["point/P"])
+
+    def test_literal_owner_migration_keeps_boolean_cutter(self):
+        embed = import_module(PKG + ".embed")
+        graph = {"nodes": {"source": {"type": "blender_object", "params": {"object": "Plane A"}},
+                           "cutter": {"type": "blender_object", "params": {"object": "Plane A"}},
+                           "boolean": {"type": "boolean", "inputs": {"geo": "source", "cutter": "cutter"}}},
+                 "display": "boolean"}
+        class Group(dict):
+            name = "Plane A asset"
+        group = Group({embed.GRAPH: json.dumps(graph), embed.ASSET_OWNER: "Plane A"})
+        fields = embed.repair_target(group)
+        migrated = json.loads(group[embed.GRAPH])
+        self.assertEqual(fields, ["nodes.source.params.object: 'Plane A' -> '@target'"])
+        self.assertEqual(json.loads(group[embed.TARGET_CHANGES]), fields)
+        self.assertEqual(migrated["nodes"]["source"]["params"]["object"], "@target")
+        self.assertEqual(migrated["nodes"]["cutter"]["params"]["object"], "Plane A")
+        self.assertEqual(graph["nodes"]["source"]["params"]["object"], "Plane A")
+
     def test_dynamic_modifier_inputs_roundtrip(self):
         definitions = [
             ("f", "Float", "float", 1.0), ("i", "Integer", "int", 2),
