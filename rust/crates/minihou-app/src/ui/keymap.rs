@@ -28,7 +28,7 @@ pub enum Context { Everywhere, Viewport, Network }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Command {
     Points, Edges, Faces, Object, ToggleEdit, SelectAll, SelectNone, SelectLinked, InvertSelection, Hide, Reveal, AddMenu, ToggleParams, FrameAll, FrameSelected,
-    ToolSelect, ToolMove, ToolRotate, ToolScale, ToolTransform,
+    ToolSelect, ToolMove, ToolRotate, ToolScale, ToolScaleCage, ToolTransform,
     Front, Back, Right, Left, Top, Bottom, ToggleProjection,
     OrbitDown, OrbitLeft, OrbitRight, OrbitUp,
     PanLeft, PanRight, PanUp, PanDown, ZoomIn, ZoomOut,
@@ -42,8 +42,8 @@ pub enum Command {
     SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks, GroupNodes, UngroupNodes, GroupCreate,
 }
 impl Command {
-    pub const ALL: [Self; 98] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
-        Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
+    pub const ALL: [Self; 99] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+        Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolScaleCage, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
         Self::OrbitRight, Self::OrbitUp, Self::PanLeft, Self::PanRight, Self::PanUp,
@@ -59,7 +59,7 @@ impl Command {
         Self::SelectLinked => "Select linked", Self::InvertSelection => "Invert selection",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
         Self::ToolSelect => "Select tool", Self::ToolMove => "Move (modal)", Self::ToolRotate => "Rotate (modal)",
-        Self::ToolScale => "Scale (modal)", Self::ToolTransform => "Transform tool",
+        Self::ToolScale => "Scale (modal)", Self::ToolScaleCage => "Scale cage", Self::ToolTransform => "Transform tool",
         Self::FrameAll => "Frame all", Self::FrameSelected => "Frame selected",
         Self::Front => "Front", Self::Back => "Back", Self::Right => "Right", Self::Left => "Left",
         Self::Top => "Top", Self::Bottom => "Bottom", Self::ToggleProjection => "Toggle perspective / ortho",
@@ -91,7 +91,7 @@ impl Command {
         Self::SelectLinked => "select_linked", Self::InvertSelection => "invert_selection",
         Self::SelectAll => "select_all", Self::SelectNone => "select_none", Self::Hide => "hide", Self::Reveal => "reveal", Self::AddMenu => "add_menu", Self::ToggleParams => "toggle_params",
         Self::ToolSelect => "tool_select", Self::ToolMove => "tool_move", Self::ToolRotate => "tool_rotate",
-        Self::ToolScale => "tool_scale", Self::ToolTransform => "tool_transform",
+        Self::ToolScale => "tool_scale", Self::ToolScaleCage => "tool_scale_cage", Self::ToolTransform => "tool_transform",
         Self::FrameAll => "frame_all", Self::FrameSelected => "frame_selected", Self::Front => "front", Self::Back => "back",
         Self::Right => "right", Self::Left => "left", Self::Top => "top", Self::Bottom => "bottom",
         Self::ToggleProjection => "toggle_projection", Self::OrbitDown => "orbit_down", Self::OrbitLeft => "orbit_left",
@@ -130,6 +130,7 @@ impl Command {
         Self::ToolMove => UiAction::StartModal(super::modal_transform::Kind::Move),
         Self::ToolRotate => UiAction::StartModal(super::modal_transform::Kind::Rotate),
         Self::ToolScale => UiAction::StartModal(super::modal_transform::Kind::Scale),
+        Self::ToolScaleCage => UiAction::StartScaleCage,
         Self::ToolTransform => UiAction::Editor(EditorChange::Tool(Tool::Transform)),
         Self::FrameAll => if kctx.network_hovered { UiAction::FrameNetwork } else { UiAction::Frame },
         Self::FrameSelected => UiAction::FrameSelected,
@@ -180,6 +181,7 @@ impl Keymap {
         for (key,ctrl,alt,cmd) in [(K::B,true,false,C::Bevel),(K::E,false,true,C::PushPull),
             (K::R,true,false,C::LoopCut),(K::N,false,true,C::FlipFaces),(K::M,false,true,C::Mirror)] { add(key,ctrl,false,alt,cmd,X::Viewport); }
         add(K::V,false,true,false,C::EdgeSlide,X::Viewport);
+        add(K::S,false,true,false,C::ToolScaleCage,X::Viewport);
         add(K::C, false, true, false, C::ResetCursor, X::Viewport);
         for (key,cmd) in [(K::Tab,C::AddMenu),(K::Home,C::FrameSelected)] {
             add(key,false,false,false,cmd,X::Viewport);
@@ -538,6 +540,16 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
             && b.chord==Chord::new(Key::V,false,true,false)));
         assert!(map.bindings.iter().any(|b|b.context==Context::Viewport && b.command==Command::ToolMove
             && b.chord==Chord::new(Key::G,false,false,false)));
+    }
+    #[test] fn scale_cage_has_a_dedicated_viewport_binding() {
+        let map = Keymap::blender();
+        let chord = Chord::new(Key::S, false, true, false);
+        let bindings: Vec<_> = map.bindings.iter().filter(|b| b.chord == chord).collect();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].context, Context::Viewport);
+        assert_eq!(bindings[0].command, Command::ToolScaleCage);
+        assert!(Command::ALL.contains(&Command::ToolScaleCage));
+        assert!(matches!(Command::ToolScaleCage.to_action(&KeyContext::default()), Some(UiAction::StartScaleCage)));
     }
     #[test] fn lasso_command_is_registered_and_bindable() {
         assert!(Command::ALL.contains(&Command::LassoSelect));

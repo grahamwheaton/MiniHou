@@ -2,12 +2,16 @@ use super::*;
 
 pub(super) const HEADER_H: f32 = 36.;
 pub(super) const TIMELINE_H: f32 = 44.;
-pub(super) const TOOLS: [(&str, Icon); 14] = [
-    ("Select (Q)", Icon::Select), ("3D cursor", Icon::Cursor), ("Move (G)", Icon::Move), ("Rotate (R)", Icon::Rotate),
-    ("Scale (S)", Icon::Scale), ("Transform", Icon::Transform), ("Measure", Icon::Measure),
-    ("Draw Line", Icon::Line), ("Draw Polyline (Enter finish)", Icon::Polyline),
-    ("Draw Polygon (Enter finish)", Icon::Polygon), ("Draw Rectangle", Icon::Rectangle), ("Draw Circle", Icon::Circle),
-    ("Knife (K): click mesh points, RMB/E next chain, Enter confirm all", Icon::Knife), ("Loop Cut (Ctrl+R): hover a quad edge, wheel count, click then slide, click confirm", Icon::LoopCut),
+pub(super) const TOOLS: [(&str, Icon, Option<Tool>); 15] = [
+    ("Select (Q)", Icon::Select, Some(Tool::Select)), ("3D cursor", Icon::Cursor, Some(Tool::Cursor)),
+    ("Move (G)", Icon::Move, Some(Tool::Move)), ("Rotate (R)", Icon::Rotate, Some(Tool::Rotate)),
+    ("Scale (S)", Icon::Scale, Some(Tool::Scale)), ("Scale Cage (Shift+S)", Icon::ScaleCage, None),
+    ("Transform", Icon::Transform, Some(Tool::Transform)), ("Measure", Icon::Measure, Some(Tool::Measure)),
+    ("Draw Line", Icon::Line, Some(Tool::Line)), ("Draw Polyline (Enter finish)", Icon::Polyline, Some(Tool::Polyline)),
+    ("Draw Polygon (Enter finish)", Icon::Polygon, Some(Tool::Polygon)), ("Draw Rectangle", Icon::Rectangle, Some(Tool::Rectangle)),
+    ("Draw Circle", Icon::Circle, Some(Tool::Circle)),
+    ("Knife (K): click mesh points, RMB/E next chain, Enter confirm all", Icon::Knife, Some(Tool::Knife)),
+    ("Loop Cut (Ctrl+R): hover a quad edge, wheel count, click then slide, click confirm", Icon::LoopCut, Some(Tool::LoopCut)),
 ];
 pub(super) const DENSE_PRIMS: usize = 40_000;
 pub(super) const FRAME_START: u32 = 0;
@@ -28,7 +32,7 @@ pub(super) const OVERLAYS: [(&str, &str); 6] = [("Grid floor", ""), ("Axis gizmo
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Icon { Display(Mode), Visibility(ObjectVisibility), Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays, Xray, Solid, Shaded, Wire, ShadedWire, Frame,
-    Select, BoxSelect, CircleSelect, LassoSelect, Cursor, Move, Rotate, Scale, Transform, Measure, Line, Polyline, Polygon, Rectangle, Circle, Knife, LoopCut, ToStart, Prev, Play, Pause, Next, ToEnd }
+    Select, BoxSelect, CircleSelect, LassoSelect, Cursor, Move, Rotate, Scale, ScaleCage, Transform, Measure, Line, Polyline, Polygon, Rectangle, Circle, Knife, LoopCut, ToStart, Prev, Play, Pause, Next, ToEnd }
 
 /// Where every header control sits, from the viewport's left/top/width. Pure so it can be tested at any width.
 #[derive(Debug)]
@@ -163,6 +167,7 @@ pub(super) fn icon(p: &egui::Painter, ic: Icon, r: Rect, col: Color32, tick: boo
         Icon::Move => { line(&[(8., 1.5), (8., 14.5)]); line(&[(1.5, 8.), (14.5, 8.)]); line(&[(6., 3.5), (8., 1.5), (10., 3.5)]); line(&[(6., 12.5), (8., 14.5), (10., 12.5)]); line(&[(3.5, 6.), (1.5, 8.), (3.5, 10.)]); line(&[(12.5, 6.), (14.5, 8.), (12.5, 10.)]); }
         Icon::Rotate => { line(&[(13., 8.), (12.6, 10.), (11.2, 12.2), (9., 13.2), (6.5, 13.), (4.4, 11.6), (3.2, 9.4), (3., 7.), (4., 5.), (5.8, 3.6), (8., 3.)]); line(&[(13., 2.5), (13., 5.5), (10., 5.5)]); }
         Icon::Scale => { poly(&[(2., 7.), (9., 7.), (9., 14.), (2., 14.)]); line(&[(7., 9.), (14., 2.)]); line(&[(9.5, 2.), (14., 2.), (14., 6.5)]); }
+        Icon::ScaleCage => { poly(&[(2., 2.), (14., 2.), (14., 14.), (2., 14.)]); for (x, y) in [(2., 2.), (14., 2.), (2., 14.), (14., 14.)] { p.rect_filled(Rect::from_center_size(at(x, y), Vec2::splat(3. * s)), 0., col); } }
         Icon::Transform => { poly(&[(3.5, 3.5), (12.5, 3.5), (12.5, 12.5), (3.5, 12.5)]); for (x, y) in [(3., 3.), (13., 3.), (3., 13.), (13., 13.)] { fill_poly(&[(x - 1.5, y - 1.5), (x + 1.5, y - 1.5), (x + 1.5, y + 1.5), (x - 1.5, y + 1.5)]); } }
         Icon::Line => { line(&[(2., 13.), (14., 3.)]); for q in [(2.,13.),(14.,3.)] { p.circle_filled(at(q.0,q.1), 1.8, col); } }
         Icon::Polyline => { line(&[(2., 13.), (5., 3.), (10., 10.), (14., 4.)]); }

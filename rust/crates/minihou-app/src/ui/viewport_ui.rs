@@ -111,13 +111,15 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     let strip = Rect::from_min_size(Pos2::new(rect.left() + 12., rect.top() + HEADER_H + 12.), Vec2::new(36., strip_h));
     painter.rect(strip, 6., th.panel, stroke, StrokeKind::Inside);
     let mut y = strip.top() + 4.;
-    for (i, (name, icon)) in TOOLS.iter().enumerate() {
-        if i == 2 || i == 6 || i == 7 || i == 12 {
+    for (i, (name, icon, tool)) in TOOLS.iter().enumerate() {
+        if i == 2 || i == 7 || i == 8 || i == 13 {
             painter.line_segment([Pos2::new(strip.left() + 6., y + 2.), Pos2::new(strip.right() - 6., y + 2.)], stroke);
             y += 5.;
         }
         let r = Rect::from_min_size(Pos2::new(strip.left() + 4., y), Vec2::splat(28.));
-        if button(ui, th, r, ("vp_tool", i), ed.tool == Tool::ALL[i], name, *icon) { out.push(UiAction::Editor(EditorChange::Tool(Tool::ALL[i]))); }
+        if button(ui, th, r, ("vp_tool", i), tool.is_some_and(|t| ed.tool == t), name, *icon) {
+            out.push(tool.map_or(UiAction::StartScaleCage, |t| UiAction::Editor(EditorChange::Tool(t))));
+        }
         y += 28.;
     }
 
@@ -250,6 +252,11 @@ pub fn modal_status(ui: &egui::Ui, rect: egui::Rect, status: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn scale_cage_is_directly_below_scale_in_tool_strip() {
+        let scale = TOOLS.iter().position(|(_, _, tool)| *tool == Some(Tool::Scale)).unwrap();
+        assert_eq!(TOOLS[scale].1, Icon::Scale);
+        assert_eq!(TOOLS[scale + 1], ("Scale Cage (Shift+S)", Icon::ScaleCage, None));
+    }
     #[test] fn timeline_shortcuts_step_and_jump() {
         let ctx = egui::Context::default();
         timeline_command(&ctx, "timeline_start");
