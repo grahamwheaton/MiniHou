@@ -63,3 +63,71 @@ fn diagnostics_report_counts_for_cooks_and_hits() {
     assert!(d.cook_ms >= 0.0);
     assert_eq!((d.point_count, d.primitive_count), (geo.npoints, geo.nprims()));
 }
+
+#[test]
+fn stores_multiple_frames_and_reuses_an_older_frame() {
+    let mut s = session();
+    for frame in 1..=3 { s.set_time(frame as f64, 24.).unwrap(); s.cook(None).unwrap(); }
+    assert_eq!(s.frame_cache_len("held"), 3);
+    s.set_time(1., 24.).unwrap();
+    assert!(s.cached_geometry("held").is_some());
+    s.cook(None).unwrap();
+    assert_eq!(s.last_stats().cached, ["held"]);
+}
+
+#[test]
+fn evicts_oldest_at_max_frames() {
+    let mut s = session();
+    s.set_param("held", "max_frames", json!(2)).unwrap();
+    for frame in 1..=3 { s.set_time(frame as f64, 24.).unwrap(); s.cook(None).unwrap(); }
+    assert_eq!(s.frame_cache_len("held"), 2);
+    s.set_time(1., 24.).unwrap();
+    s.cook(None).unwrap();
+    assert!(s.last_stats().cooked.contains(&"held".into()));
+}
+
+#[test]
+fn evicts_oldest_at_byte_budget() {
+    let mut s = session();
+    let geo = s.cook(None).unwrap();
+    s.set_frame_budget_bytes(crate::session::geometry_bytes(&geo) + 1);
+    s.set_time(2., 24.).unwrap(); s.cook(None).unwrap();
+    assert_eq!(s.frame_cache_len("held"), 1);
+    s.set_time(1., 24.).unwrap(); s.cook(None).unwrap();
+    assert!(s.last_stats().cooked.contains(&"held".into()));
+}
+
+#[test]
+fn upstream_change_purges_all_frames() {
+    let mut s = session();
+    for frame in 1..=2 { s.set_time(frame as f64, 24.).unwrap(); s.cook(None).unwrap(); }
+    s.set_param("source", "size", json!([2, 1, 1])).unwrap();
+    s.cook(None).unwrap();
+    assert_eq!(s.frame_cache_len("held"), 1);
+}
+
+#[test]
+fn clears_only_current_frame() {
+    let mut s = session();
+    for frame in 1..=2 { s.set_time(frame as f64, 24.).unwrap(); s.cook(None).unwrap(); }
+    s.clear_current_frame_cache("held");
+    assert_eq!(s.frame_cache_len("held"), 1);
+    s.set_time(1., 24.).unwrap(); s.cook(None).unwrap();
+    assert_eq!(s.last_stats().cached, ["held"]);
+    s.set_time(2., 24.).unwrap(); s.cook(None).unwrap();
+    assert!(s.last_stats().cooked.contains(&"held".into()));
+}
+
+#[test]
+fn clear_toggles_purge_the_requested_frames() {
+    let mut s = session();
+    for frame in 1..=2 { s.set_time(frame as f64, 24.).unwrap(); s.cook(None).unwrap(); }
+    s.set_param("held", "clear_current_frame_cache", json!(true)).unwrap();
+    s.cook(None).unwrap();
+    assert_eq!(s.frame_cache_len("held"), 2);
+    assert!(s.last_stats().cooked.contains(&"held".into()));
+    s.set_param("held", "clear_current_frame_cache", json!(false)).unwrap();
+    s.set_param("held", "clear_cache", json!(true)).unwrap();
+    s.cook(None).unwrap();
+    assert_eq!(s.frame_cache_len("held"), 1);
+}

@@ -4,5 +4,10 @@
     "default": "auto",
     "options": ["auto", "off"],
     "doc": "auto: keep the input's result and reuse it while the input is unchanged; off: pass the input through and cache nothing."
-  }
+  },
+  "cache_any_frame": {"kind": "bool", "default": true, "doc": "Keep results for multiple frames. When off, retain only the current frame."},
+  "max_frames": {"kind": "int", "default": 2500, "min": 1, "doc": "Maximum number of frames stored for this Cache node."},
+  "clear_on_upstream_change": {"kind": "bool", "default": true, "doc": "Clear stored frames when the upstream recipe or parameters change."},
+  "clear_cache": {"kind": "bool", "default": false, "doc": "Toggle on to clear all stored frames for this node; toggle off to rearm."},
+  "clear_current_frame_cache": {"kind": "bool", "default": false, "doc": "Toggle on to clear this frame for this node; toggle off to rearm."}
 }
