@@ -589,12 +589,6 @@ pub fn active(ctx: &egui::Context) -> bool {
 pub fn finish_input(ctx: &egui::Context) {
     ctx.data_mut(|d| d.remove::<PrimDrag>(Id::new("prim_handle_drag")));
 }
-fn is_displayed(v: &View) -> bool {
-    if v.selected.is_empty() { return false; }
-    if v.display == v.selected { return true; }
-    minihou_app::display_nodes(v.doc).iter().any(|n| n == v.selected)
-}
-
 fn selected_node<'a>(v: &'a View) -> Option<(&'a str, &'a str, &'a Value)> {
     if v.selected.is_empty() { return None; }
     let node = v.doc.get("nodes")?.get(v.selected)?;
@@ -604,7 +598,7 @@ fn selected_node<'a>(v: &'a View) -> Option<(&'a str, &'a str, &'a Value)> {
 }
 
 pub fn hit(rect: Rect, v: &View, pointer: Pos2) -> bool {
-    if v.editor.tool != Tool::Select || !is_displayed(v) { return false; }
+    if v.editor.tool != Tool::Select { return false; }
     let Some((node_id, ty, params)) = selected_node(v) else { return false; };
     let (grips, _) = handles_for_node(node_id, ty, params);
     for grip in &grips {
@@ -765,7 +759,7 @@ pub fn compute_edits_for_drag(
 }
 
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {
-    if v.editor.tool != Tool::Select || !is_displayed(v) { return false; }
+    if v.editor.tool != Tool::Select { return false; }
     let Some((node_id, ty, params)) = selected_node(v) else { return false; };
 
     let (grips, ring) = handles_for_node(node_id, ty, params);
