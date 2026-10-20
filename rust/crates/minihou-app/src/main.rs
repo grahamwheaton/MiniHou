@@ -5,6 +5,8 @@ mod element_pick_glue;
 use element_pick_glue::{point_pickable, active_range, navigation_point, loop_cut_has_marks, loop_cut_selection, selection_exists_on_scene, selection_in_range, pick_displayed, pick_displayed_culled, keep_extrude_selection, pick_displayed_wire, wire_selection};
 mod node_selection;
 mod node_add;
+mod history_selection;
+use history_selection::{restore, selection_state};
 mod coplanar_tool;
 mod group_preview;
 mod param_pick;
@@ -57,17 +59,6 @@ fn python_gate() -> std::sync::Arc<PythonGate> {
     GATE.get_or_init(|| std::sync::Arc::new(PythonGate::denied())).clone()
 }
 
-fn snapshot(selection:&picking::Selection)->SelectionSnapshot {
-    SelectionSnapshot { mode: match selection.mode { ui::SelectionMode::Object=>0, ui::SelectionMode::Points=>1, ui::SelectionMode::Edges=>2, ui::SelectionMode::Faces=>3 },
-        points:selection.points.clone(), edges:selection.edges.clone(), tris:selection.tris.clone() }
-}
-fn restore(snapshot:SelectionSnapshot)->picking::Selection {
-    picking::Selection { mode:match snapshot.mode { 1=>ui::SelectionMode::Points, 2=>ui::SelectionMode::Edges, 3=>ui::SelectionMode::Faces, _=>ui::SelectionMode::Object },
-        points:snapshot.points, edges:snapshot.edges, tris:snapshot.tris }
-}
-fn selection_state(selection:&picking::Selection,stash:&picking::Selection)->SelectionState {
-    SelectionState { selection:snapshot(selection), stashed:snapshot(stash) }
-}
 fn zoom_under_cursor(camera:&mut Camera,delta:f32,enabled:bool,rect:egui::Rect,pos:Option<egui::Pos2>,point:Option<[f32;3]>) {
     if delta==0. {return;}
     let Some(pos)=pos.filter(|_|enabled) else {camera.zoom(delta);return;};
@@ -685,30 +676,6 @@ impl App {
         // whole polygons, polygon edges only (no fan diagonals)
         let found = element_select::cached(&self.elem_topo, scene).complete(found);
         self.selection_dirty |= element_select::apply_region(&mut self.selection, found, op);
-    }
-
-    fn sync_selection_baseline(&mut self) { self.sel_baseline = (self.selection.clone(), self.stashed_selection.clone()); }
-    fn selection_state(&self)->SelectionState { selection_state(&self.selection,&self.stashed_selection) }
-    fn finish_history(&mut self) {
-        let selection=self.selection_state();
-        self.editor.history.finish_with_selection(&self.editor.doc,Some(selection));
-    }
-    fn record_history(&mut self,before:Document) {
-        let selection=self.selection_state();
-        self.editor.history.record_with_selection(before,&self.editor.doc,Some(selection.clone()),Some(selection));
-    }
-    fn apply_selection_state(&mut self,state:SelectionState) {
-        self.selection=restore(state.selection); self.stashed_selection=restore(state.stashed);
-        if self.selection.mode!=ui::SelectionMode::Object { self.editor_state.apply(ui::EditorChange::Selection(self.selection.mode)); }
-        self.sync_selection_baseline(); self.selection_dirty=true;
-    }
-    /// A viewport selection change becomes one step on the shared undo stack.
-    fn record_selection_step(&mut self) {
-        if self.selection == self.sel_baseline.0 { return; }
-        let before = std::mem::replace(&mut self.sel_baseline, (self.selection.clone(), self.stashed_selection.clone()));
-        let before=selection_state(&before.0,&before.1);
-        let after=self.selection_state();
-        self.editor.history.record_selection_state(&self.editor.doc,Some(before),Some(after));
     }
 
     pub(crate) fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
