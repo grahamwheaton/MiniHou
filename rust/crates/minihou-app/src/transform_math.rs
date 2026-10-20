@@ -114,10 +114,12 @@ pub fn normalize3(v: Vec3) -> Vec3 {
 pub mod rotation;
 pub mod trs;
 
+#[allow(unused_imports)]
 pub use rotation::{
     axis_angle_matrix, euler_to_matrix, euler_xyz, matrix_to_euler, matrix_to_euler_xyz,
     unwrap_deg, RotationOrder, ALL_ROTATION_ORDERS,
 };
+#[allow(unused_imports)]
 pub use trs::{
     affine_about_pivot, compose, compose_rotate_axis, compose_rotate_euler, compose_scale,
     compose_translate, compose_translate_axis, has_shear, has_shear_3, Frame, ScaleResult,
