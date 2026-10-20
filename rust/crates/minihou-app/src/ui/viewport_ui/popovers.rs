@@ -218,6 +218,3 @@ fn matcap_swatch(ui:&egui::Ui, row:Rect, matcap:crate::viewport::MatCap) {
     } }
     ui.painter().add(egui::Shape::mesh(mesh));
 }
-
-
-/// Compact Blender-style status strip for the active viewport transform.
