@@ -102,3 +102,5 @@ Use one scratch worktree and one commit series **per file job**, all from the sa
 ## Progress
 - Batch 1 merged 2026-10-20 19:10: model.rs (Jim), pcg.rs, transform_math.rs, boolean_kernel.rs (Flash). Full suite 1435 passed on the merge. Note: viewport_drag_cooks_move_rotate_scale_for_object_and_point_groups failed once in a full run and passed on rerun and alone; timing-sensitive, watch it.
 - Batch 2 (Bob, scheduled tasks BobT2*): running.
+- Batch 2 merged 2026-10-20 19:30: modeling_tools.rs, polyfill.rs, uv/unwrap.rs, scatter.rs (Bob, scheduled tasks BobT2*). Full suite 1435 passed.
+- Batch 3 (pushpull, fracture_tools, modify, edge_tools): starting on Bob.
