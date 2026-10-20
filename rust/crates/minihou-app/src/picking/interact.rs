@@ -215,4 +215,3 @@ pub fn intersect_ground_or_mesh(
     };
     [origin[0] + t * dir[0], origin[1] + t * dir[1], origin[2] + t * dir[2]]
 }
-
