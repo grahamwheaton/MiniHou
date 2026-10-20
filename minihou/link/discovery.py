@@ -17,7 +17,7 @@ def publish(host, port, editor_url):
     root.mkdir(parents=True, exist_ok=True)
     path = root / (uuid.uuid4().hex + ".json")
     temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps({"host": host, "port": port, "editor_url": editor_url,
+    temp.write_text(json.dumps({"publisher": "minihou", "host": host, "port": port, "editor_url": editor_url,
                                "started": time.time()}), encoding="utf-8")
     temp.replace(path)
     return path

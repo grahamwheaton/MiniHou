@@ -1,10 +1,14 @@
 """Pair-keyed Blender edge transfer with small bpy collection mocks."""
 import ast
 import importlib
+import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
+import uuid
 from unittest.mock import patch
 
 import numpy as np
@@ -59,6 +63,8 @@ class EdgeLinkTests(unittest.TestCase):
         function = next(node for node in ast.parse(source.read_text(encoding="utf-8")).body
                         if isinstance(node, ast.FunctionDef) and node.name == "_connection")
         attempts = []
+        live = [("127.0.0.1", 8765)]
+        forgotten = []
 
         class FakeClient:
             def __init__(self, host, port, timeout):
@@ -68,7 +74,7 @@ class EdgeLinkTests(unittest.TestCase):
 
             def connect(self):
                 attempts.append((self.address, self.timeout))
-                if self.address != ("127.0.0.1", 8765):
+                if self.address != live[0]:
                     raise OSError("dead endpoint")
                 return {"capabilities": ["live_modifier_v1", "object_inputs_v1"]}
 
@@ -78,6 +84,7 @@ class EdgeLinkTests(unittest.TestCase):
         stale = [("127.0.0.1", port) for port in range(9000, 9015)]
         discovery = types.ModuleType(PKG + ".discovery")
         discovery.candidates = lambda: stale
+        discovery.forget_failed = lambda host, port: forgotten.append((host, port))
         instance_client = types.ModuleType(PKG + ".instance_client")
         instance_client.InstanceClient = FakeClient
         state = {"__package__": PKG, "bpy": types.SimpleNamespace(context=types.SimpleNamespace(
@@ -92,8 +99,39 @@ class EdgeLinkTests(unittest.TestCase):
                                       PKG + ".instance_client": instance_client}):
             exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), state)
             client = state["_connection"]()
-        self.assertIs(client, state["_client"])
-        self.assertEqual(attempts, [(("127.0.0.1", 8765), 0.4)])
+            self.assertIs(client, state["_client"])
+            self.assertEqual(attempts, [(("127.0.0.1", 8765), 0.4)])
+            self.assertEqual(forgotten, [])
+
+            disconnect()
+            attempts.clear()
+            live[0] = stale[1]
+            state["_connection"]()
+        self.assertEqual(state["_endpoint"], stale[1])
+        self.assertEqual(attempts, [(("127.0.0.1", 8765), 0.4),
+                                    (stale[0], 0.4), (stale[1], 0.4)])
+        self.assertEqual(forgotten, [("127.0.0.1", 8765), stale[0]])
+
+    def test_failed_owned_discovery_record_is_removed(self):
+        discovery = importlib.import_module(PKG + ".discovery")
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {"MINIHOU_HOME": root}):
+            owned = discovery.publish("127.0.0.1", 9000, "http://127.0.0.1:9000/")
+            foreign = discovery.directory() / "foreign.json"
+            foreign.write_text(json.dumps({"host": "127.0.0.1", "port": 9001,
+                                           "started": 0, "editor_url": ""}), encoding="utf-8")
+            legacy = discovery.directory() / (uuid.uuid4().hex + ".json")
+            legacy.write_text(json.dumps({"host": "127.0.0.1", "port": 9002,
+                                          "started": 1, "editor_url": ""}), encoding="utf-8")
+            self.assertEqual(discovery.candidates(), [("127.0.0.1", 9000),
+                                                       ("127.0.0.1", 9002),
+                                                       ("127.0.0.1", 9001)])
+            discovery.forget_failed("127.0.0.1", 9000)
+            discovery.forget_failed("127.0.0.1", 9001)
+            discovery.forget_failed("127.0.0.1", 9002)
+            self.assertFalse(owned.exists())
+            self.assertFalse(legacy.exists())
+            self.assertTrue(foreign.exists())
+            self.assertEqual(discovery.candidates(), [("127.0.0.1", 9001)])
 
     def test_read_object_preserves_custom_mesh_attributes(self):
         obj, graph = custom_attribute_object()

@@ -347,16 +347,20 @@ def _connection(host=None, port=None):
     if _client is None or endpoint != _endpoint or _client.sock is None:
         disconnect()
         from .instance_client import InstanceClient
-        from .discovery import candidates
+        from .discovery import candidates, forget_failed
         choices = list(dict.fromkeys([("127.0.0.1", 8765)] + candidates() + [endpoint])) if automatic else [endpoint]
         for address in choices:
             client = InstanceClient(*address, timeout=0.4 if automatic else 30.0)
+            connected = False
             try:
                 header = client.connect()
+                connected = True
                 if automatic and not required.issubset(header.get("capabilities", [])):
                     raise RuntimeError("This engine needs updating")
             except (OSError, RuntimeError, ValueError):
                 client.close()
+                if automatic and not connected:
+                    forget_failed(*address)
                 if not automatic:
                     raise
                 continue
