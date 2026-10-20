@@ -1,5 +1,5 @@
-use crate::error::{Error, Result};
 use super::{area2, cross2, V2};
+use crate::error::{Error, Result};
 
 pub(crate) fn inside_poly(p: V2, poly: &[usize], xy: &[V2]) -> bool {
     let mut c = false;

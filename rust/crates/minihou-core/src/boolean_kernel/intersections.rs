@@ -26,7 +26,12 @@ fn bounds(p: &[V], t: &[[usize; 3]]) -> Vec<(V, V)> {
 }
 
 /// Sweep broad phase; same lexicographic candidate order as numpy.unique, no quadratic allocation.
-pub(crate) fn candidates(pa: &[V], ta: &[[usize; 3]], pb: &[V], tb: &[[usize; 3]]) -> Vec<(usize, usize)> {
+pub(crate) fn candidates(
+    pa: &[V],
+    ta: &[[usize; 3]],
+    pb: &[V],
+    tb: &[[usize; 3]],
+) -> Vec<(usize, usize)> {
     let a = bounds(pa, ta);
     let b = bounds(pb, tb);
     let mut order: Vec<_> = (0..b.len()).collect();

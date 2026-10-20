@@ -1,11 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use crate::error::{Error, Result};
 use super::{
-    add, cross, dot, len, mul, sub,
+    add, cross,
     cuts::{inner_point, split_triangle},
+    dot,
     intersections::{candidates, distances, inside, interval, planes},
-    Dsu, Output, Piece, V,
+    len, mul, sub, Dsu, Output, Piece, V,
 };
+use crate::error::{Error, Result};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub(crate) fn boolean(
     pa: &[V],

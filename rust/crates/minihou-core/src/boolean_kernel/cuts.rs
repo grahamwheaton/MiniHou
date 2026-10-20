@@ -1,12 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet};
-use crate::error::{Error, Result};
 use super::{
-    add, area2, basis, cross, cross2, dot, mul, unit,
+    add, area2, basis, cross, cross2, dot, mul,
     polygons::{earclip, holes_into, inside_poly},
-    V, V2,
+    unit, V, V2,
 };
+use crate::error::{Error, Result};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) fn split_triangle(xy: &[V2], boundary: Vec<usize>, segs: &[[usize; 2]]) -> Result<Vec<Vec<usize>>> {
+pub(crate) fn split_triangle(
+    xy: &[V2],
+    boundary: Vec<usize>,
+    segs: &[[usize; 2]],
+) -> Result<Vec<Vec<usize>>> {
     // Vec preserves Python dict insertion order (important for the bridge and ear policies).
     let mut order = vec![];
     let mut adj = vec![vec![]; xy.len()];
