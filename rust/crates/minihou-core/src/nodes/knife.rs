@@ -647,7 +647,7 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         *face = expanded;
         vertexweights[fi] = attrs;
     }
-    let protected = |a: usize, b: usize| {
+    let protected_in = |positions: &[[f64; 3]], a: usize, b: usize| {
         segments.iter().any(|seg| {
             let q = [seg.project(positions[a]), seg.project(positions[b])];
             if q.iter().any(|q| q[3] <= EPS) {
@@ -663,6 +663,7 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 })
         })
     };
+    let protected = |a: usize, b: usize| protected_in(&positions, a, b);
     loop {
         let mut owners = BTreeMap::<(usize, usize), Vec<usize>>::new();
         let mut order = Vec::new();
@@ -735,6 +736,42 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             break;
         }
     }
+    // Triangulation diagonals are an artefact: a crossing on a diagonal that is not an original
+    // edge, sitting collinear between its face neighbours, is not a vertex the user asked for.
+    {
+        let original_edges: BTreeSet<(usize, usize)> = topo::edges(&g.topology, g.npoints)
+            .points.chunks_exact(2).map(|p| pair(p[0] as usize, p[1] as usize)).collect();
+        let on_diagonal = |i: usize| i >= g.npoints && pointweights[i].len() == 2
+            && !original_edges.contains(&pair(pointweights[i][0].0, pointweights[i][1].0));
+        for (fi, face) in faces.iter_mut().enumerate() {
+            let mut keep = Vec::new();
+            for j in 0..face.len() {
+                let (prev, cur, next) = (face[(j + face.len() - 1) % face.len()], face[j], face[(j + 1) % face.len()]);
+                let (u, v) = (sub(positions[cur], positions[prev]), sub(positions[next], positions[cur]));
+                let collinear = len(cross(u, v)) <= 1e-9 * len(u).max(1e-30) * len(v).max(1e-30) && dot(u, v) > 0.;
+                keep.push(!(on_diagonal(cur) && collinear));
+            }
+            if keep.iter().filter(|k| **k).count() < 3 { continue; }
+            let mut j = 0;
+            face.retain(|_| { j += 1; keep[j - 1] });
+            let mut j = 0;
+            vertexweights[fi].retain(|_| { j += 1; keep[j - 1] });
+        }
+        let mut used = vec![false; positions.len()];
+        for &i in faces.iter().flatten() { used[i] = true; }
+        let mut remap = vec![usize::MAX; positions.len()];
+        let mut next = 0;
+        for i in 0..positions.len() {
+            if i < g.npoints || used[i] { remap[i] = next; next += 1; }
+        }
+        if next < positions.len() {
+            let keep = |i: usize| remap[i] != usize::MAX;
+            positions = positions.iter().enumerate().filter(|(i, _)| keep(*i)).map(|(_, p)| *p).collect();
+            pointweights = pointweights.into_iter().enumerate().filter(|(i, _)| keep(*i)).map(|(_, w)| w).collect();
+            for f in faces.iter_mut() { for i in f.iter_mut() { *i = remap[*i]; } }
+        }
+    }
+    let protected = |a: usize, b: usize| protected_in(&positions, a, b);
     let mut point = interpolate(&g.point, &pointweights);
     point.insert("point_group_knife".into(), Arc::new(Attr::i32(1,
         (0..pointweights.len()).map(|i| i32::from(i>=g.npoints)).collect())));
@@ -925,7 +962,8 @@ mod tests {
         let out = knife(&[vec![Arc::new(g)]], &p).unwrap();
         out.validate().unwrap();
         assert_eq!(out.nprims(), 2);
-        assert_eq!(out.npoints, 7);
+        // Two edge crossings only; the old 7th point was the triangulation-diagonal artefact.
+        assert_eq!(out.npoints, 6);
         assert!(
             edges::values(&out, "edge_group_knife")
                 .unwrap()
@@ -969,6 +1007,18 @@ mod tests {
         assert!(through.nprims()>visible.nprims());
     }
     #[test]
+    fn diagonal_cut_adds_only_edge_crossings() {
+        let g=Geometry::from_arrays(vec![-1.,-1.,0.,1.,-1.,0.,1.,1.,0.,-1.,1.,0.],vec![0,1,2,3],vec![0,4],None).unwrap();
+        let matrix=[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.];
+        // Crosses the quad's internal triangulation diagonal, which must not leave a point.
+        let cuts=json!([{"matrix":matrix,"a":[-2.,-1.],"b":[2.,1.],"through":true}]).to_string();
+        let p=Params::resolve(KNIFE.params,json!({"cuts":cuts}).as_object()).unwrap();
+        let out=knife(&[vec![Arc::new(g)]],&p).unwrap(); out.validate().unwrap();
+        assert_eq!(out.nprims(),2);
+        assert_eq!(out.npoints,6);
+        let extra=out.p().chunks_exact(3).skip(4).map(|q|(q[0],q[1])).collect::<Vec<_>>();
+        assert!(extra.iter().any(|&(x,y)|x==-1.&&y==-0.5)&&extra.iter().any(|&(x,y)|x==1.&&y==0.5),"{extra:?}");
+    }    #[test]
     fn empty_and_invalid_projection() {
         let g = Geometry::points_only(vec![0., 0., 0.]).unwrap();
         let p = Params::resolve(KNIFE.params, None).unwrap();

@@ -204,7 +204,19 @@ pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp:
 pub fn captures_wheel(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool == Some(Tool::LoopCut)))
 }
-pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::ops::Range<u32>)>, out: &mut Actions) {
+/// Inference categories the Knife offers; edge-centre (midpoint) snapping is always on.
+fn knife_inference_mask(enabled: u32) -> u32 {
+    enabled & (inf::cat::VERTEX | inf::cat::MIDPOINT | inf::cat::EDGE | inf::cat::FACE | inf::cat::EXTENSION)
+}
+#[cfg(test)]
+mod knife_snap_tests {
+    use super::*;
+    #[test]
+    fn midpoint_stays_enabled_without_modifier() {
+        assert_ne!(knife_inference_mask(inf::cat::POINTS) & inf::cat::MIDPOINT, 0);
+        assert_eq!(knife_inference_mask(inf::cat::MIDPOINT | inf::cat::AXIS), inf::cat::MIDPOINT);
+    }
+}pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::ops::Range<u32>)>, out: &mut Actions) {
     let tool = v.editor.tool;
     if !matches!(tool, Tool::Knife | Tool::LoopCut | Tool::EdgeSlide) { cancel(ui.ctx()); return; }
     let ctx = ui.ctx().clone();
@@ -251,8 +263,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
             let settings = ctx.data(|d| d.get_temp::<inf::InferenceSettings>(super::sketch::settings_id())).unwrap_or_default();
             let mut settings = settings;
             s.snap_tolerance=settings.tolerance_px;
-            settings.enabled &= inf::cat::VERTEX | inf::cat::MIDPOINT | inf::cat::EDGE | inf::cat::FACE | inf::cat::EXTENSION;
-            if !modifiers.ctrl { settings.enabled &= !inf::cat::MIDPOINT; }
+            settings.enabled = knife_inference_mask(settings.enabled);
             settings.include_hidden = s.cut_through;
             let projector = Projector { matrix:v.camera.projection, rect_min:[rect.min.x,rect.min.y], rect_size:[rect.width(),rect.height()] };
             let ray = transform_gizmo::ray(v.camera,rect,at);
