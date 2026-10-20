@@ -1,5 +1,24 @@
 use super::*;
 
+// Keep the shared shader outside the scoped viewport changes. At grazing angles a
+// pixel spans several grid cells; the old smoothstep made every cell look filled.
+fn viewport_shader() -> String {
+    let source = include_str!("../shader.wgsl");
+    let old = "return 1.-smoothstep(0.,width*1.2,edge);";
+    assert!(source.contains(old));
+    let mut shader = source.replace(old, "return (1.-smoothstep(0.,width*1.2,edge)) * (1.-smoothstep(0.25,0.5,width));");
+    shader.push_str(include_str!("group_lines.wgsl"));
+    shader
+}
+
+#[cfg(test)]
+#[test]
+fn distant_grid_fades_when_a_pixel_covers_multiple_cells() {
+    let shader = viewport_shader();
+    assert!(shader.contains("smoothstep(0.25,0.5,width)"));
+    assert!(!shader.contains("return 1.-smoothstep(0.,width*1.2,edge);"));
+}
+
 impl Gpu {
     pub fn new_lod(device: &wgpu::Device, sc: &Scene) -> Self {
         Self::new(device,&sc.proxied(0.0))
@@ -64,7 +83,7 @@ impl Gpu {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(viewport_shader().into()),
         });
         const POS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
         const NRM: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![1 => Float32x3];
@@ -106,7 +125,9 @@ impl Gpu {
         let z_axis=buf("z axis",bytemuck::cast_slice(&[Element {a:[0.,0.,-1e6],b:[0.,0.,1e6],kind:6,selected:0}]),wgpu::BufferUsages::VERTEX);
         let pipe_face_markers=mk("face centres","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,-2,true,C::LessEqual,false,W::ALL);
         let pipe_face_markers_xray=mk("face centres xray","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,-2,true,C::Always,false,W::ALL);
-        let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-1,true,C::LessEqual,true,W::ALL);
+        // A corner shared by three faces needs enough depth bias to keep its
+        // marker visible against the adjacent rasterized triangles.
+        let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-4,true,C::LessEqual,true,W::ALL);
         let pipe_elements_ghost=mk("ghost points and curves","vs_element","fs_element_ghost",&element_bufs,T::TriangleList,-1,true,C::LessEqual,false,W::ALL);
         let pipe_surf = mk("surf", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 0, false, C::LessEqual, true, W::ALL);
         let pipe_tex=mk("textured surface","vs_tex","fs_tex",&tex_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
@@ -124,13 +145,15 @@ impl Gpu {
         let pipe_bounds = mk("bounds", "vs_wire", "fs_bounds", &wire_bufs, T::LineList, 0, false, C::LessEqual, true, W::ALL);
         let group_bufs=[vb(&POS)];
         let pipe_group_face=mk("group fill","vs_group","fs_group_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
-        let pipe_group_line=mk("group outline","vs_group","fs_group_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
+        const THICK_ATTRS:[wgpu::VertexAttribute;2]=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3];
+        let thick_bufs=[wgpu::VertexBufferLayout {array_stride:24,step_mode:wgpu::VertexStepMode::Instance,attributes:&THICK_ATTRS}];
+        let pipe_group_line=mk("group outline","vs_group_thick","fs_group_line",&thick_bufs,T::TriangleList,-4,true,C::LessEqual,false,W::ALL);
         let point_bufs=[wgpu::VertexBufferLayout {array_stride:12,step_mode:wgpu::VertexStepMode::Instance,attributes:&POS}];
         let pipe_group_point=mk("group points","vs_group_point","fs_group_point",&point_bufs,T::TriangleList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_barrier_face=mk("barrier fill","vs_group","fs_barrier_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
         let pipe_barrier_line=mk("barrier outline","vs_group","fs_barrier_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_target_face=mk("target fill","vs_group","fs_target_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
-        let pipe_target_line=mk("target outline","vs_group","fs_target_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
+        let pipe_target_line=mk("target outline","vs_group_thick","fs_target_line",&thick_bufs,T::TriangleList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_select = mk("select", "vs_surf", "fs_select", &surf_bufs, T::TriangleList, -2, true, C::LessEqual, false, W::ALL);
 
         let pipe_mask = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

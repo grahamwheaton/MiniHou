@@ -1,5 +1,41 @@
 use super::*;
 
+fn needs_selection_depth(mode: Mode, xray: bool, editing: bool, faces: bool) -> bool {
+    !xray && faces && (mode.hidden() || (editing && !mode.shaded()))
+}
+
+fn viewport_point_size(size: f32, mode: crate::ui::SelectionMode) -> f32 {
+    size * if mode == crate::ui::SelectionMode::Points { 2.0 } else { 1.0 }
+}
+
+fn show_object_outline(selected: bool, mode: crate::ui::SelectionMode) -> bool {
+    selected && mode == crate::ui::SelectionMode::Object
+}
+
+#[cfg(test)]
+#[test]
+fn object_outline_is_hidden_in_every_edit_selection_mode() {
+    for mode in [crate::ui::SelectionMode::Points, crate::ui::SelectionMode::Edges, crate::ui::SelectionMode::Faces] {
+        assert!(!show_object_outline(true, mode));
+    }
+    assert!(show_object_outline(true, crate::ui::SelectionMode::Object));
+}
+
+#[cfg(test)]
+#[test]
+fn edit_highlights_have_occluding_depth_when_faces_are_drawn() {
+    assert!(needs_selection_depth(Mode::Wireframe, false, true, true));
+    assert!(!needs_selection_depth(Mode::SmoothShaded, false, true, false));
+    assert!(!needs_selection_depth(Mode::SmoothShaded, true, true, false));
+}
+
+#[cfg(test)]
+#[test]
+fn point_mode_supports_half_the_previous_marker_size() {
+    assert_eq!(viewport_point_size(1.0, crate::ui::SelectionMode::Points), 2.0);
+    assert_eq!(viewport_point_size(0.5, crate::ui::SelectionMode::Points), 1.0);
+}
+
 impl Gpu {
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
@@ -52,7 +88,7 @@ impl Gpu {
             flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,if sketchup_clean {2} else {mode.matcap() as u32}],
             object_color:(overlay.object_color==ObjectColor::Random || use_cd) as u32,_pad_color:[0;3],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
-            element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size*if selection_mode==crate::ui::SelectionMode::Points {4.} else {1.},overlay.geometry.line_width],
+            element_size:[target.size[0] as f32,target.size[1] as f32,viewport_point_size(overlay.geometry.point_size, selection_mode),overlay.geometry.line_width],
             element_flags:[(overlay.geometry.points || selection_mode==crate::ui::SelectionMode::Points) as u32,overlay.geometry.lines as u32,points_visible(&overlay.geometry,selection_mode) as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
             element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
         queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
@@ -78,7 +114,7 @@ impl Gpu {
                 depth_stencil_attachment:Some(wgpu::RenderPassDepthStencilAttachment {
                     view:&target.depth,depth_ops:Some(wgpu::Operations {
                         load:wgpu::LoadOp::Clear(1.),
-                        store:if selected_object { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard }
+                        store:if show_object_outline(selected_object, selection_mode) { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard }
                     }),stencil_ops:None,
                 }),
                 timestamp_writes:None,occlusion_query_set:None,
@@ -88,10 +124,14 @@ impl Gpu {
             pass.set_vertex_buffer(0,vp.slice(..)); pass.set_vertex_buffer(1,vn.slice(..)); pass.set_vertex_buffer(2,vc.slice(..));
             pass.set_index_buffer(tri.buffer.slice(..),wgpu::IndexFormat::Uint32);
             let visible=tri.visible(visibility);
-            if overlay.geometry.faces && !visible.is_empty() {
-                if mode.hidden() && !overlay.xray {
+            if !visible.is_empty() {
+                // Edit highlights need a surface depth buffer even in wireframe or
+                // with face display disabled. Otherwise back-side selection bleeds through.
+                if needs_selection_depth(mode, overlay.xray, editing, overlay.geometry.faces) {
                     pass.set_pipeline(&self.pipe_depth); pass.draw_indexed(visible.clone(),0,0..1);
                 }
+            }
+            if overlay.geometry.faces && !visible.is_empty() {
                 if mode.shaded() || mode == Mode::WireframeGhost {
                     let textured=overlay.textures && matches!(mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded)
                         && overlay.object_color==ObjectColor::Single && !self.tex_batches.is_empty();
@@ -153,12 +193,12 @@ impl Gpu {
             }
             if !mode.bounds() && overlay.geometry.enabled {
                 if self.group_face_n>0 {pass.set_pipeline(&self.pipe_group_face);pass.set_vertex_buffer(0,self.group_face.slice(..));pass.draw(0..self.group_face_n,0..1);}
-                if self.group_line_n>0 {pass.set_pipeline(&self.pipe_group_line);pass.set_vertex_buffer(0,self.group_line.slice(..));pass.draw(0..self.group_line_n,0..1);}
+                if self.group_line_n>0 {pass.set_pipeline(&self.pipe_group_line);pass.set_vertex_buffer(0,self.group_line.slice(..));pass.draw(0..6,0..self.group_line_n/2);}
                 if self.group_point_n>0 {pass.set_pipeline(&self.pipe_group_point);pass.set_vertex_buffer(0,self.group_point.slice(..));pass.draw(0..6,0..self.group_point_n);}
                 if self.barrier_face_n>0 {pass.set_pipeline(&self.pipe_barrier_face);pass.set_vertex_buffer(0,self.barrier_face.slice(..));pass.draw(0..self.barrier_face_n,0..1);}
                 if self.barrier_line_n>0 {pass.set_pipeline(&self.pipe_barrier_line);pass.set_vertex_buffer(0,self.barrier_line.slice(..));pass.draw(0..self.barrier_line_n,0..1);}
                 if self.target_face_n>0 {pass.set_pipeline(&self.pipe_target_face);pass.set_vertex_buffer(0,self.target_face.slice(..));pass.draw(0..self.target_face_n,0..1);}
-                if self.target_line_n>0 {pass.set_pipeline(&self.pipe_target_line);pass.set_vertex_buffer(0,self.target_line.slice(..));pass.draw(0..self.target_line_n,0..1);}
+                if self.target_line_n>0 {pass.set_pipeline(&self.pipe_target_line);pass.set_vertex_buffer(0,self.target_line.slice(..));pass.draw(0..6,0..self.target_line_n/2);}
             }
             if selection_mode == crate::ui::SelectionMode::Faces && !mode.bounds() && self.face_markers.count > 0 {
                 pass.set_pipeline(if overlay.xray {&self.pipe_face_markers_xray}else{&self.pipe_face_markers});
@@ -186,7 +226,7 @@ impl Gpu {
                 }
             }
         }
-        if selected_object && (boxes.is_some_and(|b| b.tri.selected>0) || self.object_mask_n > 0 || (self.object_mask.is_none() && self.ntri_idx > 0)) {
+        if show_object_outline(selected_object, selection_mode) && (boxes.is_some_and(|b| b.tri.selected>0) || self.object_mask_n > 0 || (self.object_mask.is_none() && self.ntri_idx > 0)) {
             {
                 let mut mask_pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("MiniHou object mask"),
