@@ -108,3 +108,4 @@ Use one scratch worktree and one commit series **per file job**, all from the sa
 - Batch 4 (curves, procedural_systems, usd_io, session): next.
 - Batch 4 merged 2026-10-20 20:25: curves.rs, procedural_systems.rs, usd_io.rs, session.rs (Bob, scheduled tasks BobT4*). Full suite 1435 passed. Disk was full mid-run; cleared regenerable target folders from finished worktrees (156 GB free after).
 - Batch 5 in progress: picking.rs (Jim), widgets.rs and network.rs (Flash). usd_io/reader.rs now unblocked (batch 4 merged).
+- Batch 5 (picking, widgets, network) merged 2026-10-20 20:40 (Jim and Flash). Full suite 1435 passed.
