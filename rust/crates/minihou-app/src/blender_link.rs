@@ -169,8 +169,14 @@ impl LinkServer {
                     }
                 }
                 state.stop.store(true, Ordering::Relaxed);
-                for (socket, _) in &clients {
-                    let _ = socket.shutdown(Shutdown::Both);
+                // Give connected peers a brief chance to receive the normal
+                // bye frame. A partial handshake still needs a forced wakeup.
+                let grace = Instant::now() + Duration::from_millis(50);
+                while clients.iter().any(|(_, client)| !client.is_finished()) && Instant::now() < grace {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                for (socket, client) in &clients {
+                    if !client.is_finished() { let _ = socket.shutdown(Shutdown::Both); }
                 }
                 // Release the port and wake every peer before waiting for cooks.
                 // Rust cannot cancel a thread executing an arbitrary graph node.
