@@ -90,7 +90,7 @@ pub fn specification(mode: SketchMode, points: &[[f32; 3]], plane: Plane) -> Opt
     }
     Some((points,closed))
 }
-pub(super) fn outline_crosses(points: &[[f32; 2]]) -> bool {
+fn outline_crosses(points: &[[f32; 2]]) -> bool {
     let cross = |a: [f32; 2], b: [f32; 2], c: [f32; 2]| (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]);
     for i in 0..points.len() {
         for j in i+2..points.len() {
@@ -101,7 +101,7 @@ pub(super) fn outline_crosses(points: &[[f32; 2]]) -> bool {
     }
     false
 }
-pub(super) fn plane_hit(ray: ([f32; 3], [f32; 3]), plane: Plane, origin: [f32; 3]) -> Option<[f32; 3]> {
+fn plane_hit(ray: ([f32; 3], [f32; 3]), plane: Plane, origin: [f32; 3]) -> Option<[f32; 3]> {
     let (_, _, n) = plane.basis(); let denom = dot(ray.1, n);
     if denom.abs() < 1e-5 { return None; }
     let t = dot(sub(origin, ray.0), n) / denom;
