@@ -65,10 +65,41 @@ pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Val
     Some(name_domain(name, meta))
 }
 
-pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, enabled: bool) -> (bool, bool) {
+/// Group attributes on the cooked input, filtered to the field's element domain.
+pub fn input_groups(g: &minihou_core::Geometry, mode: SelectionMode) -> Vec<String> {
+    let mut names = std::collections::BTreeSet::new();
+    let tables: &[&minihou_core::geometry::AttrTable] = match mode {
+        SelectionMode::Points => &[&g.point],
+        SelectionMode::Edges => &[&g.edge, &g.vertex],
+        SelectionMode::Faces => &[&g.prim],
+        SelectionMode::Object => &[],
+    };
+    for table in tables {
+        for key in table.keys() {
+            if let Some(name) = key.strip_prefix("group_").or_else(||
+                (mode == SelectionMode::Edges).then(|| key.strip_prefix("edge_group_")).flatten()) {
+                if !name.is_empty() { names.insert(name.to_owned()); }
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
+pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, enabled: bool,
+    groups: impl FnOnce() -> Vec<String>) -> (bool, bool) {
     let mut text = value.as_str().unwrap_or_default().to_owned();
-    let edit = ui.add_sized([(width - 28.).max(8.), 22.], egui::TextEdit::singleline(&mut text));
+    let edit = ui.add_sized([(width - 56.).max(8.), 22.], egui::TextEdit::singleline(&mut text)
+        .hint_text("Group name or wildcard"));
     if edit.changed() { *value = json!(text); }
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.menu_button("▾", |ui| {
+            let names = groups();
+            if names.is_empty() { ui.label("No groups on input"); }
+            for name in names {
+                if ui.button(&name).clicked() { *value = json!(name); ui.close(); }
+            }
+        }).response.on_hover_text("Groups detected on the input");
+    });
     let arrow = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
         .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
         .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)");
@@ -163,5 +194,18 @@ mod tests {
     #[test]
     fn arrow_ink_is_purple() {
         assert_eq!(PICK_PURPLE, Color32::from_rgb(184, 82, 245));
+    }
+
+    #[test]
+    fn input_group_menu_uses_the_selected_domain() {
+        let mut g = minihou_core::Geometry::points_only(vec![0., 0., 0.]).unwrap();
+        use minihou_core::geometry::Attr;
+        use std::sync::Arc;
+        g.point.insert("group_points".into(), Arc::new(Attr::i32(1, vec![1])));
+        g.edge.insert("edge_group_edges".into(), Arc::new(Attr::i32(1, vec![])));
+        g.prim.insert("group_faces".into(), Arc::new(Attr::i32(1, vec![])));
+        assert_eq!(input_groups(&g, SelectionMode::Points), ["points"]);
+        assert_eq!(input_groups(&g, SelectionMode::Edges), ["edges"]);
+        assert_eq!(input_groups(&g, SelectionMode::Faces), ["faces"]);
     }
 }

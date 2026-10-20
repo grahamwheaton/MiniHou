@@ -2267,62 +2267,6 @@
    "kind": "bool"
   }
  },
- "fence": {
-  "batten_thickness": {
-   "default": 0.07,
-   "doc": "Thickness of the X battens in the top band",
-   "kind": "float",
-   "min": 0.01,
-   "soft_max": 0.3
-  },
-  "bay_width": {
-   "default": 2.0,
-   "doc": "Distance between posts along the path",
-   "kind": "float",
-   "min": 0.1,
-   "soft_max": 6.0
-  },
-  "height": {
-   "default": 1.8,
-   "doc": "Overall panel height",
-   "kind": "float",
-   "min": 0.1,
-   "soft_max": 4.0
-  },
-  "path": {
-   "default": "",
-   "doc": "Curve or polyline the fence follows",
-   "kind": "geometry"
-  },
-  "post_size": {
-   "default": 0.12,
-   "doc": "Width and depth of each post",
-   "kind": "float",
-   "min": 0.01,
-   "soft_max": 0.5
-  },
-  "rail_height": {
-   "default": 0.85,
-   "doc": "Height of the lower rail above the ground",
-   "kind": "float",
-   "min": 0.0,
-   "soft_max": 3.0
-  },
-  "slat_gap": {
-   "default": 0.05,
-   "doc": "Gap between slats",
-   "kind": "float",
-   "min": 0.0,
-   "soft_max": 0.5
-  },
-  "slat_width": {
-   "default": 0.1,
-   "doc": "Width of each vertical slat",
-   "kind": "float",
-   "min": 0.01,
-   "soft_max": 0.5
-  }
- },
  "fillet": {
   "divisions": {
    "default": 6,

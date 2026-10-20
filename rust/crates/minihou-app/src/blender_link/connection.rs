@@ -358,8 +358,15 @@ pub(crate) fn serve_client(
         }
         Ok(())
     })();
-    // Wake read_exact and release a full incoming queue before any cleanup.
-    let _ = socket.shutdown(Shutdown::Both);
+    // Tell a connected Blender client this is an ordinary editor exit before
+    // closing our write half. A full shutdown with unread data can surface as
+    // WinError 10053 in the add-on instead of a clean disconnect.
+    if state.stop.load(Ordering::Relaxed) {
+        let _ = send_frame(&mut socket, &json!({"type":"bye"}), &Arrays::new());
+        let _ = socket.shutdown(Shutdown::Write);
+    } else {
+        let _ = socket.shutdown(Shutdown::Both);
+    }
     drop(received);
     join_until(reader_thread, Instant::now() + Duration::from_millis(50));
     instances.clear();
@@ -367,4 +374,24 @@ pub(crate) fn serve_client(
     state.peers.lock().unwrap().remove(&id);
     if names_capable { if let Ok(mut hub) = minihou_app::object_names::HUB.lock() { hub.capable_peers = hub.capable_peers.saturating_sub(1); } }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::LinkServer;
+    use minihou_app::Document;
+    use std::path::Path;
+
+    #[test]
+    fn connected_peer_receives_bye_on_editor_exit() {
+        let doc = Document::parse(r#"{"nodes":{},"display":null}"#.into()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("graph.json")).unwrap();
+        let mut peer = TcpStream::connect(server.address()).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        send_frame(&mut peer, &json!({"type":"hello","protocol":link_protocol::PROTOCOL_VERSION,"mode":"instances"}), &Arrays::new()).unwrap();
+        assert_eq!(link_protocol::read_message(&mut peer, 1024 * 1024).unwrap().0["type"], "welcome");
+        drop(server);
+        assert_eq!(link_protocol::read_message(&mut peer, 1024 * 1024).unwrap().0["type"], "bye");
+    }
 }
