@@ -502,6 +502,28 @@ mod multi_output_cache_tests {
     }
 }
 
+#[cfg(test)]
+mod sidecar_hook_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn another_node_attaches_and_caches_its_sidecar() {
+        let graph = Graph::from_value(&json!({"nodes": {
+            "simple": {"type": "test_sidecar"}
+        }})).unwrap();
+        let mut session = Session::new(graph);
+        let geometry = session.cook(Some("simple")).unwrap();
+        assert_eq!(geometry.npoints, 0);
+        let payload = session.side_payload::<String>("simple").unwrap();
+        assert_eq!(payload.as_str(), "attached");
+        assert_eq!(session.cache_bytes(), geometry_bytes(&geometry) + 8);
+        session.cook(Some("simple")).unwrap();
+        assert_eq!(session.last_stats().cached, vec!["simple"]);
+        assert!(Arc::ptr_eq(&payload, &session.side_payload::<String>("simple").unwrap()));
+    }
+}
+
 struct Run<'a> {
     cancel: Option<&'a (dyn Fn() -> bool + Send + Sync)>,
     graph: &'a Graph,
