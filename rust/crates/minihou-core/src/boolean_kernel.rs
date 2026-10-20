@@ -9,6 +9,7 @@ pub(crate) mod polygons;
 pub(crate) use assembly::boolean;
 #[allow(unused_imports)]
 pub(crate) use cuts::inner_point;
+#[allow(unused_imports)]
 pub(crate) use intersections::orient3d;
 pub(crate) use polygons::{earclip, holes_into};
 
