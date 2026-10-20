@@ -6,7 +6,9 @@ fn viewport_shader() -> String {
     let source = include_str!("../shader.wgsl");
     let old = "return 1.-smoothstep(0.,width*1.2,edge);";
     assert!(source.contains(old));
-    source.replace(old, "return (1.-smoothstep(0.,width*1.2,edge)) * (1.-smoothstep(0.25,0.5,width));")
+    let mut shader = source.replace(old, "return (1.-smoothstep(0.,width*1.2,edge)) * (1.-smoothstep(0.25,0.5,width));");
+    shader.push_str(include_str!("group_lines.wgsl"));
+    shader
 }
 
 #[cfg(test)]
@@ -143,13 +145,15 @@ impl Gpu {
         let pipe_bounds = mk("bounds", "vs_wire", "fs_bounds", &wire_bufs, T::LineList, 0, false, C::LessEqual, true, W::ALL);
         let group_bufs=[vb(&POS)];
         let pipe_group_face=mk("group fill","vs_group","fs_group_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
-        let pipe_group_line=mk("group outline","vs_group","fs_group_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
+        const THICK_ATTRS:[wgpu::VertexAttribute;2]=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3];
+        let thick_bufs=[wgpu::VertexBufferLayout {array_stride:24,step_mode:wgpu::VertexStepMode::Instance,attributes:&THICK_ATTRS}];
+        let pipe_group_line=mk("group outline","vs_group_thick","fs_group_line",&thick_bufs,T::TriangleList,-4,true,C::LessEqual,false,W::ALL);
         let point_bufs=[wgpu::VertexBufferLayout {array_stride:12,step_mode:wgpu::VertexStepMode::Instance,attributes:&POS}];
         let pipe_group_point=mk("group points","vs_group_point","fs_group_point",&point_bufs,T::TriangleList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_barrier_face=mk("barrier fill","vs_group","fs_barrier_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
         let pipe_barrier_line=mk("barrier outline","vs_group","fs_barrier_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_target_face=mk("target fill","vs_group","fs_target_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
-        let pipe_target_line=mk("target outline","vs_group","fs_target_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
+        let pipe_target_line=mk("target outline","vs_group_thick","fs_target_line",&thick_bufs,T::TriangleList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_select = mk("select", "vs_surf", "fs_select", &surf_bufs, T::TriangleList, -2, true, C::LessEqual, false, W::ALL);
 
         let pipe_mask = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
