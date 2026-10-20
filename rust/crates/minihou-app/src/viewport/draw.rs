@@ -1,5 +1,17 @@
 use super::*;
 
+fn needs_selection_depth(mode: Mode, xray: bool, editing: bool, faces: bool) -> bool {
+    !xray && faces && (mode.hidden() || (editing && !mode.shaded()))
+}
+
+#[cfg(test)]
+#[test]
+fn edit_highlights_have_occluding_depth_when_faces_are_drawn() {
+    assert!(needs_selection_depth(Mode::Wireframe, false, true, true));
+    assert!(!needs_selection_depth(Mode::SmoothShaded, false, true, false));
+    assert!(!needs_selection_depth(Mode::SmoothShaded, true, true, false));
+}
+
 impl Gpu {
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
@@ -88,10 +100,14 @@ impl Gpu {
             pass.set_vertex_buffer(0,vp.slice(..)); pass.set_vertex_buffer(1,vn.slice(..)); pass.set_vertex_buffer(2,vc.slice(..));
             pass.set_index_buffer(tri.buffer.slice(..),wgpu::IndexFormat::Uint32);
             let visible=tri.visible(visibility);
-            if overlay.geometry.faces && !visible.is_empty() {
-                if mode.hidden() && !overlay.xray {
+            if !visible.is_empty() {
+                // Edit highlights need a surface depth buffer even in wireframe or
+                // with face display disabled. Otherwise back-side selection bleeds through.
+                if needs_selection_depth(mode, overlay.xray, editing, overlay.geometry.faces) {
                     pass.set_pipeline(&self.pipe_depth); pass.draw_indexed(visible.clone(),0,0..1);
                 }
+            }
+            if overlay.geometry.faces && !visible.is_empty() {
                 if mode.shaded() || mode == Mode::WireframeGhost {
                     let textured=overlay.textures && matches!(mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded)
                         && overlay.object_color==ObjectColor::Single && !self.tex_batches.is_empty();
