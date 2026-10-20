@@ -47,6 +47,7 @@ pub enum UiAction {
     StartSketch(sketch::SketchMode),
     TransformNode { op: TransformOp },
     StartModal(modal_transform::Kind),
+    StartScaleCage,
     FinishTransform,
     CancelTransform,
     MeshCutCommit { source: String, node_type: String, params: serde_json::Value },

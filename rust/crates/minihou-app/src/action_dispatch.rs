@@ -374,6 +374,12 @@ impl App {
                     if node["type"]=="bezier" && ui::curve_tool::start_modal(ctx,&self.selected,&controls,kind,pointer) { ctx.request_repaint(); }
                     else { self.start_modal(ctx,kind); }
                 },
+                UiAction::StartScaleCage => {
+                    if self.modal.is_none() {
+                        self.start_modal(ctx, ui::modal_transform::Kind::Scale);
+                        if let Some(modal) = &mut self.modal { modal.cage = true; }
+                    }
+                },
                 UiAction::FinishTransform => self.finish_transform(),
                 UiAction::CancelTransform => self.cancel_transform(),
                 UiAction::MeshCutCommit { source, node_type, params } => {
