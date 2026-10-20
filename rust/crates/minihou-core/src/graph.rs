@@ -197,7 +197,7 @@ impl Graph {
     /// Promoted names are declared on a subnet and stored as ordinary outer params.
     pub fn promoted_param(&self, id: &str, name: &str) -> Option<&Value> {
         if let Some(node) = self.source["nodes"].get(id) {
-            return node["promoted_params"].as_array()?.iter().find(|p| p["name"] == name);
+            return nodes::subnet_public_params(node).into_iter().find(|p| p["name"] == name);
         }
         let mut node = &self.source["nodes"];
         let mut parts = id.split('/').peekable();
@@ -205,7 +205,17 @@ impl Graph {
             node = &node[part];
             if parts.peek().is_some() { node = &node["inner"]["nodes"]; }
         }
-        node["promoted_params"].as_array()?.iter().find(|p| p["name"] == name)
+        nodes::subnet_public_params(node).into_iter().find(|p| p["name"] == name)
+    }
+
+    pub(crate) fn promoted_params(&self, id: &str) -> Vec<&Value> {
+        let mut node = &self.source["nodes"];
+        let mut parts = id.split('/').peekable();
+        while let Some(part) = parts.next() {
+            node = &node[part];
+            if parts.peek().is_some() { node = &node["inner"]["nodes"]; }
+        }
+        nodes::subnet_public_params(node)
     }
 
     /// The display node, else the first `output` node without its own Blender object, else the first `output`.
@@ -367,6 +377,8 @@ fn subnet_alias(node: &Value, source: Value) -> Value {
     for field in ["params","channels","promoted_params"] {
         if let Some(value)=node.get(field) {alias[field]=value.clone();}
     }
+    let public = nodes::subnet_public_params(node);
+    if !public.is_empty() { alias["promoted_params"] = Value::Array(public.into_iter().cloned().collect()); }
     alias
 }
 
@@ -424,8 +436,9 @@ fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[Option<Value
                 }
             }
             let mut inner = nd["inner"]["nodes"].as_object().ok_or_else(|| Error::new(format!("node '{full}': subnet needs inner.nodes")))?.clone();
-            if let Some(promoted) = nd["promoted_params"].as_array() {
-                for entry in promoted {
+            {
+                let promoted = nodes::subnet_public_params(&nd).into_iter().cloned().collect::<Vec<_>>();
+                for entry in &promoted {
                     let (Some(name),Some(target),Some(param)) = (entry["name"].as_str(),entry["node"].as_str(),entry["param"].as_str()) else { return Err(Error::new(format!("node '{full}': invalid promoted parameter"))); };
                     let target_node = inner.get_mut(target).ok_or_else(|| Error::new(format!("node '{full}': promoted target '{target}' is missing")))?;
                     target_node["channels"][param] = Value::String(format!("ch('../../{id}/{name}')"));
