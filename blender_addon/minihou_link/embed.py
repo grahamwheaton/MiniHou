@@ -251,11 +251,19 @@ def bind_target(graph, owner):
     """Replace only root Blender Object references to the asset's original owner."""
     out = json.loads(json.dumps(graph))
     changed = []
-    for nid, node in out.get("nodes", {}).items():
+    nodes = out.get("nodes", {})
+    nid = out.get("display")
+    seen = set()
+    while isinstance(nid, str) and nid in nodes and nid not in seen:
+        seen.add(nid)
+        node = nodes[nid]
         if (node.get("type") == "blender_object" and not node.get("inputs")
                 and node.get("params", {}).get("object") == owner):
             node["params"]["object"] = "@target"
             changed.append(f"nodes.{nid}.params.object: {owner!r} -> '@target'")
+        inputs = node.get("inputs") or {}
+        nid = next((inputs[key] for key in ("geo", "geometry", "input")
+                    if isinstance(inputs.get(key), str)), None)
     return out, changed
 
 
@@ -266,9 +274,8 @@ def _asset_owner(ng):
     users = [obj for obj in bpy.data.objects for mod in getattr(obj, "modifiers", ())
              if getattr(mod, "node_group", None) == ng]
     if len(users) > 1:
-        roots = {node.get("params", {}).get("object") for node in runtime_graph(ng).get("nodes", {}).values()
-                 if node.get("type") == "blender_object" and not node.get("inputs")}
-        matches = {obj.name for obj in users if obj.name in roots}
+        roots = {obj.name for obj in users if bind_target(runtime_graph(ng), obj.name)[1]}
+        matches = roots
         if len(matches) == 1:
             owner = matches.pop()
             ng[ASSET_OWNER] = owner

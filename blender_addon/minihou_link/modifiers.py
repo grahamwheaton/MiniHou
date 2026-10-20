@@ -239,9 +239,13 @@ def set_object(mod, key, obj):
 def _source_meshes(obj, mod, materials=None):
     sources = {}
     inputs = [(key, get_object(mod, key)) for key in _object_keys(mod)]
+    graph_nodes = json.loads(mod.node_group[GRAPH]).get("nodes", {})
     for p in parameters(mod):
         if p["kind"] not in {"object", "collection"} or not p.get("id"):
             continue
+        if (p.get("node") == "@picker" and
+                graph_nodes.get(p.get("graph_node"), {}).get("params", {}).get("object") == "@target"):
+            continue  # a migrated interface may still have its old picker until the next cook
         ident = proxy.mapping(mod.node_group).get(p["name"])
         if ident is None or not proxy.has_input(mod, ident):
             continue

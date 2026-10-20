@@ -171,8 +171,9 @@ class RustLinkTests(unittest.TestCase):
     def test_literal_owner_migration_keeps_boolean_cutter(self):
         embed = import_module(PKG + ".embed")
         graph = {"nodes": {"source": {"type": "blender_object", "params": {"object": "Plane A"}},
-                           "cutter": {"type": "blender_object", "params": {"object": "Cutter"}},
-                           "boolean": {"type": "boolean", "inputs": {"geo": "source", "cutter": "cutter"}}}}
+                           "cutter": {"type": "blender_object", "params": {"object": "Plane A"}},
+                           "boolean": {"type": "boolean", "inputs": {"geo": "source", "cutter": "cutter"}}},
+                 "display": "boolean"}
         class Group(dict):
             name = "Plane A asset"
         group = Group({embed.GRAPH: json.dumps(graph), embed.ASSET_OWNER: "Plane A"})
@@ -181,7 +182,7 @@ class RustLinkTests(unittest.TestCase):
         self.assertEqual(fields, ["nodes.source.params.object: 'Plane A' -> '@target'"])
         self.assertEqual(json.loads(group[embed.TARGET_CHANGES]), fields)
         self.assertEqual(migrated["nodes"]["source"]["params"]["object"], "@target")
-        self.assertEqual(migrated["nodes"]["cutter"]["params"]["object"], "Cutter")
+        self.assertEqual(migrated["nodes"]["cutter"]["params"]["object"], "Plane A")
         self.assertEqual(graph["nodes"]["source"]["params"]["object"], "Plane A")
 
     def test_dynamic_modifier_inputs_roundtrip(self):

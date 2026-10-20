@@ -258,8 +258,13 @@ impl InstanceManager {
             .collect();
         // Blender Object nodes read their implicit group picker (input:@picker:<id>); empty = waiting, never by name.
         bindings.extend(minihou_app::modifier_inputs::pickers(&graph).into_iter()
-            .filter(|(node, _)| graph["nodes"][node]["params"]["object"].as_str()
-                .is_some_and(|name| !name.is_empty() && name != "@target"))
+            .filter(|(node, uid)| {
+                let name = graph["nodes"][node]["params"]["object"].as_str().unwrap_or("");
+                let key = minihou_app::modifier_inputs::picker_key(uid);
+                name != "@target" && (!name.is_empty()
+                    || feeds.is_some_and(|sources| sources.contains_key(&key))
+                    || entry.sources.contains_key(&key))
+            })
             .map(|(node, uid)|
                 (minihou_core::nodes::blender_input::picker_external(&node), minihou_app::modifier_inputs::picker_key(&uid), String::new())));
         for (external, key, empty) in bindings {
@@ -722,6 +727,12 @@ mod tests {
         let target = Geometry::points_only(vec![7., 0., 0.]).unwrap();
         let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":1,
             "instance_id":"B","graph":graph,"params":{}}), &link_protocol::geometry_arrays(&target));
+        assert_eq!(header["type"], "instance_result", "{header}");
+        assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().p(), &[7., 0., 0.]);
+        let unbound = json!({"nodes":{"source":{"type":"blender_object","params":{"object":""}},
+            "out":{"type":"output","inputs":{"geo":"source"}}},"display":"out"});
+        let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":3,
+            "instance_id":"B","graph":unbound,"params":{}}), &link_protocol::geometry_arrays(&target));
         assert_eq!(header["type"], "instance_result", "{header}");
         assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().p(), &[7., 0., 0.]);
         let object_input = json!({"nodes":{"source":{"type":"object_input","params":{"binding":"@target"}},
