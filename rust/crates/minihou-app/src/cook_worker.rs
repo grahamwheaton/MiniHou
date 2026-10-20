@@ -61,7 +61,8 @@ fn cook_batch_preview<T>(session: &mut Session, target: &mut String, requests: V
                         let id = (0..).map(|i| format!("__display_merge_{i}")).find(|id| !graph.nodes.iter().any(|(name, _)| name == id)).unwrap();
                         graph.nodes.push((id.clone(), minihou_core::graph::NodeDef { node_type: "merge".into(), inputs: vec![("geos".into(), displayed)], endpoints: Vec::new(), params: None, channels: None, locked_params: None, bypass: false }));
                         id
-                    } else { graph.main_output()? };
+                    } else if graph.nodes.is_empty() { String::new() }
+                    else { graph.main_output()? };
                     session.replace_graph(graph);
                 }
             }
@@ -69,9 +70,14 @@ fn cook_batch_preview<T>(session: &mut Session, target: &mut String, requests: V
         })();
         if let Err(e) = result { error = Some(e.to_string()); }
     }
-    let geometry = match session.cook(Some(target)) {
-        Ok(g) => Some(g),
-        Err(e) => { error = Some(e.to_string()); None }
+    let geometry = if session.graph().nodes.is_empty() {
+        // Removing the final node clears the viewport; there is no node to cook.
+        Some(Arc::new(Geometry::points_only(Vec::new()).expect("empty geometry")))
+    } else {
+        match session.cook(Some(target)) {
+            Ok(g) => Some(g),
+            Err(e) => { error = Some(e.to_string()); None }
+        }
     };
     let preview = preview_node.and_then(|id| {
         if !session.graph().nodes.iter().any(|(name, _)| name == id) { return None; }
@@ -254,6 +260,21 @@ impl<T: Send + 'static> CookWorker<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removing_last_node_cooks_empty_viewport_without_error() {
+        let doc = Document::parse(json!({"nodes":{"box1":{"type":"box"}},"display":"box1"}).to_string()).unwrap();
+        let mut session = doc.session().unwrap();
+        let mut target = "box1".to_owned();
+        let response = cook_batch(&mut session, &mut target,
+            vec![CookRequest { revision: 1, edit: Edit::Replace(json!({"nodes":{},"display":null})) }],
+            |g| g.npoints);
+        assert_eq!(target, "");
+        assert_eq!(response.prepared, Some(0));
+        assert_eq!(response.geometry.unwrap().npoints, 0);
+        assert!(response.display_ranges.is_empty());
+        assert!(response.error.is_none(), "{:?}", response.error);
+    }
 
     /// A drag of one parameter re-cooks only that node and what is downstream of it, once per step; the upstream node stays cached.
     #[test]
