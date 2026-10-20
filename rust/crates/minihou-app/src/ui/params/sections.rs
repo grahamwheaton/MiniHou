@@ -175,6 +175,31 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
     ui.heading(format!("Controller: {id}"));
     ui.small("Use ch('../controller/parameter') to drive another node.");
     egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.heading("Parameters");
+        let parameters = minihou_core::controller::parameters(node);
+        if parameters.is_empty() { ui.small("Add a section and parameter below to create a control."); }
+        for entry in parameters {
+            let Some(name) = entry["name"].as_str() else { continue; };
+            let kind = entry["kind"].as_str().unwrap_or("float");
+            let old = node["params"].get(name).unwrap_or(&entry["default"]);
+            let mut value = old.clone();
+            ui.push_id(("controller_value", name), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(name);
+                    let edited = match kind {
+                        "float" => { let mut n=value.as_f64().unwrap_or(0.); let yes=ui.add(egui::DragValue::new(&mut n).speed(0.01)).changed(); value=json!(n); yes },
+                        "int" => { let mut n=value.as_i64().unwrap_or(0); let yes=ui.add(egui::DragValue::new(&mut n)).changed(); value=json!(n); yes },
+                        "bool" => { let mut b=value.as_bool().unwrap_or(false); let yes=ui.checkbox(&mut b, "").changed(); value=json!(b); yes },
+                        "vector" | "color" => { let mut any=false; let count=if kind=="vector" {3} else {4}; let mut xs=(0..count).map(|i|value[i].as_f64().unwrap_or(0.)).collect::<Vec<_>>(); for x in &mut xs {any|=ui.add(egui::DragValue::new(x).speed(0.01)).changed();} value=json!(xs); any },
+                        "menu" => { let mut s=value.as_str().unwrap_or("").to_owned(); let before=s.clone(); egui::ComboBox::from_id_salt("choice").selected_text(&s).show_ui(ui, |ui| {for option in entry["options"].as_array().into_iter().flatten().filter_map(Value::as_str) {ui.selectable_value(&mut s,option.into(),option);}}); value=json!(s); s!=before },
+                        _ => {let mut s=value.as_str().unwrap_or("").to_owned(); let yes=ui.text_edit_singleline(&mut s).changed(); value=json!(s); yes},
+                    };
+                    if edited { out.push(UiAction::Edit {edit: Edit::Param {node:id.into(),name:name.into(),value},continuous:true}); }
+                });
+            });
+        }
+        ui.separator();
+        ui.heading("Edit Sections");
         let section_drag_key=egui::Id::new(("controller_section_drag",id));
         let mut section_dragging=ui.ctx().data(|d|d.get_temp::<usize>(section_drag_key));
         let mut section_move=None;
@@ -209,17 +234,6 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
                             if handle.drag_started() {dragging=Some(pi);}
                             ui.label(&name);
                             ui.small(&kind);
-                            let old = node["params"].get(&name).unwrap_or(&entries[pi]["default"]);
-                            let mut value = old.clone();
-                            let edited = match kind.as_str() {
-                                "float" => { let mut n=value.as_f64().unwrap_or(0.); let yes=ui.add(egui::DragValue::new(&mut n).speed(0.01)).changed(); value=json!(n); yes },
-                                "int" => { let mut n=value.as_i64().unwrap_or(0); let yes=ui.add(egui::DragValue::new(&mut n)).changed(); value=json!(n); yes },
-                                "bool" => { let mut b=value.as_bool().unwrap_or(false); let yes=ui.checkbox(&mut b, "").changed(); value=json!(b); yes },
-                                "vector" | "color" => { let mut any=false; let count=if kind=="vector" {3} else {4}; let mut xs=(0..count).map(|i|value[i].as_f64().unwrap_or(0.)).collect::<Vec<_>>(); for x in &mut xs {any|=ui.add(egui::DragValue::new(x).speed(0.01)).changed();} value=json!(xs); any },
-                                "menu" => { let mut s=value.as_str().unwrap_or("").to_owned(); let before=s.clone(); egui::ComboBox::from_id_salt("choice").selected_text(&s).show_ui(ui, |ui| {for option in entries[pi]["options"].as_array().into_iter().flatten().filter_map(Value::as_str) {ui.selectable_value(&mut s,option.into(),option);}}); value=json!(s); s!=before },
-                                _ => {let mut s=value.as_str().unwrap_or("").to_owned(); let yes=ui.text_edit_singleline(&mut s).changed(); value=json!(s); yes},
-                            };
-                            if edited { out.push(UiAction::Edit {edit: Edit::Param {node:id.into(),name:name.clone(),value},continuous:true}); }
                             let mut expose = entries[pi]["expose_to_blender"].as_bool().unwrap_or(false);
                             if matches!(kind.as_str(),"float"|"int"|"bool"|"vector"|"color") && ui.checkbox(&mut expose,"Expose to Blender").changed() {
                                 entries[pi]["expose_to_blender"]=json!(expose); changed=true;
@@ -288,6 +302,31 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
         if minihou_core::controller::validate(&next["nodes"][id]).is_ok() {
             out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:false});
         }
+    }
+}
+
+#[cfg(test)]
+mod controller_panel_tests {
+    use super::*;
+    use crate::ui::testing::Fixture;
+
+    #[test]
+    fn controller_values_are_visible_in_parameter_panel() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"nodes":{"driver":{"type":"controller",
+            "controller_sections":[{"name":"Shape","parameters":[{"name":"width","kind":"float","default":1.0}]}],
+            "params":{"width":2.0}}},"display":"driver"}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "driver".into();
+        f.display = "driver".into();
+        let ctx = egui::Context::default();
+        let mut out = Actions::default();
+        let frame = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| controller_panel(ui, &f.view(), &mut out, "driver"));
+        });
+        assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "Parameters")));
+        assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "width")));
+        assert!(out.0.is_empty());
     }
 }
 
