@@ -236,7 +236,7 @@ mod tools_tests {
 
     #[test]
     fn sixty_transform_updates_use_param_edits_and_one_undo_step() {
-        let mut doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+        let mut doc = Document::parse(include_str!("test_data/demo_graph.json").to_owned()).unwrap();
         let before = doc.clone();
         let source = doc.value()["display"].as_str().unwrap().to_owned();
         let mut value = doc.value().clone();

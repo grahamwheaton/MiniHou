@@ -226,7 +226,7 @@ pub mod testing {
         pub flags: HashMap<String, NodeFlags>, pub selected: String, pub selected_set: BTreeSet<String>, pub display: String, pub mode: Mode, pub editor: EditorState, pub camera: CameraInfo, pub bounds: ([f32; 3], f32), pub geo: Option<GeoSummary>, pub blender: BlenderStatus, pub units: crate::units::UnitSettings }
     impl Fixture {
         pub fn new() -> Self {
-            let doc = Document::parse(include_str!("../default_graph.json").to_owned()).unwrap();
+            let doc = Document::parse(include_str!("../test_data/demo_graph.json").to_owned()).unwrap();
             let graph = Graph::from_value(doc.value()).unwrap();
             let display = graph.main_output().unwrap();
             Self { doc, graph, cooking: CookState::default(), theme: theme::Theme::dark(), flags: HashMap::new(),

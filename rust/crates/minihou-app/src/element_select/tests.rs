@@ -39,7 +39,7 @@
     }
     #[test]
     fn face_marker_mask_matches_polygon_selection_on_startup_mesh() {
-        let graph = minihou_core::Graph::from_json(include_str!("../default_graph.json")).unwrap();
+        let graph = minihou_core::Graph::from_json(include_str!("../test_data/demo_graph.json")).unwrap();
         let geo = graph.cook(Some("output1")).unwrap();
         let scene = crate::viewport::Scene::new(&geo);
         let topo = Topology::new(scene.positions(), scene.triangle_indices(), scene.edge_indices());

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "display": "output1",
+  "nodes": {
+    "grid1": {"type": "grid", "params": {"columns": 160, "rows": 160, "size_x": 10.0, "size_y": 10.0}},
+    "noise1": {"type": "noise", "inputs": {"geo": "grid1"}, "params": {"frequency": 0.8, "octaves": 5, "amplitude": [0.0, 0.0, 1.6]}},
+    "transform1": {"type": "transform", "inputs": {"geo": "noise1"}, "params": {"translate": [0.0, 0.0, 0.0]}},
+    "normal1": {"type": "normal", "inputs": {"geo": "transform1"}},
+    "output1": {"type": "output", "inputs": {"geo": "normal1"}}
+  }
+}

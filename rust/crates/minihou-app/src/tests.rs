@@ -467,14 +467,14 @@ fn failed_save_as_retains_path_and_dirty_state() {
 #[test]
 fn the_built_in_demo_graph_opens_and_cooks() {
     // main.rs opens this when the app is started without arguments (a double-click).
-    let doc = Document::parse(include_str!("default_graph.json").to_owned()).expect("default graph parses");
+    let doc = Document::parse(include_str!("test_data/demo_graph.json").to_owned()).expect("default graph parses");
     assert!(selftest(&doc).expect("default graph cooks")["points"].as_u64().unwrap() > 0);
 }
 
 #[test]
 fn adding_a_node_is_one_undo_step() {
     use crate::History;
-    let mut doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+    let mut doc = Document::parse(include_str!("test_data/demo_graph.json").to_owned()).unwrap();
     let before = doc.text().to_owned();
     let mut value = doc.value().clone();
     value["nodes"]["extra1"] = json!({"type": "null", "inputs": {"geo": "grid1"}});

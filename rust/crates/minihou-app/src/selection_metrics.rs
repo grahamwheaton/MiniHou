@@ -48,7 +48,7 @@ impl Cache {
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn brush_refresh_matches_unique_face_vertex_metrics() {
-        let graph=Graph::from_json(include_str!("default_graph.json")).unwrap();
+        let graph=Graph::from_json(include_str!("test_data/demo_graph.json")).unwrap();
         let scene=Scene::new(&graph.cook(Some("output1")).unwrap());
         let sel=picking::Selection {mode:ui::SelectionMode::Faces,tris:(0..scene.triangles() as u32).collect(),..Default::default()};
         let ids=selected_point_ids(&sel,sel.mode,scene.triangle_indices());

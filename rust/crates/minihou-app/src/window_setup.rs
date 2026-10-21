@@ -4,7 +4,7 @@ use super::*;
 fn open_graph(path: &std::path::Path) -> Result<Document> {
     Document::open(path).map_err(|e| format!("Cannot open {}: {e}
 
-Run the app without arguments to open the built-in demo graph.", std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()).display()).into())
+Run the app without arguments to open an empty graph.", std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()).display()).into())
 }
 /// The app icon (window and taskbar), decoded from the embedded PNG; None if it cannot be decoded.
 fn app_icon() -> Option<egui::IconData> {
@@ -15,7 +15,7 @@ fn app_icon() -> Option<egui::IconData> {
 
 pub(super) fn run() -> Result<()> {
     let args:Vec<_>=std::env::args_os().skip(1).collect();
-    // Started with no arguments (a double-click): open the built-in demo graph rather than exit with a usage line nobody sees.
+    // Started with no arguments (a double-click): open an empty graph.
     let (headless,path,doc)=match args.as_slice() {
         [flag,path] if flag=="--selftest" => { let path=PathBuf::from(path); let doc=open_graph(&path)?; (true,path,doc) }
         [path] => { let path=PathBuf::from(path); let doc=open_graph(&path)?; (false,path,doc) }

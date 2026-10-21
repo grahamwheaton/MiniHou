@@ -95,9 +95,7 @@ pub fn initialize(value: &mut Value, id: &str) {
     };
     node["input_sockets"] = json!([{"index": 0, "name": "Input 1"}]);
     node["output_sockets"] = json!([{"index": 0, "name": "Output 1"}]);
-    if !source.is_null() {
-        node["inputs"] = json!({"in0": source});
-    }
+    node["inputs"] = if source.is_null() { json!({}) } else { json!({"in0": source}) };
     node["inner"] = json!({"nodes": {
         "input1": {"type": "subnet_input", "port_index": 0, "pos": [0.0, 0.0]},
         "output1": {"type": "subnet_output", "port_index": 0, "inputs": {"geo": "input1"}, "pos": [0.0, 120.0]}
@@ -372,6 +370,27 @@ mod tests {
         assert_eq!(v["nodes"]["sub"]["inputs"]["in0"], "box1");
         v["display"] = json!("sub");
         assert_eq!(cook(&v), cook(&json!({"nodes": {"box1": v["nodes"]["box1"]}, "display": "box1"})));
+    }
+    #[test]
+    fn fresh_unconnected_subnet_cooks_without_error() {
+        let start = json!({"version": 1, "nodes": {}});
+        let (mut v, id) = crate::graph_edit::add(&start, "subnet", None).unwrap();
+        initialize(&mut v, &id);
+        let inner = &v["nodes"][&id]["inner"];
+        assert_eq!(v["nodes"][&id]["inputs"], json!({}));
+        assert_eq!(inner["nodes"]["output1"]["inputs"]["geo"], "input1");
+        assert_eq!(inner["output"], "output1");
+        assert_eq!(v["display"], id);
+        let graph = minihou_core::Graph::from_value(&v).unwrap();
+        assert_eq!(graph.cook(None).unwrap().npoints, 0);
+        assert_eq!(minihou_core::session::Session::new(graph).cook(None).unwrap().npoints, 0);
+        let doc = minihou_app::Document::parse(start.to_string()).unwrap();
+        let mut session = doc.session().unwrap();
+        let mut target = String::new();
+        let response = minihou_app::cook_batch(&mut session, &mut target,
+            vec![minihou_app::CookRequest { revision: 1, edit: minihou_app::Edit::Replace(v) }], |_| ());
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert_eq!(response.geometry.unwrap().npoints, 0);
     }
     #[test]
     fn noodle_drop_adds_connected_input_and_output_boundaries() {
