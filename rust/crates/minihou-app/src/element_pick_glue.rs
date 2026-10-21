@@ -41,6 +41,15 @@ pub(super) fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewpor
 pub(super) fn pick_displayed_culled(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,cull:bool)->Option<picking::Hit> {
     picking::pick_triangle_culled(scene.positions(),scene.triangle_indices(),o,d,cull,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
 }
+/// A projected element is visible when no displayed triangle lies in front of it.
+pub(super) fn element_visible_at(scene:&Scene,camera:CameraInfo,rect:egui::Rect,point:[f32;3],
+    visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,ignore_occlusion:bool)->bool {
+    let Some(screen)=ui::transform_gizmo::project(camera,rect,point) else { return false; };
+    let (origin,dir)=ui::transform_gizmo::ray(camera,rect,screen);
+    picking::element_in_front(&scene.pick_bvh,scene.positions(),scene.triangle_indices(),origin,dir,point,
+        scene.radius.max(1.)*1e-4,ignore_occlusion,
+        |tri|tri.iter().all(|id|point_pickable(visibility,ranges,selected,*id)))
+}
 /// After an extrude cook the original selection stays when its ids still exist (Blender keeps the faces selected).
 pub(super) fn keep_extrude_selection(before:&picking::Selection,scene:&Scene)->Option<picking::Selection> {
     (!before.is_empty() && selection_exists_on_scene(before,scene)).then(||before.clone())

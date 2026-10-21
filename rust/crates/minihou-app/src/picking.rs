@@ -17,6 +17,15 @@ pub fn ignores_surface_occlusion(mode: crate::viewport::Mode, overlays_enabled: 
         || (overlays_enabled && (xray || wireframe))
 }
 
+/// Test the element's depth against the nearest displayed surface along its screen ray.
+pub fn element_in_front(bvh:&Bvh,positions:&[f32],triangles:&[u32],origin:[f32;3],dir:[f32;3],
+    point:[f32;3],tolerance:f32,ignore_occlusion:bool,visible:impl FnMut(&[u32])->bool)->bool {
+    let depth=(0..3).map(|k|(point[k]-origin[k])*dir[k]).sum::<f32>();
+    if !depth.is_finite() || depth <= 0. { return false; }
+    ignore_occlusion || bvh.pick(positions,triangles,origin,dir,visible)
+        .is_none_or(|hit|depth <= hit.t + tolerance)
+}
+
 #[cfg(test)]
 #[test]
 fn picking_occlusion_tracks_display_mode() {
@@ -27,6 +36,33 @@ fn picking_occlusion_tracks_display_mode() {
     assert!(ignores_surface_occlusion(Mode::Wireframe, false, false, false));
     assert!(!ignores_surface_occlusion(Mode::HiddenLineInvisible, false, false, false));
     assert!(!ignores_surface_occlusion(Mode::SmoothShaded, false, true, true));
+}
+
+#[cfg(test)]
+#[test]
+fn hidden_point_edge_and_face_are_selected_only_in_xray_or_wireframe() {
+    use crate::viewport::Mode;
+    use eframe::egui::{pos2,Rect};
+    // Two coincident screen-space triangles, with independent element ids.
+    let p=[-1.,-1.,1., 1.,-1.,1., 0.,1.,1.,
+           -1.,-1.,0., 1.,-1.,0., 0.,1.,0.];
+    let tris=[0,1,2,3,4,5];
+    let bvh=Bvh::new(&p,&tris);
+    let origin=[0.,0.,3.]; let dir=[0.,0.,-1.];
+    let targets=[[0.,0.,0.], [0.,-1.,0.], [0.,-1./3.,0.]];
+    let box_shape=RegionShape::Rect(Rect::from_min_max(pos2(-2.,-2.),pos2(2.,2.)));
+    let lasso=RegionShape::Lasso(vec![pos2(-2.,-2.),pos2(2.,-2.),pos2(2.,2.),pos2(-2.,2.)]);
+    for shape in [box_shape,lasso] {
+        for target in targets {
+            assert!(shape.contains(pos2(target[0],target[1])));
+            for (mode,xray,expected) in [(Mode::SmoothShaded,false,false),(Mode::SmoothShaded,true,true),
+                                          (Mode::Wireframe,false,true)] {
+                let ignore=ignores_surface_occlusion(mode,true,xray,false);
+                assert_eq!(element_in_front(&bvh,&p,&tris,origin,dir,target,1e-4,ignore,|_|true),expected);
+            }
+        }
+    }
+    assert!(element_in_front(&bvh,&p,&tris,origin,dir,[0.,0.,1.],1e-4,false,|_|true));
 }
 
 #[cfg(test)] mod bvh_navigation_tests {

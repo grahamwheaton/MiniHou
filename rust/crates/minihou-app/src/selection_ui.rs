@@ -1,4 +1,5 @@
 use super::*;
+use crate::element_pick_glue::element_visible_at;
 
 /// Picking records displayed triangle numbers; transform groups use the triangle's point numbers.
 pub(crate) fn selected_point_ids(selection: &picking::Selection, mode: ui::SelectionMode, triangles: &[u32]) -> Vec<u32> {
@@ -42,6 +43,11 @@ impl App {
         let project = |p| ui::transform_gizmo::project(camera, self.last_viewport, p);
         let inside = |p| project(p).is_some_and(|q| shape.contains(q));
         let mode = self.editor_state.selection;
+        let ignore_occlusion=picking::ignores_surface_occlusion(self.mode,self.editor_state.overlays.enabled,
+            self.editor_state.xray,self.editor_state.overlays.wireframe);
+        let active_pick_set=self.active_pick_set();
+        let element_visible=|p| element_visible_at(scene,camera,self.last_viewport,p,
+            viewport::ObjectVisibility::HideOthers,&self.display_ranges,&active_pick_set,ignore_occlusion);
         if mode == ui::SelectionMode::Object {
             if let Some((path, selected)) = &self.subnet_scope {
                 let prefix = format!("{}/", path.join("/"));
@@ -70,18 +76,20 @@ impl App {
         }
         let mut found = picking::Selection { mode, ..Default::default() };
         match mode {
-            ui::SelectionMode::Points => { for i in 0..points.len()/3 { if position(i as u32).is_some_and(inside) { found.points.push(i as u32); } } }
+            ui::SelectionMode::Points => { for i in 0..points.len()/3 { if position(i as u32).is_some_and(|p|inside(p)&&element_visible(p)) { found.points.push(i as u32); } } }
             ui::SelectionMode::Edges => {
                 let mut edges = std::collections::BTreeSet::new();
                 for t in tris.as_chunks::<3>().0 { for (a,b) in [(t[0],t[1]),(t[1],t[2]),(t[2],t[0])] { edges.insert((a.min(b), a.max(b))); } }
                 for pair in scene.line_primitive_indices().chunks_exact(2) { edges.insert((pair[0].min(pair[1]),pair[0].max(pair[1]))); }
                 for (a,b) in edges {
-                    if let (Some(pa), Some(pb)) = (position(a).and_then(project), position(b).and_then(project)) {
-                        if shape.contains_edge(pa, pb) { found.edges.push((a,b)); }
+                    if let (Some(a_pos), Some(b_pos)) = (position(a), position(b)) {
+                        if let (Some(pa), Some(pb)) = (project(a_pos),project(b_pos)) {
+                            if shape.contains_edge(pa, pb) && element_visible(a_pos) && element_visible(b_pos) { found.edges.push((a,b)); }
+                        }
                     }
                 }
             }
-            ui::SelectionMode::Faces => { for (i,t) in tris.as_chunks::<3>().0.iter().enumerate() { if let (Some(a), Some(b), Some(c)) = (position(t[0]), position(t[1]), position(t[2])) { if inside([0,1,2].map(|k| (a[k]+b[k]+c[k])/3.)) { found.tris.push(i as u32); } } } }
+            ui::SelectionMode::Faces => { for (i,t) in tris.as_chunks::<3>().0.iter().enumerate() { if let (Some(a), Some(b), Some(c)) = (position(t[0]), position(t[1]), position(t[2])) { let center=[0,1,2].map(|k| (a[k]+b[k]+c[k])/3.); if inside(center) && element_visible(center) { found.tris.push(i as u32); } } } }
             ui::SelectionMode::Object => {
                 let hits: Vec<String> = self.display_ranges.iter().filter_map(|(id, range)| {
                     if self.editor_state.object_visibility != viewport::ObjectVisibility::ShowAll && !self.selected_set.contains(id) { return None; }

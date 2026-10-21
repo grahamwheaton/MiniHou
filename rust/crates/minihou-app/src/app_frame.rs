@@ -475,7 +475,8 @@ impl eframe::App for App {
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
                         let hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,false) };
-                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode,ignore_pick_occlusion) };
+                        let wire = if self.object_hidden || (hit.is_some() && !(ignore_pick_occlusion && matches!(mode,ui::SelectionMode::Points|ui::SelectionMode::Edges))) { None }
+                            else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode,ignore_pick_occlusion) };
                         if mode == ui::SelectionMode::Object {
                             let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))
                                 .or_else(|| wire.and_then(|w| { let id=match w { picking::WireHit::Point(i)|picking::WireHit::Edge(i,_)=>i }; self.display_ranges.iter().find(|(_,r)|r.contains(&id)).map(|(name,_)|name.as_str()) }))
