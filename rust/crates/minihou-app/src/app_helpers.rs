@@ -262,6 +262,13 @@ pub(crate) fn resolve_displayed_node<'a>(value: &Value, selected: &str, display_
     }
     display_ranges.iter().find(|(id, _)| feeds_node(value, selected, id)).map(|(id, _)| id.as_str())
 }
+pub(crate) fn resolve_active_displayed_node<'a>(value: &Value, selected: &str,
+    display_ranges: &'a [(String, std::ops::Range<u32>)], output_range_count: usize, selected_preview: bool) -> Option<&'a str> {
+    let (outputs, previews) = display_ranges.split_at(output_range_count);
+    resolve_displayed_node(value, selected, outputs).or_else(|| {
+        selected_preview.then(|| previews.iter().find(|(id, _)| id == selected).map(|(id, _)| id.as_str())).flatten()
+    })
+}
 
 pub(super) fn include_selected_preview(scene: &mut Scene, ranges: &mut Vec<(String, std::ops::Range<u32>)>, selected: &str, preview: Option<&minihou_core::Geometry>) -> bool {
     if selected.is_empty() || ranges.iter().any(|(id, _)| id == selected) { return false; }
