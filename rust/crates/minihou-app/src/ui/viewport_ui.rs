@@ -11,6 +11,18 @@ mod popovers;
 use popovers::{caret_button, falloff_samples, note, show_popover};
 use chrome::{button, button_text, display_row, frame_at, header_layout, icon, section, show_shading_pie, split_error, toggle_popover, HeaderLayout, Icon, Popover, VpState, DENSE_PRIMS, FRAME_END, FRAME_START, HEADER_H, OVERLAYS, TIMELINE_H, TOOLS};
 
+// The viewport image uses the CentralPanel's Middle layer. Draw the scene tools
+// on another Middle layer, then all chrome and menus above it in Foreground.
+pub fn scene_layer_id() -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Middle, egui::Id::new("viewport_scene_tools"))
+}
+fn chrome_layer_id() -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Foreground, egui::Id::new("viewport_chrome"))
+}
+fn popover_layer_id() -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Foreground, egui::Id::new("viewport_popovers"))
+}
+
 /// Render primitive handles over the viewport when a primitive generator is selected.
 pub fn handles(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {
     ray_guide::show(ui, rect, v);
@@ -59,7 +71,13 @@ pub fn timeline_command(ctx: &egui::Context, command: &str) -> Option<minihou_ap
 
 
 pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
+    ui.scope_builder(egui::UiBuilder::new().layer_id(chrome_layer_id()).max_rect(rect), |ui| {
+        overlay_contents(ui, rect, v, out);
+    });
     show_shading_pie(ui.ctx(), rect, v, out);
+}
+
+fn overlay_contents(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     let ctx = ui.ctx().clone();
     let id = egui::Id::new("viewport_ui_state");
     let mut st: VpState = ctx.data_mut(|d| d.get_temp(id)).unwrap_or_default();
@@ -231,7 +249,10 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     if let Some(which) = st.popover {
         let anchor = match which { Popover::Orientation => h.orient, Popover::Pivot => h.pivot, Popover::Snap => h.snap, Popover::Proportional => h.prop, Popover::Overlays => h.overlays, Popover::Shading => h.shading, Popover::Visibility => h.visibility };
         let before=out.0.len();
-        let pop = show_popover(ui, rect, anchor, which, v, out);
+        let pop = ui.scope_builder(egui::UiBuilder::new().layer_id(popover_layer_id()).max_rect(rect), |ui| {
+            show_popover(ui, rect, anchor, which, v, out)
+        }).inner;
+        ctx.move_to_top(popover_layer_id());
         if out.0.len()>before && matches!(which,Popover::Shading | Popover::Visibility) { st.popover=None; }
         let dismiss = ctx.input(|i| i.key_pressed(egui::Key::Escape) || (i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !pop.contains(p) && !anchor.contains(p))));
         if dismiss { st.popover = None; }
@@ -242,7 +263,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
 
 /// Compact Blender-style status strip for the active viewport transform.
 pub fn modal_status(ui: &egui::Ui, rect: egui::Rect, status: &str) {
-    let painter = ui.painter_at(rect);
+    let painter = egui::Painter::new(ui.ctx().clone(), chrome_layer_id(), rect);
     let bar = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom()-29.), rect.right_bottom());
     painter.rect_filled(bar, 0., egui::Color32::from_black_alpha(205));
     painter.text(bar.left_center()+egui::vec2(10.,0.), egui::Align2::LEFT_CENTER, status,
@@ -252,6 +273,11 @@ pub fn modal_status(ui: &egui::Ui, rect: egui::Rect, status: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn viewport_chrome_is_above_scene_tools() {
+        assert!(scene_layer_id().order < chrome_layer_id().order);
+        assert_eq!(popover_layer_id().order, egui::Order::Foreground);
+        assert_ne!(popover_layer_id(), chrome_layer_id());
+    }
     #[test] fn scale_cage_is_directly_below_scale_in_tool_strip() {
         let scale = TOOLS.iter().position(|(_, _, tool)| *tool == Some(Tool::Scale)).unwrap();
         assert_eq!(TOOLS[scale].1, Icon::Scale);
