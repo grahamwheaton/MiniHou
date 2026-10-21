@@ -41,6 +41,17 @@ pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, Strin
     add_impl(&repaired, ty, after, true)
 }
 
+/// Add a Merge below a node selection without splicing any existing consumers.
+/// Every selected node becomes an input in the same document edit.
+pub fn add_selected_merge(value: &Value, selected: &[String], after: &str) -> Option<(Value, String)> {
+    if selected.len() < 2 || !selected.iter().any(|id| id == after) { return None; }
+    let (mut next, id) = add_impl(value, "merge", Some(after), false)?;
+    for source in selected.iter().filter(|source| source.as_str() != after) {
+        next = connect(&next, source, &id, Some("geos"))?;
+    }
+    Some((next, id))
+}
+
 /// Repair the older viewport shape `source -> output -> operator` in place.
 /// Each hanging operator becomes the last operation before its output.
 pub fn repair_output_hangs(value: &mut Value) -> usize {

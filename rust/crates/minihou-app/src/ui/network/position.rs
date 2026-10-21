@@ -55,6 +55,16 @@ pub(super) fn ghost_card(p: &egui::Painter, rect: Rect, node_type: &str, v: &Vie
 /// positions (which may have been dragged or tidied since the file was saved).
 pub fn position_add(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
     next: &mut serde_json::Value, after: Option<&str>) -> Option<minihou_app::Document> {
+    position_add_impl(ctx, path, old, next, after, &[])
+}
+
+pub fn position_add_merge(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
+    next: &mut serde_json::Value, selected: &[String]) -> Option<minihou_app::Document> {
+    position_add_impl(ctx, path, old, next, None, selected)
+}
+
+fn position_add_impl(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
+    next: &mut serde_json::Value, after: Option<&str>, merge_sources: &[String]) -> Option<minihou_app::Document> {
     let (Ok(graph), Ok(next_graph)) = (minihou_core::Graph::from_value(old), minihou_core::Graph::from_value(next)) else { return None };
     let (state, add_pos) = ctx.data_mut(|d| {
         let mut s = d.get_persisted::<State>(state_id(path)).unwrap_or_default();
@@ -78,7 +88,19 @@ pub fn position_add(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
         }
     }
     let mut lookup: HashMap<_, _> = positions.into_iter().collect();
-    if after.is_none() {
+    if !merge_sources.is_empty() {
+        let sources: Vec<_> = merge_sources.iter().filter_map(|id| lookup.get(id).copied()).collect();
+        if sources.len() == merge_sources.len() {
+            if let Some((id, _)) = next_graph.nodes.iter().find(|(id, _)| old["nodes"].get(id).is_none()) {
+                let left = sources.iter().map(|at| at.x).fold(f32::INFINITY, f32::min);
+                let right = sources.iter().map(|at| at.x).fold(f32::NEG_INFINITY, f32::max);
+                let bottom = sources.iter().map(|at| at.y).fold(f32::NEG_INFINITY, f32::max);
+                let preferred = pos2((left + right) * 0.5, bottom + 128.0);
+                lookup.insert(id.clone(), network_layout::free_position(preferred, &lookup.values().copied().collect::<Vec<_>>()));
+            }
+        }
+    }
+    if after.is_none() && merge_sources.is_empty() {
         if let Some(pos) = add_pos {
             if let Some((id, _)) = next_graph.nodes.iter().find(|(id, _)| old["nodes"].get(id).is_none()) {
                 lookup.insert(id.clone(), pos);

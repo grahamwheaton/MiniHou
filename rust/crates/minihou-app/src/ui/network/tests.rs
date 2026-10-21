@@ -1,6 +1,25 @@
     use super::*;
     use crate::ui::testing::Fixture;
 
+    #[test]
+    fn tab_merge_connects_both_selected_nodes_and_sits_below_them() {
+        let ctx = egui::Context::default();
+        let path = Path::new("selected-merge-test.json");
+        let old = serde_json::json!({"version":1,"display":"a","nodes":{
+            "a":{"type":"box","pos":[96.,64.]},
+            "b":{"type":"sphere","pos":[480.,256.]}
+        }});
+        let selected = vec!["a".to_owned(), "b".to_owned()];
+        let (mut next, id) = crate::graph_edit::add_selected_merge(&old, &selected, "a").unwrap();
+        position_add_merge(&ctx, path, &old, &mut next, &selected).unwrap();
+        assert_eq!(next["nodes"][&id]["inputs"]["geos"], serde_json::json!(["a", "b"]));
+        let at = json_pos(&next, &id).unwrap();
+        assert!(at.y > json_pos(&next, "a").unwrap().y);
+        assert!(at.y > json_pos(&next, "b").unwrap().y);
+        assert_eq!(at.x, 288.0);
+        crate::graph_edit::validated(next).unwrap();
+    }
+
     #[test] fn shelf_drop_centers_card_and_only_snaps_when_enabled() {
         let canvas = Rect::from_min_size(pos2(100., 80.), vec2(1000., 700.));
         let pan = vec2(-40., 25.);
