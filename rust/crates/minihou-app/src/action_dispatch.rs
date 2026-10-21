@@ -32,6 +32,10 @@ impl App {
         use ui::EditorChange as C;
         let e = self.editor_state;
         match name {
+            "move_nodes" | "scale_nodes" => if self.network_hover {
+                let kind = if name == "move_nodes" { ui::network::LayoutKind::Move } else { ui::network::LayoutKind::Scale };
+                ui::network::begin_layout(ctx, &self.editor.path, self.editor.doc.value(), &self.selected_set, kind);
+            },
             "toggle_dep_links" => { self.prefs.show_parameter_links=!self.prefs.show_parameter_links; ui::network::toggle_links(ctx,&self.editor.path); let _=self.prefs.save(); },
             "go_to_link_source" | "go_to_link_target" => {
                 let destination = if name == "go_to_link_source" {

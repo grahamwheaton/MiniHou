@@ -470,6 +470,19 @@ mod tests {
         assert_eq!(cook(&g), cook(&v));
     }
     #[test]
+    fn group_always_creates_an_input_and_output_even_without_external_wires() {
+        let v = json!({"display":"box1","nodes":{"box1":{"type":"box","pos":[32.0,64.0]}}});
+        let (grouped, id) = group(&v, &["box1".into()]).unwrap();
+        let subnet = &grouped["nodes"][&id];
+        assert_eq!(subnet["input_sockets"], json!([{"index":0,"name":"Input 1"}]));
+        assert_eq!(subnet["output_sockets"], json!([{"index":0,"name":"Output 1"}]));
+        assert_eq!(subnet["inner"]["nodes"]["input1"]["type"], "subnet_input");
+        assert_eq!(subnet["inner"]["nodes"]["output1"]["inputs"]["geo"], "box1");
+        assert_eq!(subnet["inner"]["output"], "output1");
+        assert_eq!(grouped["display"], id);
+        assert_eq!(cook(&grouped), cook(&v));
+    }
+    #[test]
     fn ungroup_restores_the_original() {
         let v = sample();
         let (g, _) = group(&v, &["xf".into(), "nrm".into()]).unwrap();
@@ -477,6 +490,18 @@ mod tests {
         assert_eq!(sel.len(), 2);
         assert_eq!(back["nodes"], v["nodes"]);
         assert_eq!(back["display"], v["display"]);
+    }
+    #[test]
+    fn ungroup_selected_subnet_restores_inner_nodes_and_external_wires() {
+        let original = sample();
+        let (grouped, subnet) = group(&original, &["xf".into(), "nrm".into()]).unwrap();
+        let (ungrouped, selected) = ungroup(&grouped, &subnet).unwrap();
+        assert_eq!(selected, vec!["nrm", "xf"]);
+        assert!(ungrouped["nodes"].get(&subnet).is_none());
+        assert_eq!(ungrouped["nodes"]["xf"]["inputs"]["geo"], "box1");
+        assert_eq!(ungrouped["nodes"]["nrm"]["inputs"]["geo"], "xf");
+        assert_eq!(ungrouped["nodes"]["out"]["inputs"]["geo"], "nrm");
+        assert_eq!(cook(&ungrouped), cook(&original));
     }
     #[test]
     fn group_moves_display_and_keeps_multiple_outputs() {

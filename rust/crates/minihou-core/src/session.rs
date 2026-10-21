@@ -302,6 +302,21 @@ impl Session {
         Some(self.cache.get(&key)?.geo.clone())
     }
 
+    /// Read point counts for the temporary subnet-expanded nodes cooked by this session.
+    /// The public graph is restored before returning.
+    pub fn expanded_cached_point_counts(&mut self) -> Option<HashMap<String, u32>> {
+        let mut value = self.graph.to_value();
+        let expanded = crate::graph::expand_subnets(value["nodes"].as_object()?).ok()??;
+        value["nodes"] = Value::Object(expanded);
+        let graph = Graph::from_value(&value).ok()?;
+        let original = std::mem::replace(&mut self.graph, graph);
+        let ids: Vec<_> = self.graph.nodes.iter().map(|(id, _)| id.clone()).collect();
+        let counts = ids.into_iter().filter_map(|id| self.cached_geometry(&id)
+            .map(|geometry| (id, geometry.npoints as u32))).collect();
+        self.graph = original;
+        Some(counts)
+    }
+
     /// `None` or `Some(0)`: unlimited.
     pub fn set_budget_bytes(&mut self, budget: Option<usize>) {
         self.budget = budget.filter(|b| *b > 0);

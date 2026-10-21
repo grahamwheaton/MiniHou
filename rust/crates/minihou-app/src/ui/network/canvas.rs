@@ -16,6 +16,31 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     state.moved.retain(|node, _| v.graph.nodes.iter().any(|(id, _)| id == node));
     for (node, at) in &positions { state.moved.insert(node.clone(), *at); }
 
+    let layout_frame = state.layout.is_some();
+    if let Some(layout) = &state.layout {
+        let cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.pointer.button_pressed(PointerButton::Secondary));
+        let confirm = ctx.input(|i| i.key_pressed(egui::Key::Enter) || i.pointer.button_pressed(PointerButton::Primary));
+        if cancel {
+            for (node, at) in &layout.selected { state.moved.insert(node.clone(), *at); }
+            state.layout = None;
+        } else {
+            let pointer = pointer.unwrap_or(layout.anchor);
+            let changed = position::layout_positions(layout.kind, &layout.selected,
+                (pointer - layout.anchor) / state.zoom.max(0.25));
+            for (node, at) in &changed { state.moved.insert(node.clone(), *at); }
+            for (node, at) in &mut positions {
+                if let Some((_, moved)) = changed.iter().find(|(id, _)| id == node) { *at = *moved; }
+            }
+            if confirm {
+                let mut next = layout.before.clone();
+                for (node, at) in changed { next["nodes"][&node]["pos"] = serde_json::json!([at.x, at.y]); }
+                if next != layout.before { out.push(UiAction::NetworkGesture {
+                    expected: v.doc.clone(), before: layout.before.clone(), next }); }
+                state.layout = None;
+            } else { ctx.request_repaint(); }
+        }
+    }
+
     if !state.physics { state.springs = None; }
     if let Some(springs) = &mut state.springs {
         let snappiness = ctx.data(|d| d.get_temp::<f32>(Id::new("node_physics_snappiness"))).unwrap_or(0.7);
@@ -88,7 +113,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     }
     let right_click = ((secondary_pressed && !shift) || shifted_click.is_some()) && state.wire.is_none();
     let tab = over && state.menu.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Tab));
-    if right_click || tab {
+    if !layout_frame && (right_click || tab) {
         let at = shifted_click.or(pointer).unwrap_or(r.center());
         let target = if right_click { positions.iter().rev().find(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at))
             .map(|(id, _)| id.clone()) } else { None };
@@ -104,7 +129,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     let ports = canvas_ports(v, &positions);
     let hit_port = pointer.filter(|at| r.contains(*at)).and_then(|at| ports.iter().rev()
         .find(|(_, world)| screen(r, state, *world).distance(at) <= (9.0 * state.zoom).max(6.0)));
-    if state.menu.is_none() && ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary)) {
+    if !layout_frame && state.menu.is_none() && ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary)) {
         if let Some((port, world)) = hit_port {
             state.wire_output_index = if matches!(port, AddConnection::Output(_)) {
                 ports.iter().filter(|(candidate, _)| candidate == port)
@@ -122,7 +147,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
             state.springs = None;
         }
     }
-    let blocked = tool_dropped || state.menu.is_some() || state.wire.is_some() || state.cut.is_some();
+    let blocked = layout_frame || tool_dropped || state.menu.is_some() || state.wire.is_some() || state.cut.is_some();
     if ctx.input(|i| i.key_pressed(egui::Key::Escape) || !i.focused || i.pointer.button_pressed(PointerButton::Secondary)) {
         state.wire = None;
         state.pickup = None;

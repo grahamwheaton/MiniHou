@@ -133,9 +133,19 @@ impl eframe::App for App {
             egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             ui::network::set_physics_snappiness(ctx, self.prefs.node_physics_snappiness);
+            if let Some(targets) = self.subnet_pending_selection.take() {
+                ui::network::select_inner(ctx, &self.editor.path, targets);
+            }
             ui::network::set_links(ctx, &self.editor.path, self.prefs.show_parameter_links);
             let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
             self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
+            self.subnet_scope = ui::network::current_scope(ctx, &self.editor.path, self.editor.doc.value())
+                .map(|(path, inner, selected, _)| (path, if selected.is_empty() || inner["nodes"].get(&selected).is_none() {
+                    let output = inner["output"].as_str().unwrap_or_default();
+                    if inner["nodes"][output]["type"] == "subnet_output" {
+                        inner["nodes"][output]["inputs"]["geo"].as_str().unwrap_or(output).to_owned()
+                    } else { output.to_owned() }
+                } else { selected }));
             if self.params_open { egui::SidePanel::right("parameters").default_width(460.).show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
                 if let Some((path,inner,selected,selected_set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
@@ -463,9 +473,30 @@ impl eframe::App for App {
                             let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))
                                 .or_else(|| wire.and_then(|w| { let id=match w { picking::WireHit::Point(i)|picking::WireHit::Edge(i,_)=>i }; self.display_ranges.iter().find(|(_,r)|r.contains(&id)).map(|(name,_)|name.as_str()) }))
                                 .map(|id| vec![id.to_owned()]).unwrap_or_default();
-                            // Empty space clears the shared network/object selection, including with Shift.
-                            let extend = extend && !ids.is_empty();
-                            out.push(UiAction::SelectSet { ids, extend });
+                            let selecting_inner = if let Some((path, selected)) = &self.subnet_scope {
+                                let point = hit.and_then(|hit| scene.triangle_indices().get(hit.tri * 3).copied())
+                                    .or_else(|| wire.map(|hit| match hit { picking::WireHit::Point(point) |
+                                        picking::WireHit::Edge(point, _) => point }));
+                                let inner = point.and_then(|point| picking::picked_scoped_node(path, selected, &self.display_ranges, point))
+                                    .or_else(|| {
+                                        let owner = picking::scoped_display_owner(self.editor.doc.value(), path, selected, &self.display_ranges);
+                                        ids.first().filter(|id| owner == Some(id.as_str())).map(|_| selected.clone())
+                                    });
+                                if let Some(inner) = inner {
+                                    ui::network::select_inner(ctx, &self.editor.path, vec![inner.clone()]);
+                                    self.subnet_scope = Some((path.clone(), inner));
+                                    self.selection_dirty = true;
+                                    true
+                                } else { false }
+                            } else { false };
+                            if !selecting_inner {
+                                // Empty space clears the shared network/object selection, including with Shift.
+                                let extend = extend && !ids.is_empty();
+                                let confirming = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("modal_confirm_click")).unwrap_or(false));
+                                if viewport_input::selects_object(confirming, !ids.is_empty(), ids.iter().all(|id| self.selected_set.contains(id))) {
+                                    out.push(UiAction::SelectSet { ids, extend });
+                                }
+                            }
                         }
                         if mode == ui::SelectionMode::Object {
                             self.selection = picking::Selection { mode, ..Default::default() };

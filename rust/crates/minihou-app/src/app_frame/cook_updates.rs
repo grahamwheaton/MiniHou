@@ -4,6 +4,7 @@ impl App {
     pub(super) fn accept_frame_cook(&mut self, ctx: &egui::Context) {
         if let Some(response) = self.worker.poll() {
             let display_ranges = response.display_ranges.clone();
+            let output_range_count = response.output_range_count;
             if response.revision == self.cooking.requested {
                 if let Some(link) = &self.link { link.cooked(&response); }
             }
@@ -13,7 +14,7 @@ impl App {
             }
             if let Some(mut scene) = accepted.filter(|_| !display_is_empty(self.editor.doc.value())) {
                 self.display_ranges = display_ranges;
-                self.output_range_count = self.display_ranges.len();
+                self.output_range_count = output_range_count;
                 let preview = self.cooking.preview.as_ref().filter(|(id, _, _)| id == &self.selected).map(|(_, geo, _)| geo.as_ref());
                 self.selected_preview = include_selected_preview(&mut scene, &mut self.display_ranges, &self.selected, preview);
                 self.picked_field = None;

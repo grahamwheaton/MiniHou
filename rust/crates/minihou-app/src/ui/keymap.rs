@@ -127,9 +127,11 @@ impl Command {
         // Tab opens the add menu in the viewport too, in every selection mode; Ctrl+Tab toggles object / edit mode.
         Self::AddMenu => UiAction::Command("add_menu".to_owned()),
         Self::ToolSelect => UiAction::Editor(EditorChange::Tool(Tool::Select)),
-        Self::ToolMove => UiAction::StartModal(super::modal_transform::Kind::Move),
+        Self::ToolMove => if kctx.network_hovered { UiAction::Command("move_nodes".into()) }
+            else { UiAction::StartModal(super::modal_transform::Kind::Move) },
         Self::ToolRotate => UiAction::StartModal(super::modal_transform::Kind::Rotate),
-        Self::ToolScale => UiAction::StartModal(super::modal_transform::Kind::Scale),
+        Self::ToolScale => if kctx.network_hovered { UiAction::Command("scale_nodes".into()) }
+            else { UiAction::StartModal(super::modal_transform::Kind::Scale) },
         Self::ToolScaleCage => UiAction::StartScaleCage,
         Self::ToolTransform => UiAction::Editor(EditorChange::Tool(Tool::Transform)),
         Self::FrameAll => if kctx.network_hovered { UiAction::FrameNetwork } else { UiAction::Frame },
@@ -194,6 +196,8 @@ impl Keymap {
         }
         add(K::R,false,true,false,C::RepeatLast,X::Viewport);
         add(K::R,false,true,false,C::RepeatLast,X::Network);
+        add(K::G,false,false,false,C::ToolMove,X::Network);
+        add(K::S,false,false,false,C::ToolScale,X::Network);
         add(K::Tab,false,false,false,C::AddMenu,X::Network);
         add(K::F2,false,false,false,C::RenameNode,X::Network);
         // Numpad 1/3/7 and their opposite views, 5 projection, 9 flip, decimal frame.
@@ -222,6 +226,7 @@ impl Keymap {
         add(K::D,false,false,true,C::DuplicateObject,X::Viewport);
         add(K::G,true,false,false,C::GroupNodes,X::Network);
         add(K::U,true,false,false,C::UngroupNodes,X::Network);
+        // Leaving a subnet is handled by Escape in the network canvas. Plain U is unbound.
         add(K::G,true,false,false,C::GroupCreate,X::Viewport);
         add(K::X,true,false,false,C::DissolveNode,X::Network);
         for (key,cmd) in [(K::C,C::Copy),(K::V,C::Paste),(K::A,C::SelectAll),
@@ -467,6 +472,35 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
             }], ..Default::default() }, |ctx| {
                 let actions = map.poll(ctx, &KeyContext { viewport_hovered: !network, network_hovered: network, ..Default::default() });
                 let expected = match key { Key::G => "group_selection", Key::U => "ungroup_selection", _ => "delete_selection" };
+                assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
+            });
+        }
+    }
+
+    #[test] fn plain_u_does_not_close_or_ungroup_a_subnet() {
+        let map = Keymap::blender();
+        assert!(!map.bindings.iter().any(|binding| binding.context == Context::Network
+            && binding.chord == Chord::new(Key::U, false, false, false)));
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key {
+            key: Key::U, physical_key: None, pressed: true, repeat: false,
+            modifiers: Modifiers::NONE,
+        }], ..Default::default() }, |ctx| {
+            assert!(map.poll(ctx, &KeyContext { network_hovered: true, ..Default::default() }).is_empty());
+            assert!(ctx.input(|input| input.key_pressed(Key::U)));
+        });
+    }
+
+    #[test] fn network_g_and_s_start_layout_transforms() {
+        let map = Keymap::blender();
+        for (key, expected) in [(Key::G, "move_nodes"), (Key::S, "scale_nodes")] {
+            assert!(map.bindings.iter().any(|binding| binding.context == Context::Network
+                && binding.chord == Chord::new(key, false, false, false)));
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key {
+                key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE,
+            }], ..Default::default() }, |ctx| {
+                let actions = map.poll(ctx, &KeyContext { network_hovered: true, ..Default::default() });
                 assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
             });
         }
