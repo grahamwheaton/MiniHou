@@ -47,4 +47,12 @@ defaults. RAM-derived budgets have the existing defaults as floors.
 Step 2 routes the cook cache version and frame budgets, image transfer budgets,
 Python bridge output and stderr caps, and loop iteration budget through
 `Limits::default()`. Their runtime values remain unchanged. Hardware-adaptive
-runtime sizing and steps 3–5 remain planned.
+runtime sizing and steps 4–5 remain planned.
+
+Step 3 records the effective wgpu device buffer limits in `Limits` when the
+viewport GPU is constructed. Oversized indexed faces and edges are split at
+primitive boundaries, with local vertex IDs and matching position, normal and
+colour buffers. The draw loop renders every chunk, including selection depth,
+wire, ghost and outline passes. Point/curve instances and textured vertices
+also use bounded uploads. A live viewport check with a mesh beyond the device
+limit is still needed; unit tests cover the CPU partitioning rules.
