@@ -222,6 +222,7 @@ impl Keymap {
         add(K::D,false,false,true,C::DuplicateObject,X::Viewport);
         add(K::G,true,false,false,C::GroupNodes,X::Network);
         add(K::U,true,false,false,C::UngroupNodes,X::Network);
+        // Leaving a subnet is handled by Escape in the network canvas. Plain U is unbound.
         add(K::G,true,false,false,C::GroupCreate,X::Viewport);
         add(K::X,true,false,false,C::DissolveNode,X::Network);
         for (key,cmd) in [(K::C,C::Copy),(K::V,C::Paste),(K::A,C::SelectAll),
@@ -470,6 +471,20 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
                 assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
             });
         }
+    }
+
+    #[test] fn plain_u_does_not_close_or_ungroup_a_subnet() {
+        let map = Keymap::blender();
+        assert!(!map.bindings.iter().any(|binding| binding.context == Context::Network
+            && binding.chord == Chord::new(Key::U, false, false, false)));
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key {
+            key: Key::U, physical_key: None, pressed: true, repeat: false,
+            modifiers: Modifiers::NONE,
+        }], ..Default::default() }, |ctx| {
+            assert!(map.poll(ctx, &KeyContext { network_hovered: true, ..Default::default() }).is_empty());
+            assert!(ctx.input(|input| input.key_pressed(Key::U)));
+        });
     }
 
     #[test] fn linked_and_inverse_are_routed_to_the_hovered_editor() {
