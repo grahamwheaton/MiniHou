@@ -441,7 +441,14 @@ fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[Option<Value
                 for entry in &promoted {
                     let (Some(name),Some(target),Some(param)) = (entry["name"].as_str(),entry["node"].as_str(),entry["param"].as_str()) else { return Err(Error::new(format!("node '{full}': invalid promoted parameter"))); };
                     let target_node = inner.get_mut(target).ok_or_else(|| Error::new(format!("node '{full}': promoted target '{target}' is missing")))?;
-                    target_node["channels"][param] = Value::String(format!("ch('../../{id}/{name}')"));
+                    if entry["default"].as_array().is_some_and(|values| values.len() == 3) {
+                        for axis in ["x", "y", "z"] {
+                            target_node["channels"][format!("{param}.{axis}")] =
+                                Value::String(format!("ch('../../{id}/{name}.{axis}')"));
+                        }
+                    } else {
+                        target_node["channels"][param] = Value::String(format!("ch('../../{id}/{name}')"));
+                    }
                 }
             }
             flatten_subnets(&inner, &format!("{full}/"), &ext2, out, depth + 1)?;

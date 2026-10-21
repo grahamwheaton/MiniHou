@@ -288,6 +288,13 @@ pub fn embed_scope(doc: &serde_json::Value, path: &[String], inner: serde_json::
     Some(next)
 }
 pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -> Option<UiAction> {
+    if let UiAction::Edit { edit: Edit::Exposed(entries), .. } = &action {
+        let (parent, id) = path.split_last()?;
+        let mut scope = if id.is_empty() { doc.clone() } else { scope_doc(doc, id)? };
+        scope = crate::subnet_edit::expose_parameters(&scope, parent, entries.clone())?;
+        let next = if id.is_empty() { scope } else { embed_scope(doc, id, scope)? };
+        return Some(UiAction::Edit { edit: Edit::Replace(next), continuous: false });
+    }
     let mut inner=scope_doc(doc,path)?;
     match action {
         UiAction::Edit {edit,continuous:_} => match edit {

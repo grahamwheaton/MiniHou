@@ -29,6 +29,24 @@
         assert_eq!(next["nodes"]["other"],doc["nodes"]["other"]);
     }
     #[test]
+    fn exposing_inner_parameter_creates_a_subnet_input_that_drives_the_inner_node() {
+        let doc=json!({"display":"group","nodes":{"group":{"type":"subnet","inner":{"nodes":{
+            "point":{"type":"point"},
+            "move":{"type":"transform","inputs":{"geo":"point"}}
+        },"output":"move"}}}});
+        let path=["group".into()];
+        let inner=scope_doc(&doc,&path).unwrap();
+        let edit=minihou_app::toggle_exposed(&inner,"move","translate");
+        let Some(UiAction::Edit {edit:Edit::Replace(mut next),..})=
+            scoped_edit(&doc,&path,UiAction::Edit {edit,continuous:false}) else {panic!("expected subnet edit")};
+        assert_eq!(next["nodes"]["group"]["promoted_params"][0]["name"],"move_translate");
+        assert_eq!(next["nodes"]["group"]["promoted_params"][0]["param"],"translate");
+        assert!(minihou_app::is_exposed(&scope_doc(&next,&path).unwrap(),"move","translate"));
+        next["nodes"]["group"]["params"]["move_translate"]=json!([3.0,4.0,5.0]);
+        let graph=minihou_core::Graph::from_value(&next).unwrap();
+        assert_eq!(graph.cook(None).unwrap().p(),&[3.0,4.0,5.0]);
+    }
+    #[test]
     fn network_inner_output_change_embeds_in_parent_subnet() {
         let doc=json!({"nodes":{"group":{"type":"subnet","inner":{"nodes":{"a":{"type":"box"},"b":{"type":"box"}},"output":"a"}}}});
         let mut inner=scope_doc(&doc,&["group".into()]).unwrap();
