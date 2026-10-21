@@ -302,6 +302,7 @@ impl eframe::App for App {
                 let modal_pick=self.pushpull_pick || self.editor_state.selection!=ui::SelectionMode::Object;
                 let pick_set=if modal_pick {active_pick_set.clone()} else {node_pick_set.clone()};
                 let pick_visibility=if modal_pick {viewport::ObjectVisibility::HideOthers} else {self.editor_state.object_visibility};
+                let ignore_pick_occlusion=picking::ignores_surface_occlusion(self.mode,self.editor_state.overlays.enabled,self.editor_state.xray,self.editor_state.overlays.wireframe);
 
                 let hover_elem = if hover_in_viewport {
                     if let (Some(pos), Some(scene)) = (hover_pos, &self.scene) {
@@ -321,7 +322,7 @@ impl eframe::App for App {
                                     _ => topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode),
                                 }
                             }).or_else(|| {
-                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,pick_visibility,&self.display_ranges,&pick_set,mode,self.editor_state.xray)?;
+                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,pick_visibility,&self.display_ranges,&pick_set,mode,ignore_pick_occlusion)?;
                                 let topo=element_select::cached(&self.elem_topo,scene);
                                 let mut selected=wire_selection(wire,mode);
                                 if mode==ui::SelectionMode::Edges && mods.alt && self.prefs.viewport.navigation==ui::keymap::Navigation::Blender {
@@ -443,7 +444,7 @@ impl eframe::App for App {
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
                         let hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,false) };
-                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode,self.editor_state.xray) };
+                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode,ignore_pick_occlusion) };
                         if mode == ui::SelectionMode::Object {
                             let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))
                                 .or_else(|| wire.and_then(|w| { let id=match w { picking::WireHit::Point(i)|picking::WireHit::Edge(i,_)=>i }; self.display_ranges.iter().find(|(_,r)|r.contains(&id)).map(|(name,_)|name.as_str()) }))

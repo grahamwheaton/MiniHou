@@ -11,6 +11,24 @@ pub use spatial::{position_bounds, SnapFeature, snap_feature, RegionShape, Selec
 
 pub use interact::{Selection, at, try_at, pick_triangle, pick_triangle_filtered, pick_triangle_culled, element_of, extend, highlight, intersect_horizontal_plane, drop_world_position, cursor_hit_position, primitive_rest_offset, intersect_ground_plane, intersect_ground_or_mesh};
 
+/// Wireframe and X-ray expose elements on the far side of a surface.
+pub fn ignores_surface_occlusion(mode: crate::viewport::Mode, overlays_enabled: bool, xray: bool, wireframe: bool) -> bool {
+    matches!(mode, crate::viewport::Mode::Wireframe | crate::viewport::Mode::WireframeGhost | crate::viewport::Mode::WireBoundingBox)
+        || (overlays_enabled && (xray || wireframe))
+}
+
+#[cfg(test)]
+#[test]
+fn picking_occlusion_tracks_display_mode() {
+    use crate::viewport::Mode;
+    assert!(!ignores_surface_occlusion(Mode::SmoothShaded, true, false, false));
+    assert!(ignores_surface_occlusion(Mode::SmoothShaded, true, true, false));
+    assert!(ignores_surface_occlusion(Mode::SmoothShaded, true, false, true));
+    assert!(ignores_surface_occlusion(Mode::Wireframe, false, false, false));
+    assert!(!ignores_surface_occlusion(Mode::HiddenLineInvisible, false, false, false));
+    assert!(!ignores_surface_occlusion(Mode::SmoothShaded, false, true, true));
+}
+
 #[cfg(test)] mod bvh_navigation_tests {
     use super::*;
     #[test] fn navigation_depth_pick_uses_cooked_bvh_and_empty_fallback() {
