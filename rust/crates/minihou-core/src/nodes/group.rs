@@ -180,6 +180,31 @@ fn create_edges(g:&Geometry,inputs:&Inputs,p:&Params,name:&str)->Result<Geometry
 
 pub const BLAST: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "blast", inputs: GEO, params: crate::params!(
     "group":"";"domain":"primitives";"delete_non_selected":false;"keep_unused_points":false), cook: blast };
+/// Extract the selected geometry as a separate stream for duplication.
+pub const SPLIT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
+    name: "split", inputs: GEO, params: crate::params!("group":"";"domain":"primitives"), cook: split };
+fn split(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let g = SPLIT.one(inputs, 0)?;
+    let domain = p.e("domain", &["primitives", "points", "edges"])?;
+    let pattern = p.s("group")?;
+    if pattern.trim().is_empty() { return Ok(Geometry::default()); }
+    if domain == "edges" {
+        let edges = crate::topo::edges(&g.topology, g.npoints);
+        let selected = edge_mask(&g, &edges, &pattern)?;
+        let mut points = vec![false; g.npoints];
+        for (index, &selected) in selected.iter().enumerate() {
+            if selected {
+                points[edges.points[index * 2] as usize] = true;
+                points[edges.points[index * 2 + 1] as usize] = true;
+            }
+        }
+        return super::modify::keep_points(&g, &points);
+    }
+    let domain = if domain == "points" { "point" } else { "prim" };
+    let selected = mask(&g, domain, &pattern)?;
+    if domain == "point" { super::modify::keep_points(&g, &selected) }
+    else { keep_prims(&g, &selected, true) }
+}
 fn blast(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=BLAST.one(inputs,0)?;let dom=p.e("domain",&["primitives","points","edges"])?;
     if dom=="edges" {
@@ -201,6 +226,15 @@ fn blast(inputs:&Inputs,p:&Params)->Result<Geometry>{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn split_extracts_only_selected_primitives() {
+        let g = Arc::new(Geometry::from_arrays(vec![0.; 18], vec![0,1,2,3,4,5], vec![0,3,6], None).unwrap());
+        let p = Params::resolve(SPLIT.params, serde_json::json!({"group":"1", "domain":"primitives"}).as_object()).unwrap();
+        let selected = split(&[vec![g]], &p).unwrap();
+        assert_eq!(selected.nprims(), 1);
+        assert_eq!(selected.npoints, 3);
+        selected.validate().unwrap();
+    }
     #[test]
     fn subset_preserves_domains_and_open_flags() {
         let mut g = Geometry::from_arrays(vec![0.;12],vec![2,0,1,2],vec![0,2,4],Some(vec![false,true])).unwrap();

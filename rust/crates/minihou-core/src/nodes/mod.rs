@@ -230,6 +230,7 @@ pub fn registry() -> &'static [NodeSpec] {
         modify::MOUNTAIN,
         modify::MATCH_SIZE,
         modify::DELETE,
+        group::SPLIT,
         merge::MERGE,
         curves::CONVERT_LINE,
         curves::POLYPATH,
