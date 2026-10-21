@@ -346,7 +346,8 @@ impl eframe::App for App {
                     }
                 }
                 if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
-                    let selected_object = !self.object_hidden && self.display_ranges.iter().any(|(id, _)| self.selected_set.contains(id));
+                    let selection_mode = if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection };
+                    let selected_object = selection_mode == ui::SelectionMode::Object && !self.object_hidden && self.display_ranges.iter().any(|(id, _)| self.selected_set.contains(id));
                     gpu.draw(
                         &self.state,
                         target,
@@ -366,7 +367,7 @@ impl eframe::App for App {
                             object_color: self.editor_state.object_color,
                             textures: self.editor_state.textures,
                         },
-                        if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection },
+                        selection_mode,
                         selected_object,
                     );
                     if !self.object_hidden {

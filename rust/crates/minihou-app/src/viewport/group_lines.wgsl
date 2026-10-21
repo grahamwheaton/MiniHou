@@ -11,5 +11,5 @@ fn vs_group_thick(@builtin(vertex_index) vertex:u32,
     let direction=delta/max(length(delta),0.00001);
     let perpendicular=vec2(-direction.y,direction.x);
     let clip=select(start,end,corner.x>0.);
-    return vec4(clip.xy+perpendicular*corner.y*2.5/u.element_size.xy*clip.w,clip.zw);
+    return vec4(clip.xy+perpendicular*corner.y*3.5/u.element_size.xy*clip.w,clip.zw);
 }
