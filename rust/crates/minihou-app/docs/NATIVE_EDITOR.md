@@ -63,6 +63,8 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Shift+Right | Last frame | Viewport |
 | Shift+R | Repeat last | Viewport |
 | Shift+R | Repeat last | Network |
+| G | Move (modal) | Network |
+| S | Scale (modal) | Network |
 | Tab | Add node menu | Network |
 | F2 | Rename node | Network |
 | Alt+1 | Front | Viewport |

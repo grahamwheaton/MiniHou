@@ -64,6 +64,13 @@ impl Wiggle {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LayoutKind { Move, Scale }
+
+#[derive(Clone)]
+struct LayoutTransform { kind: LayoutKind, anchor: Pos2, selected: Vec<(String, Pos2)>,
+    before: serde_json::Value }
+
 #[derive(Clone)]
 struct State { show_links: bool, focus: Option<String>, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2>, snap: bool, physics: bool, springs: Option<network_physics::Springs>, tidied: bool,
     subnet_path: Vec<String>, inner_selected: String, inner_selected_set: BTreeSet<String>,
@@ -72,14 +79,14 @@ struct State { show_links: bool, focus: Option<String>, zoom: f32, pan: Vec2, mo
     cut: Option<Cut>, box_op: SelectionOp,
     wiggle: Wiggle,
     wire: Option<AddConnection>, wire_output_index: usize, pickup: Option<crate::graph_edit::WirePickup>,
-    drag_before: Option<serde_json::Value>, drag_physics: bool,
+    drag_before: Option<serde_json::Value>, drag_physics: bool, layout: Option<LayoutTransform>,
     drag: Option<(String, Pos2)>, box_start: Option<Pos2>, alt_pan: bool, menu: Option<network_menu::MenuState>,
     canvas: Option<Rect>, add_pos: Option<Pos2> }
 impl Default for State {
     fn default() -> Self { Self { show_links: true, focus: None, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true, physics: true, springs: None,
         subnet_path: Vec::new(), inner_selected: String::new(), inner_selected_set: BTreeSet::new(),
         selected_wires: BTreeSet::new(), graph_snapshot: None, cut: None, box_op: SelectionOp::Replace,
-        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, wire_output_index: 0, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None,
+        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, wire_output_index: 0, pickup: None, drag_before: None, drag_physics: false, layout: None, drag: None, box_start: None, alt_pan: false, menu: None,
         canvas: None, add_pos: None } }
 }
 
@@ -150,6 +157,30 @@ pub fn place_connected(ctx: &egui::Context, path: &Path, node: &str, pos: [f32; 
     });
 }
 
+pub fn begin_layout(ctx: &egui::Context, file: &Path, doc: &serde_json::Value,
+    root_selected: &BTreeSet<String>, kind: LayoutKind) {
+    let id = state_id(file);
+    ctx.data_mut(|d| {
+        let mut state = d.get_persisted::<State>(id).unwrap_or_default();
+        let scoped = scope_doc(doc, &state.subnet_path);
+        let value = scoped.as_ref().unwrap_or(doc);
+        let selected = if scoped.is_some() { &state.inner_selected_set } else { root_selected };
+        if let (Ok(graph), Some(anchor)) = (minihou_core::Graph::from_value(value), ctx.input(|i| i.pointer.hover_pos())) {
+            let positions = positions_for(&state, &graph, value);
+            let nodes: Vec<_> = positions.iter().filter(|(id, _)| selected.contains(id)).cloned().collect();
+            if !nodes.is_empty() {
+                let mut before = value.clone();
+                for (id, at) in positions { before["nodes"][&id]["pos"] = serde_json::json!([at.x, at.y]); }
+                state.layout = Some(LayoutTransform { kind, anchor, selected: nodes, before });
+                state.drag = None;
+                state.springs = None;
+            }
+        }
+        d.insert_persisted(id, state);
+    });
+    ctx.request_repaint();
+}
+
 fn tidy_preserving_locks(state:&mut State, graph:&minihou_core::Graph, doc:&serde_json::Value, flags:&HashMap<String,super::NodeFlags>) {
     let positions=positions_for(state,graph,doc);
     let pinned: HashMap<_,_>=positions.iter().filter(|(id,_)| flags.get(id).is_some_and(|f|f.locked)).cloned().collect();
@@ -173,7 +204,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     let id = state_id(v.path);
     let mut state = ui.ctx().data_mut(|d| d.get_persisted::<State>(id).unwrap_or_default());
     state.subnet_path = valid_path(v.doc, &state.subnet_path);
-    if !state.subnet_path.is_empty() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+    if !state.subnet_path.is_empty() && state.layout.is_none() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         state.subnet_path.pop(); reset_scope(&mut state);
         ui.ctx().input_mut(|i| { i.consume_key(egui::Modifiers::NONE,egui::Key::Escape); });
     }
@@ -201,6 +232,12 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                 UiAction::Select(name) => { state.inner_selected=name.clone(); state.inner_selected_set=BTreeSet::from([name]); },
                 UiAction::ToggleSelect(name) => { if !state.inner_selected_set.insert(name.clone()) {state.inner_selected_set.remove(&name);} state.inner_selected=name; },
                 UiAction::SelectSet { ids, extend } => {if !extend {state.inner_selected_set.clear();} state.inner_selected_set.extend(ids); state.inner_selected=state.inner_selected_set.iter().next_back().cloned().unwrap_or_default();},
+                UiAction::NetworkGesture { expected: _, before, next } => {
+                    if let (Some(before), Some(next)) = (embed_scope(v.doc, &state.subnet_path, before),
+                        embed_scope(v.doc, &state.subnet_path, next)) {
+                        out.push(UiAction::NetworkGesture { expected: v.doc.clone(), before, next });
+                    }
+                },
                 other => if let Some(edit)=scoped_edit(v.doc,&state.subnet_path,other) {out.push(edit);},
             }
         }
@@ -294,7 +331,7 @@ pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -
 }
 fn reset_scope(state: &mut State) {
     state.inner_selected.clear(); state.inner_selected_set.clear(); state.selected_wires.clear();
-    state.moved.clear(); state.graph_snapshot=None; state.zoom=-1.0; state.pan=Vec2::ZERO;
+    state.moved.clear(); state.layout=None; state.graph_snapshot=None; state.zoom=-1.0; state.pan=Vec2::ZERO;
 }
 #[cfg(test)]
 mod subnet_scope_tests;

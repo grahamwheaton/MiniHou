@@ -1,5 +1,15 @@
 use super::*;
 
+/// Apply one network layout gesture without changing node sizes or graph data.
+pub(super) fn layout_positions(kind: LayoutKind, selected: &[(String, Pos2)], delta: Vec2) -> Vec<(String, Pos2)> {
+    let center = selected.iter().fold(Vec2::ZERO, |sum, (_, at)| sum + at.to_vec2()) / selected.len().max(1) as f32;
+    let factor = 2.0_f32.powf(delta.x / 150.0);
+    selected.iter().map(|(id, at)| (id.clone(), match kind {
+        LayoutKind::Move => *at + delta,
+        LayoutKind::Scale => (center + (at.to_vec2() - center) * factor).to_pos2(),
+    })).collect()
+}
+
 pub(super) fn node_positions(state: &State, v: &View) -> Vec<(String, Pos2)> {
     positions_for(state, v.graph, v.doc)
 }

@@ -1,4 +1,13 @@
     use super::*;
+
+    #[test]
+    fn layout_move_preserves_group_offsets_and_scale_uses_selection_centre() {
+        let selected = vec![("a".into(), pos2(0., 0.)), ("b".into(), pos2(100., 40.))];
+        assert_eq!(position::layout_positions(LayoutKind::Move, &selected, vec2(25., -10.)),
+            vec![("a".into(), pos2(25., -10.)), ("b".into(), pos2(125., 30.))]);
+        assert_eq!(position::layout_positions(LayoutKind::Scale, &selected, vec2(150., 0.)),
+            vec![("a".into(), pos2(-50., -20.)), ("b".into(), pos2(150., 60.))]);
+    }
     use crate::ui::testing::Fixture;
 
     #[test]
