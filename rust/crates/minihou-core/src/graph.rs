@@ -451,7 +451,7 @@ fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[Option<Value
                 out.insert(full.clone(), subnet_alias(&nd,Value::String(format!("{full}/{output}"))));
             } else {
                 for (index, _) in output_desc {
-                    let boundary = inner.iter().filter(|(_, node)| node["type"] == "subnet_output" && node["port_index"].as_u64() == Some(index as u64))
+                    let boundary = inner.iter().filter(|(_, node)| matches!(node["type"].as_str(), Some("output" | "subnet_output")) && node["port_index"].as_u64() == Some(index as u64))
                         .map(|(id, _)| id).collect::<Vec<_>>();
                     if boundary.len() != 1 { return Err(Error::new(format!("subnet '{full}' output {index} needs one boundary node"))); }
                     let alias = if index == 0 { full.clone() } else { format!("{full}/$out{index}") };
@@ -522,6 +522,47 @@ mod subnet_graph_tests {
         let graph = Graph::from_value(&doc).unwrap();
         assert_eq!(graph.cook(None).unwrap().p()[0], 2.0);
         assert_eq!(crate::session::Session::new(graph).cook(None).unwrap().p()[0], 2.0);
+    }
+
+    #[test]
+    fn indexed_legacy_output_boundary_cooks() {
+        let doc=json!({"display":"sub","nodes":{"sub":{"type":"subnet",
+            "output_sockets":[{"index":0,"name":"Geometry"}],"inner":{"nodes":{
+                "point":{"type":"point"},"out":{"type":"output","port_index":0,"inputs":{"geo":"point"}}
+            },"output":"out"}}}});
+        assert_eq!(Graph::from_value(&doc).unwrap().cook(None).unwrap().npoints,1);
+    }
+
+    #[test]
+    fn indexed_boundaries_keep_sparse_port_indices() {
+        let doc=json!({"display":"result","nodes":{
+            "b":{"type":"box"},
+            "sub":{"type":"subnet","input_sockets":[{"index":2,"name":"Third"}],
+                "output_sockets":[{"index":0,"name":"First"},{"index":3,"name":"Fourth"}],
+                "inputs":{"in2":"b"},"inner":{"nodes":{
+                    "incoming":{"type":"subnet_input","port_index":2},
+                    "first":{"type":"subnet_output","port_index":0,"inputs":{"geo":"incoming"}},
+                    "fourth":{"type":"subnet_output","port_index":3,"inputs":{"geo":"incoming"}}
+                }}},
+            "result":{"type":"null","inputs":{"geo":{"node":"sub","output":3}}}
+        }});
+        let graph=Graph::from_value(&doc).unwrap();
+        assert_eq!(graph.to_value(),doc);
+        let expanded=expand_subnets(doc["nodes"].as_object().unwrap()).unwrap().unwrap();
+        assert_eq!(expanded["sub/incoming"]["inputs"]["geo"],"b");
+        assert_eq!(expanded["sub/$out3"]["inputs"]["geo"],"sub/fourth");
+        assert_eq!(expanded["result"]["inputs"]["geo"],"sub/$out3");
+        assert_eq!(graph.cook(None).unwrap().nprims(),Graph::from_value(&json!({"nodes":{"b":{"type":"box"}},"display":"b"})).unwrap().cook(None).unwrap().nprims());
+    }
+
+    #[test]
+    fn legacy_single_port_expansion_is_stable() {
+        let doc=grouped_box();
+        let expanded=expand_subnets(doc["nodes"].as_object().unwrap()).unwrap().unwrap();
+        assert_eq!(expanded["subnet1"]["inputs"]["geo"],"subnet1/subdivide1");
+        assert_eq!(expanded["subnet1/box1"]["type"],"box");
+        assert_eq!(expanded["subnet1/subdivide1"]["inputs"]["geo"],"subnet1/box1");
+        assert_eq!(expanded["out"]["inputs"]["geo"],"subnet1");
     }
 
     fn grouped_box() -> Value {

@@ -359,9 +359,9 @@ pub fn promoted_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &s
             let mut next=v.doc.clone();
             let node=&mut next["nodes"][id];
             let mut name=param.replace('.',"_");
-            if node["promoted_params"].as_array().is_some_and(|entries|entries.iter().any(|e|e["name"]==name)) {
+            if nodes::subnet_public_params(node).iter().any(|e|e["name"]==name) {
                 let base=name.clone(); let mut i=2;
-                while node["promoted_params"].as_array().is_some_and(|entries|entries.iter().any(|e|e["name"]==name)) {name=format!("{base}_{i}");i+=1;}
+                while nodes::subnet_public_params(node).iter().any(|e|e["name"]==name) {name=format!("{base}_{i}");i+=1;}
             }
             if !node["promoted_params"].is_array(){node["promoted_params"]=json!([]);}
             node["promoted_params"].as_array_mut().unwrap().push(json!({"name":name.clone(),"node":target,"param":param,"default":value,"min":0.0,"max":10.0}));
@@ -370,8 +370,20 @@ pub fn promoted_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &s
         }
     });
     ui.ctx().data_mut(|d|d.insert_temp(choice_id,choice));
-    let Some(entries)=subnet["promoted_params"].as_array() else {return};
-    for entry in entries {
+    if let Some(inner)=subnet["inner"]["nodes"].as_object() {
+        for (boundary, _) in inner.iter().filter(|(_, node)| matches!(node["type"].as_str(), Some("input" | "output" | "subnet_input" | "subnet_output"))) {
+            ui.horizontal(|ui| {
+                ui.label(format!("{boundary} parameters"));
+                if ui.add_enabled(!candidates.is_empty(), egui::Button::new("Add parameter")).clicked() {
+                    let (target,param,value)=&candidates[choice];
+                    if let Some(next)=add_boundary_param(v.doc,id,boundary,target,param,value) {
+                        out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:false});
+                    }
+                }
+            });
+        }
+    }
+    for entry in nodes::subnet_public_params(subnet) {
         let Some(name)=entry["name"].as_str() else {continue};
         let default=entry.get("default").cloned().unwrap_or(json!(0.0));
         let old=subnet["params"].get(name).unwrap_or(&default);
@@ -409,6 +421,23 @@ pub fn promoted_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &s
     }
 }
 
+fn add_boundary_param(doc: &Value, id: &str, boundary: &str, target: &str, param: &str, default: &Value) -> Option<Value> {
+    let mut next=doc.clone();
+    let subnet=&mut next["nodes"][id];
+    let existing=nodes::subnet_public_params(subnet);
+    let base=param.replace('.',"_");
+    let mut name=base.clone();
+    let mut suffix=2;
+    while existing.iter().any(|entry| entry["name"] == name) {
+        name=format!("{base}_{suffix}"); suffix+=1;
+    }
+    let node=subnet["inner"]["nodes"].get_mut(boundary)?;
+    if !matches!(node["type"].as_str(), Some("input" | "output" | "subnet_input" | "subnet_output")) { return None; }
+    if !node["custom_params"].is_array() {node["custom_params"]=json!([]);}
+    node["custom_params"].as_array_mut()?.push(json!({"name":name,"node":target,"param":param,"default":default,"min":0.0,"max":10.0}));
+    Some(next)
+}
+
 pub fn promoted_value_edit(doc: &Value, id: &str, name: &str, value: f64, continuous: bool) -> UiAction {
     let mut next=doc.clone(); next["nodes"][id]["params"][name]=json!(value);
     UiAction::Edit {edit:Edit::Replace(next),continuous}
@@ -417,12 +446,36 @@ pub fn promoted_value_edit(doc: &Value, id: &str, name: &str, value: f64, contin
 #[cfg(test)]
 mod subnet_parameter_tests {
     use super::*;
+    use crate::ui::testing::Fixture;
     #[test]
     fn promoted_slider_edit_writes_outer_param() {
         let doc=json!({"nodes":{"subnet1":{"type":"subnet","params":{"width":1.0},"inner":{"nodes":{"box1":{"type":"box"}},"output":"box1"}}}});
         let UiAction::Edit {edit:Edit::Replace(next),continuous:true}=promoted_value_edit(&doc,"subnet1","width",4.0,true) else {panic!("expected continuous document edit")};
         assert_eq!(next["nodes"]["subnet1"]["params"]["width"],json!(4.0));
         assert_eq!(doc["nodes"]["subnet1"]["params"]["width"],json!(1.0));
+    }
+    #[test]
+    fn boundary_parameter_is_visible_and_can_be_added() {
+        let doc=json!({"display":"sub","nodes":{"sub":{"type":"subnet","inner":{"nodes":{
+            "input1":{"type":"subnet_input","port_index":0,"custom_params":[
+                {"name":"offset","node":"move","param":"translate.x","default":1.0}]},
+            "move":{"type":"transform","inputs":{"geo":"input1"}},
+            "output1":{"type":"subnet_output","port_index":0,"inputs":{"geo":"move"}}
+        },"output":"output1"},"input_sockets":[{"index":0,"name":"Input 1"}],
+            "output_sockets":[{"index":0,"name":"Output 1"}]}}});
+        let mut f=Fixture::new();
+        f.doc=minihou_app::Document::parse(doc.to_string()).unwrap();
+        f.graph=minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected="sub".into();
+        let ctx=egui::Context::default();
+        let mut out=Actions::default();
+        let frame=ctx.run(egui::RawInput::default(),|ctx| {
+            egui::CentralPanel::default().show(ctx,|ui| promoted_panel(ui,&f.view(),&mut out,"sub"));
+        });
+        assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape,egui::Shape::Text(t) if t.galley.text()=="offset")));
+        let next=add_boundary_param(&doc,"sub","output1","move","translate.y",&json!(2.0)).unwrap();
+        assert_eq!(next["nodes"]["sub"]["inner"]["nodes"]["output1"]["custom_params"][0]["name"],"translate_y");
+        assert_eq!(nodes::subnet_public_params(&next["nodes"]["sub"]).len(),2);
     }
 }
 
