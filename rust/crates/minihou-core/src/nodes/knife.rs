@@ -1018,7 +1018,23 @@ mod tests {
         assert_eq!(out.npoints,6);
         let extra=out.p().chunks_exact(3).skip(4).map(|q|(q[0],q[1])).collect::<Vec<_>>();
         assert!(extra.iter().any(|&(x,y)|x==-1.&&y==-0.5)&&extra.iter().any(|&(x,y)|x==1.&&y==0.5),"{extra:?}");
-    }    #[test]
+    }
+    #[test]
+    fn cut_endpoint_on_internal_diagonal_is_kept() {
+        let g=Geometry::from_arrays(vec![-1.,-1.,0.,1.,-1.,0.,1.,1.,0.,-1.,1.,0.],vec![0,1,2,3],vec![0,4],None).unwrap();
+        let matrix=[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.];
+        // Two strokes meet on the quad's internal triangulation diagonal.
+        let cuts=json!([{"matrix":matrix,"a":[-2.,0.],"b":[0.,0.],"through":true},
+                        {"matrix":matrix,"a":[0.,0.],"b":[2.,0.],"through":true}]).to_string();
+        let p=Params::resolve(KNIFE.params,json!({"cuts":cuts}).as_object()).unwrap();
+        let out=knife(&[vec![Arc::new(g)]],&p).unwrap(); out.validate().unwrap();
+        let endpoints:Vec<_>=out.p().chunks_exact(3).enumerate()
+            .filter(|(_,q)|q[0].abs()<1e-6&&q[1].abs()<1e-6&&q[2].abs()<1e-6)
+            .map(|(i,_)|i).collect();
+        assert_eq!(endpoints.len(),1,"cut endpoint is missing from {:?}",out.p());
+        assert!(out.topology.vertex_point.contains(&(endpoints[0] as i32)));
+    }
+    #[test]
     fn empty_and_invalid_projection() {
         let g = Geometry::points_only(vec![0., 0., 0.]).unwrap();
         let p = Params::resolve(KNIFE.params, None).unwrap();
