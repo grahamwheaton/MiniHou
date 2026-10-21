@@ -28,20 +28,81 @@ pub fn open_pie_menu(ctx: &egui::Context, path: &Path) {
     ctx.request_repaint();
 }
 pub fn open_rename_dialog(ctx: &egui::Context, node_id: &str) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("rename_link_node"), (node_id.to_owned(), node_id.to_owned())));
+    let id = egui::Id::new("rename_link_node");
+    ctx.data_mut(|d| {
+        d.insert_temp(id, (node_id.to_owned(), node_id.to_owned()));
+        d.insert_temp(id.with("select_name"), true);
+    });
     ctx.request_repaint();
 }
 
 pub(super) fn rename_dialog(ctx: &egui::Context, out: &mut Actions) {
     let id=egui::Id::new("rename_link_node");
     let Some((old,mut new))=ctx.data(|d|d.get_temp::<(String,String)>(id)) else {return};
+    let (confirm, cancel) = ctx.input_mut(|i| (
+        i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+        i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+    ));
+    if cancel {
+        ctx.data_mut(|d| d.remove::<(String,String)>(id));
+        return;
+    }
     let mut open=true;
     egui::Window::new("Rename node").open(&mut open).show(ctx,|ui| {
-        ui.text_edit_singleline(&mut new);
-        if ui.button("Rename").clicked() {out.push(UiAction::RenameNode {old:old.clone(),new:new.clone()});ctx.data_mut(|d|d.remove::<(String,String)>(id));}
+        let text_id = id.with("name");
+        let response = ui.add(egui::TextEdit::singleline(&mut new).id(text_id));
+        let select_name = ctx.data_mut(|d| {
+            let select = d.get_temp::<bool>(id.with("select_name")).unwrap_or(false);
+            d.remove::<bool>(id.with("select_name"));
+            select
+        });
+        if select_name {
+            response.request_focus();
+            let mut state = egui::TextEdit::load_state(ctx, text_id).unwrap_or_default();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0), egui::text::CCursor::new(new.chars().count()))));
+            state.store(ctx, text_id);
+        }
+        let clicked = ui.button("Rename").clicked();
+        if confirm || clicked {out.push(UiAction::RenameNode {old:old.clone(),new:new.clone()});ctx.data_mut(|d|d.remove::<(String,String)>(id));}
     });
     if open && ctx.data(|d|d.get_temp::<(String,String)>(id)).is_some() {ctx.data_mut(|d|d.insert_temp(id,(old,new)));}
     if !open {ctx.data_mut(|d|d.remove::<(String,String)>(id));}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_rename_focuses_and_selects_the_current_name() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("rename_link_node");
+        let text_id = id.with("name");
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            open_rename_dialog(ctx, "box1");
+            rename_dialog(ctx, &mut Actions::default());
+            assert!(ctx.memory(|m| m.has_focus(text_id)));
+            let state = egui::TextEdit::load_state(ctx, text_id).unwrap();
+            assert_eq!(state.cursor.char_range().unwrap().as_sorted_char_range(), 0..4);
+        });
+    }
+
+    #[test]
+    fn enter_commits_and_escape_cancels_rename() {
+        for (key, commits) in [(egui::Key::Enter, true), (egui::Key::Escape, false)] {
+            let ctx = egui::Context::default();
+            let id = egui::Id::new("rename_link_node");
+            let _ = ctx.run(egui::RawInput::default(), |ctx| open_rename_dialog(ctx, "box1"));
+            let mut out = Actions::default();
+            let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key {
+                key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE,
+            }], ..Default::default() }, |ctx| rename_dialog(ctx, &mut out));
+            assert_eq!(matches!(out.0.as_slice(), [UiAction::RenameNode {old, new}]
+                if old == "box1" && new == "box1"), commits);
+            assert!(ctx.data(|d| d.get_temp::<(String, String)>(id)).is_none());
+        }
+    }
 }
 
 pub(super) fn header_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut State) {
