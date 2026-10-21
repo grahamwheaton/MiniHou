@@ -151,6 +151,31 @@ fn test_enable_checkbox_toggles() {
 }
 
 #[test]
+fn test_all_enabled_rows_must_pass_and_count_limits_rows() {
+    let g0 = make_point_geo(1);
+    let g1 = make_point_geo(2);
+    let rows = json!([
+        { "enable": true, "test_type": "expression", "enable_value": "1" },
+        { "enable": true, "test_type": "expression", "enable_value": "0" }
+    ]);
+    let p = Params::resolve(NODE.params, json!({ "tests": rows }).as_object()).unwrap();
+    assert_eq!(cook(&[vec![g0.clone()], vec![g1.clone()]], &p).unwrap().npoints, 1);
+
+    let p = Params::resolve(NODE.params, json!({ "number_of_tests": 1, "tests": rows }).as_object()).unwrap();
+    assert_eq!(cook(&[vec![g0], vec![g1]], &p).unwrap().npoints, 2);
+}
+
+#[test]
+fn test_unknown_test_type_is_rejected() {
+    let p = Params::resolve(NODE.params, json!({
+        "number_of_tests": 1,
+        "tests": [{ "enable": true, "test_type": "unsupported", "enable_value": "1" }]
+    }).as_object()).unwrap();
+    let err = cook(&[vec![make_point_geo(1)], vec![make_point_geo(2)]], &p).unwrap_err();
+    assert!(err.to_string().contains("unsupported test type"));
+}
+
+#[test]
 fn test_time_expressions() {
     let g0 = make_point_geo(1);
     let g1 = make_point_geo(2);
