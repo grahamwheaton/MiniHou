@@ -440,6 +440,23 @@
         }
     }
 
+    #[test]
+    fn attribute_create_tab_add_uses_selected_elements_as_context() {
+        let t = topo(&grid(4, 3));
+        assert_eq!(find_input_group_field("attribute_create"), Some(("group", Some("domain"))));
+        let points = Selection { points: vec![2, 5], ..sel(Points) };
+        assert_eq!(t.node_params("attribute_create", &points), Some(serde_json::json!({
+            "group":"2 5", "domain":"points", "group_type":"points"})));
+        let edges = Selection { edges: vec![(6, 7), (7, 8)], ..sel(Edges) };
+        assert_eq!(t.node_params("attribute_create", &edges), Some(serde_json::json!({
+            "group":"6 7 8", "domain":"points", "group_type":"points"})));
+        let faces = Selection { tris: vec![0, 1, 2, 3], ..sel(Faces) };
+        assert_eq!(t.node_params("attribute_create", &faces), Some(serde_json::json!({
+            "group":"0 1", "domain":"primitives", "group_type":"primitives"})));
+        assert!(t.node_params("attribute_create", &sel(Points)).is_none());
+        assert!(t.node_params("attribute_create", &sel(SelectionMode::Object)).is_none());
+    }
+
     fn pick_group_create_tags_the_selection_with_a_free_name() {
         let m = grid(4, 3);
         let t = topo(&m);
