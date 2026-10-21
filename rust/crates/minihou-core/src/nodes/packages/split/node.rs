@@ -9,7 +9,7 @@ use crate::{
 pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry", "remainder"], cook_multi: Some(cook_multi), cook_sidecar: None,
     name: "split",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
-    params: crate::params!("group": ""; "group_type": "primitives"; "invert_selection": false; "delete_unused_groups": false),
+    params: crate::params!("group": ""; "group_type": "primitives"; "invert_selection": false; "delete_unused_groups": false; "extract_elements": false),
     cook,
 };
 
@@ -78,13 +78,54 @@ fn pieces(g: &Geometry, p: &Params) -> Result<(Geometry, Geometry)> {
 
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = NODE.one(inputs, 0)?;
+    if p.b("extract_elements")? { return extract_elements(&g, p); }
     Ok(pieces(&g, p)?.0)
 }
 
 fn cook_multi(inputs: &Inputs, p: &Params) -> Result<NodeOutputs> {
     let g = NODE.one(inputs, 0)?;
     let (selected, remainder) = pieces(&g, p)?;
+    let selected = if p.b("extract_elements")? { extract_elements(&g, p)? } else { selected };
     Ok(vec![selected, remainder].into())
+}
+
+/// Shift+D needs the selected points or edges themselves, including selections that do not contain a full face.
+fn extract_elements(g: &Geometry, p: &Params) -> Result<Geometry> {
+    let pattern = p.s("group")?;
+    if pattern.trim().is_empty() { return group::keep_prims(g, &vec![false; g.nprims()], true); }
+    match p.e("group_type", &["primitives", "faces", "points", "edges"])?.as_str() {
+        "points" => {
+            let selected = group::mask(g, "point", &pattern)?;
+            crate::nodes::modify::keep_points(g, &selected)
+        }
+        "edges" => {
+            let edges = crate::topo::edges(&g.topology, g.npoints);
+            let selected = crate::nodes::edge_tools::edge_mask(g, &pattern)?;
+            let chosen: Vec<_> = selected.iter().enumerate().filter_map(|(i, &yes)| yes.then_some(i)).collect();
+            let mut points = vec![false; g.npoints];
+            for &i in &chosen {
+                points[edges.points[i * 2] as usize] = true;
+                points[edges.points[i * 2 + 1] as usize] = true;
+            }
+            let retained: Vec<_> = points.iter().enumerate().filter_map(|(i, &yes)| yes.then_some(i)).collect();
+            let mut remap = vec![-1i32; g.npoints];
+            for (new, &old) in retained.iter().enumerate() { remap[old] = new as i32; }
+            let vp = chosen.iter().flat_map(|&i| [remap[edges.points[i * 2] as usize],
+                remap[edges.points[i * 2 + 1] as usize]]).collect();
+            let offsets = (0..=chosen.len()).map(|i| (i * 2) as i32).collect();
+            let positions = retained.iter().flat_map(|&i| g.p()[i * 3..i * 3 + 3].iter().copied()).collect();
+            let mut out = Geometry::from_arrays(positions, vp, offsets, Some(vec![false; chosen.len()]))?;
+            out.point = group::gather_table(&g.point, &retained);
+            out.edge = group::gather_table(&g.edge, &chosen);
+            out.detail = g.detail.clone();
+            out.packed = std::sync::Arc::clone(&g.packed);
+            Ok(out)
+        }
+        _ => {
+            let selected = group::mask(g, "prim", &pattern)?;
+            group::keep_prims(g, &selected, true)
+        }
+    }
 }
 
 #[cfg(test)]

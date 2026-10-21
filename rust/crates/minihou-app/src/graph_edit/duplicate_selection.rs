@@ -6,7 +6,7 @@ pub fn duplicate_selection_nodes(value: &Value, source: &str, split_params: Valu
     -> Option<(Value, [String; 3])>
 {
     let group = split_params.get("group")?.as_str()?;
-    let domain = split_params.get("domain")?.as_str()?;
+    let domain = split_params.get("group_type")?.as_str()?;
     if group.trim().is_empty() || !matches!(domain, "points" | "edges" | "primitives") { return None; }
     let all = nodes(value)?;
     let source_node = all.get(source)?;
@@ -18,6 +18,8 @@ pub fn duplicate_selection_nodes(value: &Value, source: &str, split_params: Valu
     let mut next = value.clone();
     let all = nodes_mut(&mut next)?;
     let split = fresh_id(all, "split");
+    let mut split_params = split_params;
+    split_params["extract_elements"] = json!(true);
     all.insert(split.clone(), json!({"type":"split", "inputs":{"geo":source}, "params":split_params}));
     let transform = fresh_id(all, "transform");
     all.insert(transform.clone(), json!({"type":"transform", "inputs":{"geo":split},
@@ -56,9 +58,9 @@ mod tests {
         let value = json!({"nodes":{"box1":{"type":"box"},
             "out":{"type":"output","inputs":{"geo":"box1"}}},"display":"out"});
         let (next, [split, transform, merge]) = duplicate_selection_nodes(
-            &value, "out", json!({"group":"1 3", "domain":"primitives"})).unwrap();
+            &value, "out", json!({"group":"1 3", "group_type":"primitives"})).unwrap();
         assert_eq!(next["nodes"][&split]["inputs"]["geo"], "box1");
-        assert_eq!(next["nodes"][&split]["params"], json!({"group":"1 3","domain":"primitives"}));
+        assert_eq!(next["nodes"][&split]["params"], json!({"group":"1 3","group_type":"primitives","extract_elements":true}));
         assert_eq!(next["nodes"][&transform]["inputs"]["geo"], split);
         assert_eq!(next["nodes"][&transform]["params"]["translate"], json!([0.0,0.0,0.0]));
         assert_eq!(next["nodes"][&merge]["inputs"]["geos"], json!(["box1",transform]));
@@ -69,7 +71,7 @@ mod tests {
     #[test]
     fn empty_selection_does_nothing() {
         let value = json!({"nodes":{"box1":{"type":"box"}}});
-        assert!(duplicate_selection_nodes(&value, "box1", json!({"group":"", "domain":"points"})).is_none());
+        assert!(duplicate_selection_nodes(&value, "box1", json!({"group":"", "group_type":"points"})).is_none());
         assert_eq!(value["nodes"].as_object().unwrap().len(), 1);
     }
 }

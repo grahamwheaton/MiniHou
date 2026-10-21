@@ -108,7 +108,8 @@ impl Topology {
             "group_create" => {
                 serde_json::json!({"domain": name, "method": "pattern", "pattern": group_pattern()})
             }
-            "blast" | "split" => serde_json::json!({"domain": name, "group": group_pattern()}),
+            "blast" => serde_json::json!({"domain": name, "group": group_pattern()}),
+            "split" => serde_json::json!({"group_type": name, "group": join(sel.mode, &ids)}),
             "boundary_select" => {
                 let dom = match sel.mode { SelectionMode::Faces => "faces", SelectionMode::Points => "points", _ => "edges" };
                 serde_json::json!({"group": join(sel.mode, &ids), "domain": dom})
