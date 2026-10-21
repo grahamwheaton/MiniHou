@@ -184,6 +184,17 @@ pub fn linear_to_srgb(v:f32)->f32 { if v<=0.0031308 {v*12.92} else {1.055*v.powf
         assert_eq!(r.register_image_with_id(&hash,bytes).unwrap(),hash);
         assert!(r.register_image_with_id("sha256:wrong",bytes).is_err());
     }
+    #[test] fn generated_png_decode_keeps_alpha_and_rgb_fallback() {
+        let rgba=image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(2,1,vec![12,34,56,0, 78,90,123,127]).unwrap());
+        let rgb=image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(2,1,vec![12,34,56, 78,90,123]).unwrap());
+        for (source,expected) in [(rgba,vec![12,34,56,0, 78,90,123,127]),(rgb,vec![12,34,56,255, 78,90,123,255])] {
+            let mut encoded=Vec::new();
+            source.write_to(&mut std::io::Cursor::new(&mut encoded),image::ImageFormat::Png).unwrap();
+            let mut registry=Registry::new(".");
+            let id=registry.register_image(&encoded).unwrap();
+            assert_eq!(registry.images[&id].0.rgba,expected);
+        }
+    }
     #[test] fn clip_approximation_parses_as_clamp() {
         let d=Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"image_id":"sha256:test",
             "sampler":{"min":"linear","mag":"linear","wrap_u":"clamp","wrap_v":"clamp"}}}})).unwrap();
