@@ -19,7 +19,9 @@ pub(super) fn input_offset(index: usize, count: usize) -> Vec2 {
 }
 
 pub(super) fn output_count(raw: &serde_json::Value) -> usize {
-    raw["output_sockets"].as_array().map_or(1, |sockets| sockets.len().max(1))
+    raw["output_sockets"].as_array().map_or_else(||
+        raw["type"].as_str().and_then(minihou_core::nodes::get).map_or(1, |spec| spec.outputs.len().max(1)),
+        |sockets| sockets.len().max(1))
 }
 
 pub(super) fn output_position(raw: &serde_json::Value, index: usize) -> Option<usize> {
@@ -54,6 +56,7 @@ mod subnet_port_tests {
         let sparse=json!({"output_sockets":[{"index":0,"name":"First"},{"index":3,"name":"Fourth"}]});
         assert_eq!(output_index(&sparse,1),Some(3));
         assert_eq!(output_position(&sparse,3),Some(1));
+        assert_eq!(output_count(&json!({"type":"flood_fill"})),2);
     }
 }
 

@@ -483,13 +483,14 @@ mod tests {
         let v = sample();
         let (g, _) = group(&v, &["nrm".into(), "out".into()]).unwrap();
         assert_eq!(g["display"], "subnet1");
-        let two = json!({"nodes": {"a": {"type": "box"}, "b": {"type": "transform", "inputs": {"geo": "a"}},
-            "c": {"type": "output", "inputs": {"geo": ["a", "b"]}}}});
+        let two = json!({"display":"c","nodes": {"a": {"type": "box"}, "b": {"type": "transform", "inputs": {"geo": "a"}},
+            "c": {"type": "merge", "inputs": {"geos": ["a", "b"]}}}});
         let (grouped,id)=group(&two,&["a".into(),"b".into()]).unwrap();
         assert_eq!(grouped["nodes"][&id]["output_sockets"].as_array().unwrap().len(),2);
-        assert_eq!(grouped["nodes"]["c"]["inputs"]["geo"],json!([id,{"node":id,"output":1}]));
+        assert_eq!(grouped["nodes"]["c"]["inputs"]["geos"],json!([id,{"node":id,"output":1}]));
+        assert_eq!(cook(&grouped),cook(&two));
         let (back,_)=ungroup(&grouped,&id).unwrap();
-        assert_eq!(back["nodes"]["c"]["inputs"]["geo"],two["nodes"]["c"]["inputs"]["geo"]);
+        assert_eq!(back["nodes"]["c"]["inputs"]["geos"],two["nodes"]["c"]["inputs"]["geos"]);
         assert!(group(&v, &[]).is_none());
     }
     #[test]
