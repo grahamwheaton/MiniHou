@@ -349,12 +349,14 @@ fn extrude_with_direction(
                 .or_else(||point_normals.as_ref().map(|pn|[pn[3*q] as f64,pn[3*q+1] as f64,pn[3*q+2] as f64]))
                 .unwrap_or_else(||if len(direction)>0. {unit(direction)} else {fu[pv[v]]});
             let amount=distance*extrude_scalar(g,&distance_attr,pv[v],q).unwrap_or(1.);
-            newp.push(add(add(base,mul(normal,amount)),spine_translation));
+            let even_scale = if offset_even { dot(normal, fu[pv[v]]).abs().max(0.25) } else { 1. };
+            newp.push(add(add(base,mul(normal,amount / even_scale)),spine_translation));
         }
     } else {
         let mut map = vec![0; g.npoints];
         let mut acc = vec![[0.; 3]; g.npoints];
         let mut repr = vec![0; g.npoints];
+        let mut incident_faces = vec![Vec::new(); g.npoints];
         for (i, &q) in src.iter().enumerate() {
             map[q] = g.npoints + i;
         }
@@ -363,20 +365,21 @@ fn extrude_with_direction(
             nv[v] = map[q];
             acc[q] = add(acc[q], fn_[pv[v]]);
             repr[q] = v;
+            incident_faces[q].push(pv[v]);
         }
         let pn: Vec<_> = acc.iter().map(|&v| unit32(v)).collect();
-        let mut mincos = vec![1.0f64; g.npoints];
-        for &v in &selected {
-            let q = vp[v] as usize;
-            mincos[q] = mincos[q].min(dot(pn[q], fu[pv[v]]).max(0.25));
-        }
         for &q in &src {
             let v=repr[q];
             let normal=extrude_vector(g,&local_z_attr,pv[v],q).filter(|n|len(*n)>1e-12).map(unit)
                 .or_else(||point_normals.as_ref().map(|normals|[normals[3*q] as f64,normals[3*q+1] as f64,normals[3*q+2] as f64]))
                 .unwrap_or_else(||if len(direction)>0. {unit(direction)} else {pn[q]});
             let amount=distance*extrude_scalar(g,&distance_attr,pv[v],q).unwrap_or(1.);
-            let mut point = add(add(pos[q],mul(normal,if offset_even && len(direction)==0. && extrusion_mode=="primitive_normal" {amount/mincos[q]} else {amount})),spine_translation);
+            let even_scale = if offset_even {
+                incident_faces[q].iter()
+                    .map(|&face| dot(normal, fu[face]).abs().max(0.25))
+                    .fold(1., f64::min)
+            } else { 1. };
+            let mut point = add(add(pos[q],mul(normal,amount / even_scale)),spine_translation);
             if let Some(sh) = &shifted {
                 point = add(point, mul(sub(sh[v], pos[q]),extrude_scalar(g,&inset_attr,pv[v],q).unwrap_or(1.)));
             }

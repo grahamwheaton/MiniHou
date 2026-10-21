@@ -282,6 +282,22 @@ mod tests {
         assert!(out.vertex["edge_group_source"].as_i32().unwrap().iter().take(20).all(|v|*v==0));
     }
     #[test]
+    fn polyextrude_offset_even_compensates_axis_extrusion_on_tilted_nonuniform_face() {
+        let g = Geometry::from_arrays(
+            vec![0., 0., 0., 3., 0., 3., 2., 2., 2., 0., 1., 0.],
+            vec![0, 1, 2, 3], vec![0, 4], None,
+        ).unwrap();
+        let even = cook(&POLYEXTRUDE, g.clone(), json!({"distance":1.,"direction":[0.,0.,1.],"offset_even":true}));
+        let uneven = cook(&POLYEXTRUDE, g.clone(), json!({"distance":1.,"direction":[0.,0.,1.],"offset_even":false}));
+        let normal = unit(normals::prim_normals(g.p(), &g.topology)[0]);
+        for i in 0..4 {
+            let height = |out: &Geometry| (0..3).map(|k| (out.p()[3*(i+4)+k]-g.p()[3*i+k]) as f64 * normal[k]).sum::<f64>();
+            assert!((height(&even)-1.).abs()<1e-5);
+            assert!((height(&uneven)-1.).abs()>0.1);
+        }
+        assert_ne!(even.p(), uneven.p());
+    }
+    #[test]
     fn clip_shared_intersections_and_int_sources() {
         let mut g = quad();
         g.point
