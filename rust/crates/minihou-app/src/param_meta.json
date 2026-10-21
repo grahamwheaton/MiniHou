@@ -8956,7 +8956,8 @@
    "default": "",
    "doc": "Ordered elements to route through: ids (edges also p<a>-<b>) keep their order; group names add members in element order",
    "kind": "str",
-   "pick_domain_param": "domain"
+   "pick_domain_param": "domain",
+   "pick_domain_default": "points"
   }
  },
  "select_ring": {

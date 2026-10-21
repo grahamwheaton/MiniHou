@@ -93,7 +93,7 @@ impl Topology {
 
     /// Parameters for a selection node added from the Tab menu while elements are selected: `grow` gets the selection
     /// as its group, `select_loop` / `select_ring` the selected edges as seeds (other modes converted to edges),
-    /// `select_path` the first two selected elements as waypoints. `None` for other nodes or an empty selection.
+    /// `select_path` the selected elements as ordered waypoints. `None` for other nodes or an empty selection.
     pub fn node_params(&self, node_type: &str, sel: &Selection) -> Option<serde_json::Value> {
         let special = SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "boundary_select" | "select_sharp_edges");
         if !(special || find_input_group_field(node_type).is_some()) || sel.is_empty() { return None; }
@@ -124,7 +124,7 @@ impl Topology {
                 serde_json::json!({"group": join(SelectionMode::Edges, &edges)})
             }
             "grow" => serde_json::json!({"group": join(sel.mode, &ids), "domain": name}),
-            "select_path" => serde_json::json!({"waypoints": join(sel.mode, &ids[..ids.len().min(2)]), "domain": name}),
+            "select_path" => serde_json::json!({"waypoints": join(sel.mode, &ids), "domain": name}),
             other if !SELECTION_NODES.contains(&other) => {
                 let (field, domain_param) = find_input_group_field(other)?;
                 let meta = minihou_app_meta(other, field);

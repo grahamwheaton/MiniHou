@@ -453,7 +453,10 @@ impl App {
                 UiAction::Frame => self.frame_mesh(),
                 UiAction::FrameSelected => self.frame_selected(),
                 UiAction::FrameNetwork => ui::network::frame(ctx, &self.editor.path),
-                UiAction::Select(id) => select_active_nodes(&mut self.selected, &mut self.selected_set, vec![id], false, false),
+                UiAction::Select(id) => {
+                    self.autofill_selected_node(&id);
+                    select_active_nodes(&mut self.selected, &mut self.selected_set, vec![id], false, false);
+                }
                 UiAction::NavigateLink { node, param } => {
                     select_active_nodes(&mut self.selected, &mut self.selected_set, vec![node.clone()], false, false);
                     ui::network::focus(ctx, &self.editor.path, &node);

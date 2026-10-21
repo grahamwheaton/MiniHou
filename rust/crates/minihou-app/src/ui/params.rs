@@ -351,6 +351,9 @@ mod tests {
         assert_eq!(arrow_click_mode("group_create", "pattern"), Some(Points));
         assert_eq!(arrow_click_mode("edge_slide", "group"), Some(Edges));
         assert_eq!(arrow_click_mode("bend", "group"), Some(Points));
+        assert_eq!(arrow_click_mode("select_path", "waypoints"), Some(Points));
+        assert_eq!(arrow_click_mode("select_loop", "seeds"), Some(Edges));
+        assert_eq!(arrow_click_mode("select_ring", "seeds"), Some(Edges));
     }
 
     #[test]

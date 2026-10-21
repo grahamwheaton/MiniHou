@@ -434,6 +434,10 @@
         assert!(t.node_params("blast", &sel(Points)).is_none());
         assert!(t.node_params("blast", &sel(SelectionMode::Object)).is_none());
         assert_eq!(find_input_group_field("blast"), Some(("group", Some("domain"))));
+        assert_eq!(find_input_group_field("select_path"), Some(("waypoints", Some("domain"))));
+        for node in ["select_loop", "select_ring"] {
+            assert_eq!(find_input_group_field(node), Some(("seeds", Some("domain"))));
+        }
     }
 
     fn pick_group_create_tags_the_selection_with_a_free_name() {
@@ -468,14 +472,21 @@
         let t = topo(&m);
         let points = Selection { points: vec![7, 3, 9], ..sel(Points) };
         assert_eq!(t.node_params("grow", &points).unwrap(), serde_json::json!({"group": "7 3 9", "domain": "points"}));
-        assert_eq!(t.node_params("select_path", &points).unwrap(), serde_json::json!({"waypoints": "7 3", "domain": "points"}));
+        assert_eq!(t.node_params("select_path", &points).unwrap(), serde_json::json!({"waypoints": "7 3 9", "domain": "points"}));
         let edges = Selection { edges: vec![(6, 7), (7, 8)], ..sel(Edges) };
+        assert_eq!(t.node_params("select_path", &edges).unwrap(), serde_json::json!({"waypoints": "p6-7 p7-8", "domain": "edges"}));
         assert_eq!(t.node_params("select_loop", &edges).unwrap(), serde_json::json!({"seeds": "p6-7 p7-8", "domain": "edges"}));
-        assert_eq!(t.node_params("select_ring", &edges).unwrap()["seeds"], "p6-7 p7-8");
+        assert_eq!(t.node_params("select_ring", &edges).unwrap(), serde_json::json!({"seeds": "p6-7 p7-8", "domain": "edges"}));
         let face = Selection { tris: vec![0, 1], ..sel(Faces) };
+        assert_eq!(t.node_params("select_path", &face).unwrap(), serde_json::json!({"waypoints": "0", "domain": "primitives"}));
         assert_eq!(t.node_params("grow", &face).unwrap(), serde_json::json!({"group": "0", "domain": "primitives"}));
         // faces convert to their edges as loop seeds
-        assert_eq!(t.node_params("select_ring", &face).unwrap()["seeds"].as_str().unwrap().split(' ').count(), 4);
+        for node in ["select_loop", "select_ring"] {
+            let params = t.node_params(node, &face).unwrap();
+            assert_eq!(params["domain"], "primitives");
+            assert_eq!(params["seeds"].as_str().unwrap().split(' ').count(), 4);
+            assert_eq!(t.node_params(node, &points).unwrap()["domain"], "points");
+        }
         assert_eq!(t.node_params("blast", &points).unwrap(), serde_json::json!({"domain": "points", "group": "7 3 9"}));
         assert_eq!(t.node_params("blast", &edges).unwrap(), serde_json::json!({"domain": "edges", "group": "6-7 7-8"}));
         assert_eq!(t.node_params("blast", &face).unwrap(), serde_json::json!({"domain": "primitives", "group": "0"}));

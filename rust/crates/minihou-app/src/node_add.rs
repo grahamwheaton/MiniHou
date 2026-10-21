@@ -1,6 +1,15 @@
 use super::*;
 
 impl App {
+    /// Fill an existing selection node from the current viewport elements when it becomes active.
+    pub(crate) fn autofill_selected_node(&mut self, id: &str) {
+        let Some(node_type) = self.editor.doc.value()["nodes"][id]["type"].as_str() else { return };
+        if !matches!(node_type, "select_path" | "select_loop" | "select_ring") { return; }
+        let Some(params) = self.selection_node_params(node_type) else { return; };
+        let Some(value) = selection_autofill_doc(self.editor.doc.value(), id, params) else { return; };
+        self.finish_history();
+        self.commit_document(value, "fill selection node");
+    }
     pub(crate) fn add_node(&mut self, ctx: &egui::Context, node_type: &str, after: Option<&str>) {
         self.add_node_at(ctx, node_type, after, self.editor_state.cursor);
     }
@@ -67,5 +76,30 @@ impl App {
         for (a,b) in &mut selection.edges {*a-=range.start;*b-=range.start;}
         for tri in &mut selection.tris {*tri-=tri_offset;}
         element_select::Topology::new(positions,&triangles,&edges).node_params(node_type,&selection)
+    }
+}
+
+fn selection_autofill_doc(doc: &Value, id: &str, params: Value) -> Option<Value> {
+    let mut value = doc.clone();
+    merge_params(&mut value, id, params);
+    (value != *doc).then_some(value)
+}
+
+#[cfg(test)]
+mod autofill_tests {
+    use super::*;
+
+    #[test]
+    fn viewport_selection_fills_existing_node_group_and_domain() {
+        let t = element_select::Topology::new(
+            &[0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., 0.],
+            &[0, 1, 2, 0, 2, 3], &[0, 1, 1, 2, 2, 3, 3, 0]);
+        let selection = picking::Selection { mode: ui::SelectionMode::Edges, edges: vec![(0, 1)], ..Default::default() };
+        let doc = json!({"nodes":{"path1":{"type":"select_path","params":{"waypoints":"old","domain":"points","method":"fewest_steps"}}}});
+        let params = t.node_params("select_path", &selection).unwrap();
+        let filled = selection_autofill_doc(&doc, "path1", params.clone()).unwrap();
+        assert_eq!(filled["nodes"]["path1"]["params"], json!({"waypoints":"p0-1","domain":"edges","method":"fewest_steps"}));
+        assert!(selection_autofill_doc(&filled, "path1", params).is_none());
+        assert!(t.node_params("select_path", &picking::Selection { mode: ui::SelectionMode::Edges, ..Default::default() }).is_none());
     }
 }
