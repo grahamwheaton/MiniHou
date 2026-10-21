@@ -12,7 +12,8 @@ fn point_kind(id:u32, loose:&std::collections::HashSet<u32>, edge_ends:&std::col
     if loose.contains(&id) && !edge_ends.contains(&id) {1} else {2}
 }
 
-pub(super) struct Elements { pub(super) buffer:wgpu::Buffer, pub(super) selected:u32, pub(super) total:u32 }
+pub(super) struct Elements { pub(super) buffer:wgpu::Buffer, pub(super) selected:u32, pub(super) total:u32,
+    pub(super) first_selected:u32, pub(super) first_total:u32, pub(super) chunks:Vec<(wgpu::Buffer,u32,u32)> }
 /// Point previews arrive as three axis-aligned segments per point. Keep real edges
 /// as lines and turn only that recognisable cross geometry into disc instances.
 pub(super) fn split_point_crosses(lines:&[f32]) -> (Vec<f32>,Vec<f32>) {
@@ -43,9 +44,18 @@ impl Elements {
     pub(super) fn new(device:&wgpu::Device, scene:&Scene, ranges:&[std::ops::Range<u32>], selected_points:&[u32]) -> Self {
         let instances=Self::instances(scene,ranges,selected_points);
         let count=instances.1; let instances=instances.0;
-        let buffer=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label:Some("point and curve instances"),contents:if instances.is_empty() { &[0u8;32] } else { bytemuck::cast_slice(&instances) },usage:wgpu::BufferUsages::VERTEX });
-        Self {buffer,selected:count,total:instances.len() as u32}
+        let limit=device.limits().max_buffer_size.min(device.limits().max_storage_buffer_binding_size as u64);
+        let capacity=(limit / std::mem::size_of::<Element>() as u64).max(1) as usize;
+        let upload=|slice:&[Element]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some("point and curve instances"),contents:if slice.is_empty() { &[0u8;32] } else { bytemuck::cast_slice(slice) },usage:wgpu::BufferUsages::VERTEX });
+        let mut chunks=Vec::new();
+        for (start, slice) in instances.chunks(capacity).enumerate() {
+            let start=start*capacity;
+            let selected=(count as usize).saturating_sub(start).min(slice.len()) as u32;
+            chunks.push((upload(slice),selected,slice.len() as u32));
+        }
+        let (buffer,first_selected,first_total)=if chunks.is_empty() {(upload(&[]),0,0)} else {chunks.remove(0)};
+        Self {buffer,selected:count,total:instances.len() as u32,first_selected,first_total,chunks}
     }
     pub(super) fn instances(scene:&Scene, ranges:&[std::ops::Range<u32>], selected_points:&[u32]) -> (Vec<Element>,u32) {
         let mut instances=Vec::new(); let mut count=0;

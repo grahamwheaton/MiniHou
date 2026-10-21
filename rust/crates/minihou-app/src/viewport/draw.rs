@@ -1,5 +1,25 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+enum ChunkRange { Visible, Other, All }
+
+fn draw_chunks<'a>(pass: &mut wgpu::RenderPass<'a>, chunks: &'a [MeshChunk], use_cd: bool,
+                   visibility: ObjectVisibility, range: ChunkRange) {
+    for chunk in chunks {
+        let indices = match range {
+            ChunkRange::Visible => 0..if visibility == ObjectVisibility::ShowAll {chunk.total} else {chunk.selected},
+            ChunkRange::Other => chunk.selected..chunk.total,
+            ChunkRange::All => 0..chunk.total,
+        };
+        if indices.is_empty() {continue;}
+        pass.set_vertex_buffer(0, chunk.p.slice(..));
+        pass.set_vertex_buffer(1, chunk.n.slice(..));
+        pass.set_vertex_buffer(2, if use_cd {chunk.cd.as_ref().unwrap_or(&chunk.colors)} else {&chunk.colors}.slice(..));
+        pass.set_index_buffer(chunk.indices.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(indices, 0, 0..1);
+    }
+}
+
 fn needs_selection_depth(mode: Mode, xray: bool, editing: bool, faces: bool) -> bool {
     !xray && faces && (mode.hidden() || (editing && !mode.shaded()))
 }
@@ -102,6 +122,7 @@ impl Gpu {
         let boxes=if mode.bounds() { self.boxes.as_ref() } else { None };
         let (vp,vn,vc,tri,edge)=if let Some(b)=boxes { (&b.p,&b.n,&b.c,&b.tri,&b.edge) }
             else { (&self.vp,&self.vn,if use_cd { self.vcd.as_ref().unwrap() } else { &self.vc },&self.partition_tri,&self.partition_edge) };
+        let chunked = boxes.is_none() && self.mesh_source.is_some();
         let visibility=overlay.visibility;
         let mut enc = device.create_command_encoder(&Default::default());
         {
@@ -124,28 +145,35 @@ impl Gpu {
             pass.set_vertex_buffer(0,vp.slice(..)); pass.set_vertex_buffer(1,vn.slice(..)); pass.set_vertex_buffer(2,vc.slice(..));
             pass.set_index_buffer(tri.buffer.slice(..),wgpu::IndexFormat::Uint32);
             let visible=tri.visible(visibility);
-            if !visible.is_empty() {
+            if !visible.is_empty() || chunked {
                 // Edit highlights need a surface depth buffer even in wireframe or
                 // with face display disabled. Otherwise back-side selection bleeds through.
                 if needs_selection_depth(mode, overlay.xray, editing, overlay.geometry.faces) {
-                    pass.set_pipeline(&self.pipe_depth); pass.draw_indexed(visible.clone(),0,0..1);
+                    pass.set_pipeline(&self.pipe_depth);
+                    if chunked {draw_chunks(&mut pass,&self.face_chunks,use_cd,visibility,ChunkRange::Visible);}
+                    else {pass.draw_indexed(visible.clone(),0,0..1);}
                 }
             }
-            if overlay.geometry.faces && !visible.is_empty() {
+            if overlay.geometry.faces && (!visible.is_empty() || chunked) {
                 if mode.shaded() || mode == Mode::WireframeGhost {
                     let textured=overlay.textures && matches!(mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded)
                         && overlay.object_color==ObjectColor::Single && !self.tex_batches.is_empty();
                     if textured {
                         pass.set_pipeline(if overlay.xray {&self.pipe_tex_xray}else if is_shaded_wire {&self.pipe_tex_bias}else{&self.pipe_tex});
                         for batch in &self.tex_batches {pass.set_bind_group(1,&batch.bind,&[]); pass.set_vertex_buffer(0,batch.vertex.slice(..));
-                            pass.draw(0..if visibility==ObjectVisibility::ShowAll {batch.total}else{batch.selected},0..1);
+                            pass.draw(0..if visibility==ObjectVisibility::ShowAll {batch.first_total}else{batch.first_selected},0..1);
+                            for (buffer,selected,total) in &batch.chunks {
+                                pass.set_vertex_buffer(0,buffer.slice(..));
+                                pass.draw(0..if visibility==ObjectVisibility::ShowAll {*total}else{*selected},0..1);
+                            }
                         }
                         pass.set_vertex_buffer(0,vp.slice(..));
                     } else {
                         pass.set_pipeline(if overlay.xray { &self.pipe_xray }
                             else if mode == Mode::WireframeGhost { &self.pipe_ghost }
                             else if is_shaded_wire { &self.pipe_surf_bias } else { &self.pipe_surf });
-                        pass.draw_indexed(visible,0,0..1);
+                        if chunked {draw_chunks(&mut pass,&self.face_chunks,use_cd,visibility,ChunkRange::Visible);}
+                        else {pass.draw_indexed(visible,0,0..1);}
                     }
                 }
             }
@@ -153,17 +181,26 @@ impl Gpu {
                 pass.set_index_buffer(edge.buffer.slice(..),wgpu::IndexFormat::Uint32);
                 let visible=edge.visible(visibility);
                 if mode == Mode::HiddenLineGhost && !overlay.xray {
-                    pass.set_pipeline(&self.pipe_wire_hidden); pass.draw_indexed(visible.clone(),0,0..1);
+                    pass.set_pipeline(&self.pipe_wire_hidden);
+                    if chunked {draw_chunks(&mut pass,&self.edge_chunks,use_cd,visibility,ChunkRange::Visible);}
+                    else {pass.draw_indexed(visible.clone(),0,0..1);}
                 }
                 pass.set_pipeline(if overlay.xray || matches!(mode,Mode::Wireframe | Mode::WireframeGhost | Mode::WireBoundingBox) { &self.pipe_wire_all } else { &self.pipe_wire });
-                pass.draw_indexed(visible,0,0..1);
+                if chunked {draw_chunks(&mut pass,&self.edge_chunks,use_cd,visibility,ChunkRange::Visible);}
+                else {pass.draw_indexed(visible,0,0..1);}
             }
             // Ghosts depth-test against selected surfaces, never write depth, and never enter the outline mask.
             if visibility == ObjectVisibility::GhostOthers {
                 pass.set_index_buffer(tri.buffer.slice(..),wgpu::IndexFormat::Uint32);
-                if overlay.geometry.faces { pass.set_pipeline(&self.pipe_ghost); pass.draw_indexed(tri.selected..tri.total,0,0..1); }
+                if overlay.geometry.faces { pass.set_pipeline(&self.pipe_ghost);
+                    if chunked {draw_chunks(&mut pass,&self.face_chunks,use_cd,visibility,ChunkRange::Other);}
+                    else {pass.draw_indexed(tri.selected..tri.total,0,0..1);}
+                }
                 pass.set_index_buffer(edge.buffer.slice(..),wgpu::IndexFormat::Uint32);
-                if overlay.geometry.lines && show_wire { pass.set_pipeline(&self.pipe_ghost_wire); pass.draw_indexed(edge.selected..edge.total,0,0..1); }
+                if overlay.geometry.lines && show_wire { pass.set_pipeline(&self.pipe_ghost_wire);
+                    if chunked {draw_chunks(&mut pass,&self.edge_chunks,use_cd,visibility,ChunkRange::Other);}
+                    else {pass.draw_indexed(edge.selected..edge.total,0,0..1);}
+                }
             }
             if overlay.grid || overlay.axes {
                 pass.set_pipeline(&self.pipe_floor);
@@ -176,9 +213,18 @@ impl Gpu {
             if !mode.bounds() {
                 pass.set_pipeline(&self.pipe_elements);
                 pass.set_vertex_buffer(0,self.elements.buffer.slice(..));
-                pass.draw(0..6,0..if visibility==ObjectVisibility::ShowAll {self.elements.total} else {self.elements.selected});
+                pass.draw(0..6,0..if visibility==ObjectVisibility::ShowAll {self.elements.first_total} else {self.elements.first_selected});
+                for (buffer,selected,total) in &self.elements.chunks {
+                    pass.set_vertex_buffer(0,buffer.slice(..));
+                    pass.draw(0..6,0..if visibility==ObjectVisibility::ShowAll {*total} else {*selected});
+                }
                 if visibility==ObjectVisibility::GhostOthers {
-                    pass.set_pipeline(&self.pipe_elements_ghost); pass.draw(0..6,self.elements.selected..self.elements.total);
+                    pass.set_pipeline(&self.pipe_elements_ghost);
+                    pass.set_vertex_buffer(0,self.elements.buffer.slice(..));
+                    pass.draw(0..6,self.elements.first_selected..self.elements.first_total);
+                    for (buffer,selected,total) in &self.elements.chunks {
+                        pass.set_vertex_buffer(0,buffer.slice(..));pass.draw(0..6,*selected..*total);
+                    }
                 }
             }
             if self.sel_face_n > 0 && !mode.bounds() {
@@ -226,7 +272,9 @@ impl Gpu {
                 }
             }
         }
-        if show_object_outline(selected_object, selection_mode) && (boxes.is_some_and(|b| b.tri.selected>0) || self.object_mask_n > 0 || (self.object_mask.is_none() && self.ntri_idx > 0)) {
+        let has_outline = if chunked && self.object_mask_points.is_some() {self.object_mask_n>0}
+            else {boxes.is_some_and(|b| b.tri.selected>0) || self.object_mask_n > 0 || (self.object_mask.is_none() && self.ntri_idx > 0)};
+        if show_object_outline(selected_object, selection_mode) && has_outline {
             {
                 let mut mask_pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("MiniHou object mask"),
@@ -260,7 +308,8 @@ impl Gpu {
                 mask_pass.set_index_buffer(mask_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 let end = if boxes.is_some() { tri.selected } else if self.object_mask.is_some() { self.object_mask_n } else { self.ntri_idx };
                 if end > 0 {
-                    mask_pass.draw_indexed(0..end, 0, 0..1);
+                    if chunked {draw_chunks(&mut mask_pass,if self.mask_chunks.is_empty() {&self.face_chunks} else {&self.mask_chunks},use_cd,visibility,ChunkRange::All);}
+                    else {mask_pass.draw_indexed(0..end, 0, 0..1);}
                 }
             }
             {

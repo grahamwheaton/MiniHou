@@ -26,6 +26,7 @@ mod overlays;
 mod camera_grid;
 mod draw;
 mod uploads;
+use uploads::{MeshSource, MeshChunk, upload_chunks};
 pub use camera_grid::Target;
 use camera_grid::{DEPTH, inverse_projection};
 use textures::TextureBatch;
@@ -97,6 +98,9 @@ pub struct Gpu {
     nl_p: wgpu::Buffer, nl_n: wgpu::Buffer, nl_count: u32, nl_selected: u32, bb_p: wgpu::Buffer, bb_n: wgpu::Buffer, bb_i: wgpu::Buffer,
     bind: wgpu::BindGroup, ubuf: wgpu::Buffer,
     vp: wgpu::Buffer, vn: wgpu::Buffer, vc: wgpu::Buffer, vcd: Option<wgpu::Buffer>, neutral_color: wgpu::Buffer,
+    limits: minihou_core::limits::Limits,
+    mesh_source: Option<MeshSource>,
+    face_chunks: Vec<MeshChunk>, edge_chunks: Vec<MeshChunk>, mask_chunks: Vec<MeshChunk>,
     ntri_idx: u32,
     object_mask: Option<wgpu::Buffer>, object_mask_n: u32,
     object_mask_points: Option<Vec<std::ops::Range<u32>>>,

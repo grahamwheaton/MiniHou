@@ -1,6 +1,7 @@
 use super::*;
 
-pub(super) struct TextureBatch { pub(super) vertex:wgpu::Buffer, pub(super) bind:wgpu::BindGroup, pub(super) selected:u32, pub(super) total:u32, pub(super) triangles:Vec<SurfaceTri> }
+pub(super) struct TextureBatch { pub(super) vertex:wgpu::Buffer, pub(super) bind:wgpu::BindGroup, pub(super) selected:u32, pub(super) total:u32,
+    pub(super) first_selected:u32, pub(super) first_total:u32, pub(super) chunks:Vec<(wgpu::Buffer,u32,u32)>, pub(super) triangles:Vec<SurfaceTri> }
 impl TextureBatch {
     pub(super) fn repartition(&mut self,device:&wgpu::Device,ranges:&[std::ops::Range<u32>]) {
         let mut vertices=Vec::with_capacity(self.triangles.len()*3);
@@ -8,7 +9,18 @@ impl TextureBatch {
             if ranges.iter().any(|r|tri.points.iter().all(|p|r.contains(p)))==selected {vertices.extend_from_slice(&tri.vertices);}
         } if selected {self.selected=vertices.len() as u32;} }
         self.total=vertices.len() as u32;
-        self.vertex=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("material vertices"),contents:if vertices.is_empty(){&[0u8;48]}else{bytemuck::cast_slice(&vertices)},usage:wgpu::BufferUsages::VERTEX});
+        let limits=device.limits();
+        let limit=limits.max_buffer_size.min(limits.max_storage_buffer_binding_size as u64);
+        let capacity=((limit / std::mem::size_of::<TexVertex>() as u64) as usize / 3).max(1)*3;
+        let upload=|slice:&[TexVertex]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some("material vertices"),contents:if slice.is_empty(){&[0u8;48]}else{bytemuck::cast_slice(slice)},usage:wgpu::BufferUsages::VERTEX});
+        let mut chunks=Vec::new();
+        for (index,slice) in vertices.chunks(capacity).enumerate() {
+            let start=index*capacity;
+            chunks.push((upload(slice),(self.selected as usize).saturating_sub(start).min(slice.len()) as u32,slice.len() as u32));
+        }
+        let (vertex,first_selected,first_total)=if chunks.is_empty() {(upload(&[]),0,0)} else {chunks.remove(0)};
+        self.vertex=vertex;self.first_selected=first_selected;self.first_total=first_total;self.chunks=chunks;
     }
 }
 
@@ -82,7 +94,7 @@ impl Gpu {
             if triangles.iter().any(|t|t.vertices.iter().any(|v|v.valid==0.)) {warning.push_str("; missing UV checker");}
             if downsampled {warning.push_str("; downsampled for GPU budget");}
             self.texture_status.push(format!("{}: descriptor {} · scope {} · image hash {} · state {:?} · {}x{} · UV {} · {} / {} · {} bytes · {}",if slot.is_empty(){"(default)"}else{&slot},binding.descriptor_id.as_deref().unwrap_or("none"),binding.scope.as_deref().unwrap_or("none"),tex.and_then(|t|t.image_id.as_deref()).unwrap_or("none"),binding.state,dimensions.0,dimensions.1,tex.map_or("uv",|t|&t.uv_set),tex.map_or("linear",|t|&t.sampler.min),tex.map_or("repeat",|t|&t.sampler.wrap_u),resident,warning));
-            let mut batch=TextureBatch {vertex:device.create_buffer(&wgpu::BufferDescriptor {label:Some("empty material vertices"),size:48,usage:wgpu::BufferUsages::VERTEX,mapped_at_creation:false}),bind,selected:0,total:0,triangles};
+            let mut batch=TextureBatch {vertex:device.create_buffer(&wgpu::BufferDescriptor {label:Some("empty material vertices"),size:48,usage:wgpu::BufferUsages::VERTEX,mapped_at_creation:false}),bind,selected:0,total:0,first_selected:0,first_total:0,chunks:Vec::new(),triangles};
             batch.repartition(device,&self.object_mask_points.clone().unwrap_or_default());
             self.tex_batches.push(batch);
         }

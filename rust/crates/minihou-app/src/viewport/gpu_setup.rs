@@ -24,12 +24,22 @@ impl Gpu {
         Self::new(device,&sc.proxied(0.0))
     }
     pub fn new(device: &wgpu::Device, sc: &Scene) -> Self {
+        let device_limits = device.limits();
+        let mut limits = minihou_core::limits::Limits::default();
+        limits.set_gpu_limits(device_limits.max_buffer_size, device_limits.max_storage_buffer_binding_size as u64);
+        let max_bytes = device_limits.max_buffer_size.min(device_limits.max_storage_buffer_binding_size as u64);
+        let oversized = [sc.p.len().saturating_mul(4), sc.n.len(), sc.cd.as_ref().map_or(0, Vec::len), sc.tri.len(), sc.edge.len()]
+            .into_iter().any(|n| (n as u64)*4 > max_bytes);
+        let mesh_source = oversized.then(|| MeshSource { p: sc.p.clone(), n: sc.n.clone(), colors: vec![0.72; sc.p.len()], cd: sc.cd.clone() });
+        let face_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sc.tri, 3, &[], max_bytes));
+        let edge_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sc.edge, 2, &[], max_bytes));
+        let fallback = [0f32; 3];
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let buf = |label, data: &[u8], usage| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: if data.is_empty() { &[0;4] } else { data }, usage })
         };
-        let vp = buf("P", bytemuck::cast_slice(&sc.p), wgpu::BufferUsages::VERTEX);
-        let vn = buf("N", bytemuck::cast_slice(&sc.n), wgpu::BufferUsages::VERTEX);
+        let vp = buf("P", bytemuck::cast_slice(if oversized { &fallback[..] } else { &sc.p }), wgpu::BufferUsages::VERTEX);
+        let vn = buf("N", bytemuck::cast_slice(if oversized { &fallback[..] } else { &sc.n }), wgpu::BufferUsages::VERTEX);
         let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("u"),
             size: std::mem::size_of::<Uniforms>() as u64,
@@ -268,7 +278,7 @@ impl Gpu {
             face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,pipe_face_markers_xray,
             elements:Elements::new(device,sc,&[],&[]),element_points:Vec::new(),pipe_elements,pipe_elements_ghost,
             pipe_depth, pipe_wire_all, pipe_wire_hidden, pipe_ghost, pipe_ghost_wire,
-            partition_tri: Partition::new(device, &sc.tri, 3, &[]), partition_edge: Partition::new(device, &sc.edge, 2, &[]),
+            partition_tri: Partition::new(device, if oversized { &[] } else { &sc.tri }, 3, &[]), partition_edge: Partition::new(device, if oversized { &[] } else { &sc.edge }, 2, &[]),
             current_tri:sc.tri.clone(), current_edge:sc.edge.clone(),
             boxes:Some(Boxes::new(device,sc,&[],&[],&[0..(sc.p.len()/3) as u32])), object_ranges:Vec::new(), object_ids:Vec::new(),
             matcap, matcap_loaded:std::sync::atomic::AtomicU8::new(0),
@@ -298,9 +308,11 @@ impl Gpu {
             ubuf,
             vp,
             vn,
-            vc:buf("object colors",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()).max(3)]),wgpu::BufferUsages::VERTEX),
-            vcd:sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(c),wgpu::BufferUsages::VERTEX)),
-            neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()*4).max(sc.tri.len()).max(24)]),wgpu::BufferUsages::VERTEX),
+            vc:buf("object colors",bytemuck::cast_slice(&vec![0.72f32;if oversized {3} else {sc.p.len().max(3)}]),wgpu::BufferUsages::VERTEX),
+            vcd:sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(if oversized { &fallback[..] } else { c }),wgpu::BufferUsages::VERTEX)),
+            neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;if oversized {24} else {(sc.p.len()*4).max(sc.tri.len()).max(24)}]),wgpu::BufferUsages::VERTEX),
+            limits,
+            mesh_source, face_chunks, edge_chunks, mask_chunks:Vec::new(),
             object_mask: None, object_mask_n: 0, object_mask_points: None,
             ntri_idx: sc.tri.len() as u32,
             edge_world: edge_world_of(sc),
