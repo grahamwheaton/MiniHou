@@ -41,7 +41,7 @@ pub fn input_attributes(g: &minihou_core::Geometry) -> Vec<String> {
 pub fn attribute_field(ui: &mut egui::Ui, value: &mut Value, width: f32, attributes: impl FnOnce() -> Vec<String>) {
     let mut text = value.as_str().unwrap_or_default().to_owned();
     if ui.add_sized([(width - 38.).max(8.), 22.], egui::TextEdit::singleline(&mut text)).changed() { *value = json!(text); }
-    group_fuzzy::dropdown(ui, value, "attributes", attributes);
+    group_fuzzy::dropdown(ui, value, "attributes", false, attributes);
 }
 
 fn name_domain(name: &str, meta: Option<&Value>) -> SelectionMode {
@@ -124,7 +124,7 @@ pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool
     let edit = ui.add_sized([group_text_width(width), 22.], egui::TextEdit::singleline(&mut text)
         .hint_text("Group name or wildcard"));
     if edit.changed() { *value = json!(text); }
-    ui.add_enabled_ui(enabled, |ui| group_fuzzy::dropdown(ui, value, "groups", groups));
+    ui.add_enabled_ui(enabled, |ui| group_fuzzy::dropdown(ui, value, "groups", true, groups));
     let arrow = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
         .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
         .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)");
