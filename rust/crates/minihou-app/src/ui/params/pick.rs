@@ -15,8 +15,11 @@ pub fn is_input_group_field(name: &str, meta: Option<&Value>) -> bool {
     if explicit_pick(meta) { return true; }
     if (meta.is_some() && !is_string_meta(meta)) || is_output_group_field(name, meta) { return false; }
     let by_name = matches!(name, "group" | "group2" | "groups" | "group_name" | "pattern") || name.ends_with("_group") || name.ends_with("_groups");
-    let selection_list = matches!(name, "points" | "edges" | "faces" | "exclude_edges")
-        && meta.is_some_and(|m| m["doc"].as_str().is_some_and(|d| d.to_lowercase().contains("selection")));
+    let selection_list = meta.is_some_and(|m| m["doc"].as_str().is_some_and(|d| {
+        let doc = d.to_lowercase();
+        if matches!(name, "selection" | "input_selection") { doc.contains("input selection") }
+        else { matches!(name, "points" | "edges" | "faces" | "exclude_edges") && doc.contains("selection") }
+    }));
     by_name || selection_list
 }
 
@@ -131,6 +134,12 @@ pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool
     (arrow.clicked(), arrow.hovered())
 }
 
+pub fn pick_button(ui: &mut egui::Ui, active: bool, enabled: bool) -> egui::Response {
+    ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
+        .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
+        .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,12 +227,25 @@ mod tests {
 
     #[test]
     fn path_loop_and_ring_group_fields_use_the_purple_picker() {
+        for (node, field) in [("select_path", "waypoints"), ("select_loop", "seeds"), ("select_ring", "seeds")] {
+            assert!(is_input_group_field(field, param_meta(node, field)), "{node}.{field} is an input selection");
+        }
         assert_eq!(pick_domain_for("select_path", "waypoints", param_meta("select_path", "waypoints"), &json!({"domain":"points"})), Some(SelectionMode::Points));
         assert_eq!(pick_domain_for("select_path", "waypoints", param_meta("select_path", "waypoints"), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
         assert_eq!(pick_domain_for("select_path", "waypoints", param_meta("select_path", "waypoints"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
         for node in ["select_loop", "select_ring"] {
             assert_eq!(pick_domain_for(node, "seeds", param_meta(node, "seeds"), &json!({"domain":"primitives"})), Some(SelectionMode::Edges));
         }
+    }
+
+    #[test]
+    fn selection_named_input_fields_get_the_group_picker() {
+        let meta = json!({"kind":"str", "doc":"Input selection on the geometry", "pick_domain_param":"domain"});
+        for field in ["selection", "input_selection"] {
+            assert!(is_input_group_field(field, Some(&meta)));
+            assert_eq!(pick_domain_for("example", field, Some(&meta), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
+        }
+        assert!(!is_input_group_field("selection", Some(&json!({"kind":"str", "doc":"Output selection"}))));
     }
 
     #[test]

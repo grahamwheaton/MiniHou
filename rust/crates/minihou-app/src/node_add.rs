@@ -112,4 +112,17 @@ mod autofill_tests {
         assert!(selection_autofill_doc(&filled, "path1", params).is_none());
         assert!(t.node_params("select_path", &picking::Selection { mode: ui::SelectionMode::Edges, ..Default::default() }).is_none());
     }
+
+    #[test]
+    fn tab_add_attribute_create_merges_selection_into_new_node() {
+        let doc = json!({"display":"box1","nodes":{"box1":{"type":"box"}}});
+        let (mut added, id) = graph_edit::add_at(&doc, "attribute_create", Some("box1"), [0.; 3]).unwrap();
+        let t = element_select::Topology::new(
+            &[0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.],
+            &[0,1,2, 0,2,3], &[0,1, 1,2, 2,3, 3,0]);
+        let selection = picking::Selection { mode:ui::SelectionMode::Faces, tris:vec![0,1], ..Default::default() };
+        merge_params(&mut added, &id, t.node_params("attribute_create", &selection).unwrap());
+        assert_eq!(added["nodes"][&id]["params"], json!({
+            "group":"0", "domain":"primitives", "group_type":"primitives"}));
+    }
 }
