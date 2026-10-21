@@ -64,6 +64,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Shift+R | Repeat last | Viewport |
 | Shift+R | Repeat last | Network |
 | Tab | Add node menu | Network |
+| F2 | Rename node | Network |
 | Alt+1 | Front | Viewport |
 | Ctrl+Alt+1 | Back | Viewport |
 | Alt+3 | Right | Viewport |

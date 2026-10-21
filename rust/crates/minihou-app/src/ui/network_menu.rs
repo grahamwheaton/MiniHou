@@ -238,7 +238,11 @@ fn activate(entry: Entry, menu: &mut MenuState, v: &View, out: &mut Actions) -> 
         Entry::Item(Item::Paste) => { out.push(UiAction::Command("paste".into())); Some(Choice::Close) }
         Entry::Item(Item::Tidy) => Some(Choice::Tidy),
         Entry::Item(Item::FrameAll) => Some(Choice::FrameAll),
-        Entry::Item(Item::Rename) => None,
+        Entry::Item(Item::Rename) => {
+            let id = menu.target.as_ref()?;
+            out.push(UiAction::OpenRenameNode(id.clone()));
+            Some(Choice::Close)
+        },
         Entry::Item(item) => {
             let Some(id) = &menu.target else { return None };
             let action = match item {
@@ -314,12 +318,11 @@ pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, 
             }
             egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| {
                 for (index, (label, entry)) in shown.iter().enumerate() {
-                    let disabled = matches!(entry, Entry::Item(Item::Rename));
-                    let color = if disabled { v.theme.faint } else if index == menu.active { v.theme.accent } else { v.theme.text };
+                    let color = if index == menu.active { v.theme.accent } else { v.theme.text };
                     let available = !matches!(entry, Entry::Tool(ty) if minihou_core::nodes::get(ty).is_none());
                     let starred = matches!(entry, Entry::Tool(ty) if prefs().lock().unwrap().favs.iter().any(|fav| fav == ty));
                     let shown_label = format!("{}{}{}", if starred { "★ " } else { "" }, if available { "" } else { "● " }, label);
-                    let response = ui.add_enabled(!disabled, egui::Button::new(RichText::new(shown_label).color(color)).selected(index == menu.active)
+                    let response = ui.add(egui::Button::new(RichText::new(shown_label).color(color)).selected(index == menu.active)
                         .fill(if index == menu.active { v.theme.accent_bg } else { Color32::TRANSPARENT }).frame(false).sense(egui::Sense::click_and_drag()));
                     if let Entry::Tool(ty) = entry { response.dnd_set_drag_payload(crate::ui::ToolDrag((*ty).into())); }
                     if response.secondary_clicked() { if let Entry::Tool(ty) = entry {
@@ -410,6 +413,14 @@ mod tests {
     fn menu_target_model() {
         assert_eq!(items_for(None), vec![Item::Add, Item::Paste, Item::Tidy, Item::FrameAll]);
         assert_eq!(items_for(Some("box1")), vec![Item::Display, Item::Mute, Item::Lock, Item::Template, Item::Duplicate, Item::Delete, Item::Rename]);
+    }
+    #[test]
+    fn rename_uses_the_right_clicked_node() {
+        let f = crate::ui::testing::Fixture::new();
+        let mut menu = MenuState::new(Pos2::ZERO, Some("box1".into()), false);
+        let mut out = Actions::default();
+        assert!(matches!(activate(Entry::Item(Item::Rename), &mut menu, &f.view(), &mut out), Some(Choice::Close)));
+        assert!(matches!(out.0.as_slice(), [UiAction::OpenRenameNode(id)] if id == "box1"));
     }
     #[test]
     fn tab_search_uses_shelf_types() {

@@ -463,6 +463,7 @@ impl App {
                     ctx.data_mut(|d| d.insert_temp(egui::Id::new("link_flash"), (node,param,ctx.input(|i|i.time))));
                 }
                 UiAction::LinkVisibility(show) => { self.prefs.show_parameter_links=show; let _=self.prefs.save(); },
+                UiAction::OpenRenameNode(id) => ui::network::open_rename_dialog(ctx, &id),
                 UiAction::RenameNode { old, new } => {
                     if let Some(value)=graph_edit::rename(self.editor.doc.value(),&old,&new) {
                         if self.commit_document(value,"rename node") { self.selected=new.clone(); self.selected_set=std::collections::BTreeSet::from([new]); }

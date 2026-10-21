@@ -71,6 +71,7 @@ pub enum UiAction {
     Select(String),
     NavigateLink { node: String, param: String },
     LinkVisibility(bool),
+    OpenRenameNode(String),
     RenameNode { old: String, new: String },
     ToggleSelect(String),
     SelectSet { ids: Vec<String>, extend: bool },

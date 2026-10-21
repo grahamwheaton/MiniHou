@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn node_context_menu(response: &egui::Response, node_id: &String, v: &View, out: &mut Actions) {
             response.clone().context_menu(|ui| {
                 if ui.button("Rename node...").clicked() {
-                    ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("rename_link_node"),(node_id.clone(),node_id.clone())));
+                    open_rename_dialog(ui.ctx(), node_id);
                     ui.close();
                 }
                 let links = minihou_app::value_link_ui::links(v.doc);

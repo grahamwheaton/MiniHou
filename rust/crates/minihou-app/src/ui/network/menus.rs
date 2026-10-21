@@ -27,6 +27,11 @@ pub fn open_pie_menu(ctx: &egui::Context, path: &Path) {
     });
     ctx.request_repaint();
 }
+pub fn open_rename_dialog(ctx: &egui::Context, node_id: &str) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("rename_link_node"), (node_id.to_owned(), node_id.to_owned())));
+    ctx.request_repaint();
+}
+
 pub(super) fn rename_dialog(ctx: &egui::Context, out: &mut Actions) {
     let id=egui::Id::new("rename_link_node");
     let Some((old,mut new))=ctx.data(|d|d.get_temp::<(String,String)>(id)) else {return};

@@ -34,7 +34,7 @@ pub enum Command {
     PanLeft, PanRight, PanUp, PanDown, ZoomIn, ZoomOut,
     Xray, Snap, Proportional, ShadeNext, ShadePrevious, ShadePie,
     Undo, Redo, Save, SaveAs, Open, Copy, Paste, DeleteNode, DissolveNode, DuplicateNode, LinkedDuplicateNode, DuplicateObject,
-    TidyNetwork, Preferences, BoxSelect, CircleSelect, LassoSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, EdgeSlide, Knife, FlipFaces, Mirror, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
+    TidyNetwork, RenameNode, Preferences, BoxSelect, CircleSelect, LassoSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, EdgeSlide, Knife, FlipFaces, Mirror, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
     TimelineToggle, TimelinePrevious, TimelineNext, TimelineStart, TimelineEnd,
     ResetCursor,
     RepeatLast,
@@ -42,7 +42,7 @@ pub enum Command {
     SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks, GroupNodes, UngroupNodes, GroupCreate,
 }
 impl Command {
-    pub const ALL: [Self; 99] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 100] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolScaleCage, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -50,7 +50,7 @@ impl Command {
         Self::PanDown, Self::ZoomIn, Self::ZoomOut, Self::Xray, Self::Snap,
         Self::Proportional, Self::ShadeNext, Self::ShadePrevious, Self::Undo, Self::Redo,
         Self::Save, Self::SaveAs, Self::Open, Self::Copy, Self::Paste, Self::DeleteNode, Self::DissolveNode, Self::DuplicateNode, Self::LinkedDuplicateNode, Self::DuplicateObject,
-        Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::EdgeSlide, Self::Knife, Self::FlipFaces, Self::Mirror, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
+        Self::TidyNetwork, Self::RenameNode, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::EdgeSlide, Self::Knife, Self::FlipFaces, Self::Mirror, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
         Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
         Self::ResetCursor, Self::RepeatLast,
         Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess, Self::GoToLinkSource, Self::GoToLinkTarget, Self::ToggleDepLinks, Self::GroupNodes, Self::UngroupNodes, Self::GroupCreate];
@@ -69,7 +69,7 @@ impl Command {
         Self::Proportional => "Proportional editing", Self::ShadeNext => "Next shading", Self::ShadePrevious => "Previous shading",
         Self::Undo => "Undo", Self::Redo => "Redo", Self::Save => "Save", Self::SaveAs => "Save as", Self::Open => "Open",
         Self::Copy => "Copy nodes", Self::Paste => "Paste nodes",
-        Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::LinkedDuplicateNode => "Duplicate linked parameters", Self::DuplicateObject => "Duplicate objects and move", Self::GroupNodes => "Group nodes", Self::UngroupNodes => "Ungroup subnet", Self::GroupCreate => "Group Create from selection", Self::TidyNetwork => "Tidy network",
+        Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::LinkedDuplicateNode => "Duplicate linked parameters", Self::DuplicateObject => "Duplicate objects and move", Self::GroupNodes => "Group nodes", Self::UngroupNodes => "Ungroup subnet", Self::GroupCreate => "Group Create from selection", Self::TidyNetwork => "Tidy network", Self::RenameNode => "Rename node",
         Self::Preferences => "Preferences",
         Self::BoxSelect => "Box select", Self::CircleSelect => "Circle select", Self::LassoSelect => "Lasso select", Self::Paint => "Paint",
         Self::Extrude => "Extrude (modal)", Self::Inset => "Inset", Self::Bevel => "Bevel (modal)", Self::PushPull => "Push / pull (modal)",
@@ -100,7 +100,7 @@ impl Command {
         Self::Xray => "xray", Self::Snap => "snap", Self::Proportional => "proportional", Self::ShadeNext => "shade_next",
         Self::ShadePrevious => "shade_previous", Self::Undo => "undo", Self::Redo => "redo", Self::Save => "save",
         Self::SaveAs => "save_as", Self::Open => "open", Self::Copy => "copy", Self::Paste => "paste", Self::DeleteNode => "delete_node", Self::DissolveNode => "dissolve_node", Self::DuplicateNode => "duplicate_node", Self::LinkedDuplicateNode => "linked_duplicate_node", Self::DuplicateObject => "duplicate_object", Self::GroupNodes => "group_nodes", Self::UngroupNodes => "ungroup_nodes", Self::GroupCreate => "group_create",
-        Self::TidyNetwork => "tidy_network", Self::Preferences => "preferences",
+        Self::TidyNetwork => "tidy_network", Self::RenameNode => "rename_node", Self::Preferences => "preferences",
         Self::BoxSelect => "box_select", Self::CircleSelect => "circle_select", Self::LassoSelect => "lasso_select", Self::Paint => "paint",
         Self::Extrude => "extrude", Self::Inset => "inset", Self::Bevel => "bevel", Self::PushPull => "pushpull",
         Self::Knife => "knife", Self::LoopCut => "loop_cut", Self::EdgeSlide => "edge_slide", Self::FlipFaces => "flip_faces", Self::Mirror => "mirror_tool", Self::OppositeView => "opposite_view",
@@ -153,7 +153,9 @@ impl Command {
         Self::UngroupNodes => UiAction::Command("ungroup_selection".into()),
         Self::GroupCreate => UiAction::Command("group_selection".into()),
         Self::Copy | Self::Paste => UiAction::Command(self.id().to_owned()),
-        Self::TidyNetwork => UiAction::TidyNetwork, Self::Preferences => UiAction::OpenPreferences,
+        Self::TidyNetwork => UiAction::TidyNetwork,
+        Self::RenameNode => return kctx.selected.filter(|id| !id.is_empty()).map(|id| UiAction::OpenRenameNode(id.to_owned())),
+        Self::Preferences => UiAction::OpenPreferences,
         Self::RepeatLast => UiAction::RepeatLast,
         _ => UiAction::Command(self.id().to_owned()),
     }) }
@@ -193,6 +195,7 @@ impl Keymap {
         add(K::R,false,true,false,C::RepeatLast,X::Viewport);
         add(K::R,false,true,false,C::RepeatLast,X::Network);
         add(K::Tab,false,false,false,C::AddMenu,X::Network);
+        add(K::F2,false,false,false,C::RenameNode,X::Network);
         // Numpad 1/3/7 and their opposite views, 5 projection, 9 flip, decimal frame.
         // egui reports number-row and numpad digits alike; Alt is the default fallback.
         for (key,ctrl,cmd) in [(K::Num1,false,C::Front),(K::Num1,true,C::Back),
@@ -386,6 +389,24 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn f2_renames_the_selected_network_node_only() {
+        for (network, selected, expected) in [(true, Some("box1"), Some("box1")),
+            (true, None, None), (false, Some("box1"), None)] {
+            let ctx = egui::Context::default();
+            let mut actions = Vec::new();
+            let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key { key: Key::F2,
+                physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }],
+                ..Default::default() }, |ctx| {
+                actions = Keymap::blender().poll(ctx, &KeyContext {
+                    network_hovered: network, viewport_hovered: !network, selected, ..Default::default()
+                });
+            });
+            match expected {
+                Some(id) => assert!(matches!(actions.as_slice(), [UiAction::OpenRenameNode(actual)] if actual == id)),
+                None => assert!(actions.is_empty()),
+            }
+        }
+    }
     #[test] fn selection_interrupts_without_consuming_transform_keys_or_escape() {
         for (key, modifiers, expected) in [(Key::A, Modifiers::NONE, "select_all"),
             (Key::A, Modifiers::ALT, "select_none"), (Key::B, Modifiers::NONE, "box_select"),

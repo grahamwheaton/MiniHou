@@ -14,7 +14,7 @@ mod canvas;
 use canvas::*;
 mod menus;
 use menus::*;
-pub use menus::{open_add_menu, open_pie_menu};
+pub use menus::{open_add_menu, open_pie_menu, open_rename_dialog};
 mod nodes;
 use nodes::*;
 mod wires;
