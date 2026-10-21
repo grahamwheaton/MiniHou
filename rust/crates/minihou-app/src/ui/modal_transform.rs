@@ -24,6 +24,14 @@ impl Constraint {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchStage { Off, Pivot, Reference, Angle }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BaseStage { Off, Base, Target, SourceDirection, TargetDirection, Done }
+impl BaseStage {
+    pub fn enter(active: bool) -> Self { if active { Self::Base } else { Self::Off } }
+}
+pub fn base_snap_shortcut(key: Key, transform_active: bool) -> bool {
+    key==Key::B && transform_active
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CageHandle { Face(usize, bool), Corner([bool; 3]) }
 
 #[derive(Clone, Debug)]
@@ -36,6 +44,8 @@ pub struct Modal {
     pub initial_proportional: bool, pub initial_radius: f32,
     pub trackball: bool, pub sketch: SketchStage, pub sketch_pivot: Option<[f32; 3]>,
     pub sketch_reference: Option<Pos2>, pub cage: bool, pub cage_handle: Option<CageHandle>,
+    pub base_stage: BaseStage, pub base_point: Option<[f32; 3]>, pub base_target: Option<[f32; 3]>,
+    pub source_direction: Option<[f32; 3]>, pub target_direction: Option<[f32; 3]>,
     pub cage_start: Pos2, pub bounds: ([f32; 3], [f32; 3]),
     pub reference: Option<[f32; 3]>, pub target: Option<[f32; 3]>,
     pub target_shape: Option<[[f32;3];3]>,
@@ -47,6 +57,8 @@ impl Modal {
             numeric: Default::default(), field: 0, snap_to: snap_to.into(), target_kind: None, proportional, radius,
             initial_proportional:proportional, initial_radius:radius, trackball: false,
             sketch: SketchStage::Off, sketch_pivot: None, sketch_reference: None,
+            base_stage: BaseStage::Off, base_point: None, base_target: None,
+            source_direction: None, target_direction: None,
             cage: false, cage_handle: None, cage_start: start, bounds, reference: None, target: None, target_shape:None,
             last: if kind == Kind::Scale { [1.; 3] } else { [0.; 3] }, mmb_start: None }
     }
@@ -100,12 +112,32 @@ impl Modal {
             else { format!("{:.3}{}", self.last.iter().copied().find(|v| *v != 0. && *v != 1.).unwrap_or(self.last[0]), if self.kind == Kind::Rotate { "°" } else { "×" }) };
         format!("{title}  {}  {numbers}  (Snap: {}){}{}", self.constraint.label(),
             if snap { self.snap_to.label() } else { "Off".into() }, if self.proportional { "  Proportional" } else { "" },
-            if self.cage { "  Cage" } else if self.sketch != SketchStage::Off { "  Two-point" }
+            if self.base_stage != BaseStage::Off { match self.base_stage {
+                BaseStage::Base => "  Base snap: pick base", BaseStage::Target => "  Base snap: pick target",
+                BaseStage::SourceDirection => "  Base snap: pick source edge direction",
+                BaseStage::TargetDirection => "  Base snap: pick target direction", BaseStage::Done => "  Base snap", BaseStage::Off => "" } }
+            else if self.cage { "  Cage" } else if self.sketch != SketchStage::Off { "  Two-point" }
             else if self.trackball { "  Trackball" } else { "" })
     }
     #[allow(clippy::too_many_arguments)]
     pub fn desired(&self, center: Pos2, pixels_per_unit: f32, frame: [[f32; 3]; 3], camera: CameraInfo,
         snap: bool, increment: f32, precision: bool) -> ([f32; 3], [f32; 3]) {
+        if self.base_stage != BaseStage::Off {
+            let pivot = self.base_point.unwrap_or(self.pivot);
+            let values = match self.kind {
+                Kind::Move => self.base_point.zip(self.base_target).map(|(a,b)|base_snap_offset(a,b)).unwrap_or(self.last),
+                Kind::Rotate => {
+                    let mut values=[0.;3];
+                    if let (Some(base),Some(source),Some(target))=(self.base_point,self.source_direction,self.target_direction) {
+                        let axis=match self.constraint { Constraint::Axis(a,_)=>a, _=>dominant_axis(camera.ray_forward) };
+                        if let Some(angle)=rotate_alignment_angle(base,source,target,frame[axis]) { values[axis]=angle; }
+                    }
+                    values
+                }
+                Kind::Scale => self.last,
+            };
+            return (values,pivot);
+        }
         let speed = if precision { 0.1 } else { 1. };
         let delta = (self.pointer - self.start) * speed;
         let step = match self.kind { Kind::Move => increment, Kind::Rotate => 5., Kind::Scale => 0.1 };
@@ -227,6 +259,22 @@ pub fn angle_between(start: Pos2, end: Pos2, pivot: Pos2) -> f32 {
     let a = start - pivot; let b = end - pivot;
     (a.x * b.y - a.y * b.x).atan2(a.dot(b)).to_degrees()
 }
+pub fn base_snap_offset(base: [f32;3], target: [f32;3]) -> [f32;3] {
+    [0,1,2].map(|i|target[i]-base[i])
+}
+/// Signed rotation of two directions about an axis. Returns None for a direction parallel to it.
+pub fn rotate_alignment_angle(base: [f32;3], source: [f32;3], target: [f32;3], axis: [f32;3]) -> Option<f32> {
+    let length=dot(axis,axis).sqrt(); if length<1e-6 { return None; }
+    let n=axis.map(|x|x/length);
+    let projected=|point: [f32;3]| {
+        let v=base_snap_offset(base,point); let along=dot(v,n);
+        [0,1,2].map(|i|v[i]-n[i]*along)
+    };
+    let a=projected(source); let b=projected(target);
+    if dot(a,a)<1e-12 || dot(b,b)<1e-12 { return None; }
+    let cross=[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+    Some(dot(n,cross).atan2(dot(a,b)).to_degrees())
+}
 pub fn cage_transform(bounds: ([f32; 3], [f32; 3]), handle: CageHandle, motion: Vec2, pixels_per_unit: f32,
     center: bool, camera: CameraInfo) -> ([f32; 3], [f32; 3]) {
     let (lo, hi) = bounds;
@@ -271,6 +319,25 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
 #[cfg(test)] mod tests {
     use super::*;
     use eframe::egui::pos2;
+    #[test] fn base_snap_geometry_and_rotation_direction() {
+        assert_eq!(base_snap_offset([2.,-1.,4.],[-3.,5.,1.]),[-5.,6.,-3.]);
+        let base=[1.,2.,3.];
+        let source=[3.,2.,3.];
+        let target=[1.,4.,3.];
+        assert!((rotate_alignment_angle(base,source,target,[0.,0.,1.]).unwrap()-90.).abs()<1e-5);
+        assert!((rotate_alignment_angle(base,target,source,[0.,0.,1.]).unwrap()+90.).abs()<1e-5);
+        assert_eq!(rotate_alignment_angle(base,[1.,2.,4.],target,[0.,0.,1.]),None);
+    }
+    #[test] fn b_enters_base_snap_only_during_modal_transform() {
+        assert!(!base_snap_shortcut(Key::B,false));
+        assert!(!base_snap_shortcut(Key::G,true));
+        assert_eq!(BaseStage::enter(base_snap_shortcut(Key::B,false)),BaseStage::Off);
+        for kind in [Kind::Move,Kind::Rotate,Kind::Scale] {
+            let mut modal=Modal::new(kind,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Vertex,false,1.);
+            modal.base_stage=BaseStage::enter(base_snap_shortcut(Key::B,true));
+            assert_eq!(modal.base_stage,BaseStage::Base);
+        }
+    }
     #[test] fn typed_move_uses_display_units_but_angles_and_scale_do_not() {
         use crate::units::{UnitSettings,LengthUnit};
         let mut m=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
@@ -399,7 +466,7 @@ impl App {
         let input=ctx.input(|i|(i.events.clone(),i.pointer.hover_pos(),i.modifiers,i.raw_scroll_delta.y));
         let (events,pointer,modifiers,scroll)=input;
         if let Some(pointer)=pointer { modal.pointer=pointer; }
-        let mut confirm=false; let mut cancel=false; let mut gg=false;
+        let mut confirm=false; let mut cancel=false; let mut gg=false; let mut base_changed=false;
         let camera=self.camera_info();
         let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
             { ui::Orientation::Local } else { self.editor_state.orientation };
@@ -416,20 +483,54 @@ impl App {
                     if modal.type_key(key,m.shift) { continue; }
                     match key {
                         egui::Key::Escape => cancel=true,
-                        egui::Key::Enter | egui::Key::Space => confirm=true,
+                        egui::Key::Enter | egui::Key::Space if matches!(modal.base_stage,BaseStage::Off|BaseStage::Done) => confirm=true,
                         egui::Key::G if ui::modal_transform::double_g_slides(modal.kind,self.editor_state.selection) => gg=true,
                         egui::Key::X | egui::Key::Y | egui::Key::Z => modal.toggle_axis(match key { egui::Key::X=>0,egui::Key::Y=>1,_=>2 },m.shift),
                         egui::Key::O => modal.proportional = !modal.proportional,
                         egui::Key::PageUp => modal.wheel(1.), egui::Key::PageDown => modal.wheel(-1.),
-                        egui::Key::B if modal.kind==ModalKind::Move => { modal.cycle_snap(); if modal.reference.is_none() { modal.reference=Some(modal.pivot); } },
-                        egui::Key::B if modal.kind==ModalKind::Rotate => { modal.sketch=SketchStage::Pivot; modal.sketch_reference=None; },
+                        egui::Key::B => {
+                            self.cancel_transform();
+                            modal.base_stage=BaseStage::enter(true);
+                            modal.base_point=None; modal.base_target=None;
+                            modal.source_direction=None; modal.target_direction=None;
+                            modal.sketch=SketchStage::Off; modal.cage=false;
+                            modal.last=if modal.kind==ModalKind::Scale {modal.last} else {[0.;3]};
+                        },
                         egui::Key::R if modal.kind==ModalKind::Rotate => modal.trackball = !modal.trackball,
                         egui::Key::V if modal.kind==ModalKind::Scale => { modal.cage = !modal.cage; modal.cage_handle=None; },
                         _=>{}
                     }
                 }
                 egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, .. } => {
-                    if modal.sketch==SketchStage::Pivot {
+                    if modal.base_stage!=BaseStage::Off {
+                        // Point and surface features work even when incremental snapping is the current preference.
+                        let geometry=ui::SnapTargets::from_bits(0b101110);
+                        let picked=self.modal_snap_point(pos,geometry);
+                        let plane_point=modal.base_point.unwrap_or(modal.pivot);
+                        let point=picked.or_else(|| {
+                            let (origin,direction)=ui::transform_gizmo::ray(camera,self.last_viewport,pos);
+                            let normal=camera.ray_forward;
+                            let denominator=(0..3).map(|i|direction[i]*normal[i]).sum::<f32>();
+                            if denominator.abs()<1e-6 { return None; }
+                            let t=(0..3).map(|i|(plane_point[i]-origin[i])*normal[i]).sum::<f32>()/denominator;
+                            (t>0.).then(||[0,1,2].map(|i|origin[i]+direction[i]*t))
+                        });
+                        match modal.base_stage {
+                            BaseStage::Base => if let Some(point)=picked {modal.base_point=Some(point);modal.pivot=point;modal.base_stage=BaseStage::Target;base_changed=true;},
+                            BaseStage::Target => if let Some(point)=point {modal.base_target=Some(point);modal.base_stage=if modal.kind==ModalKind::Rotate {BaseStage::SourceDirection} else {BaseStage::Done};base_changed=true;confirm=modal.base_stage==BaseStage::Done;},
+                            BaseStage::SourceDirection => if let Some(point)=picked {
+                                let offset=base_snap_offset(modal.base_point.unwrap(),modal.base_target.unwrap());
+                                modal.source_direction=Some([0,1,2].map(|i|point[i]-offset[i]));
+                                modal.base_stage=BaseStage::TargetDirection;
+                            },
+                            BaseStage::TargetDirection => if let Some(point)=point {
+                                let offset=base_snap_offset(modal.base_point.unwrap(),modal.base_target.unwrap());
+                                modal.target_direction=Some([0,1,2].map(|i|point[i]-offset[i]));
+                                modal.base_stage=BaseStage::Done;base_changed=true;confirm=true;
+                            },
+                            BaseStage::Off|BaseStage::Done => confirm=true,
+                        }
+                    } else if modal.sketch==SketchStage::Pivot {
                         let to=if !modal.snap_to.geometry() {ui::SnapTo::Face.into()} else {modal.snap_to};
                         modal.sketch_pivot=self.modal_snap_point(pos,to).or(Some(modal.pivot));
                         modal.pivot=modal.sketch_pivot.unwrap(); modal.sketch=SketchStage::Reference;
@@ -467,7 +568,7 @@ impl App {
         self.editor_state.proportional.enabled=modal.proportional;
         self.editor_state.proportional.radius=modal.radius;
         let snap=self.editor_state.snap.enabled ^ modifiers.ctrl;
-        if modal.kind==ModalKind::Move && snap && modal.snap_to.geometry() {
+        if modal.base_stage==BaseStage::Off && modal.kind==ModalKind::Move && snap && modal.snap_to.geometry() {
             let feature=self.modal_snap_feature(modal.pointer,modal.snap_to);
             modal.target=feature.map(|f|f.point);
             modal.target_kind=feature.map(|f|f.kind);
@@ -485,7 +586,7 @@ impl App {
             let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
             self.selection_normal_frame(&trs).axes.map(|axis| axis.map(|x| x as f32))
         } else { ui::modal_transform::orientation_frame(orientation,camera,modal.rotation) };
-        if snap && modal.kind==ModalKind::Move && modal.snap_to.contains(ui::SnapTo::Increment) {
+        if modal.base_stage==BaseStage::Off && snap && modal.kind==ModalKind::Move && modal.snap_to.contains(ui::SnapTo::Increment) {
             if let Some(target)=modal.target.take() {
                 let (grid,_) = modal.desired(center,unit,frame,camera,true,self.editor_state.snap.increment,modifiers.shift);
                 let reference=modal.reference.unwrap_or(modal.pivot);
@@ -498,9 +599,12 @@ impl App {
         let (values,pivot)=modal.desired(center,unit,frame,camera,snap,self.editor_state.snap.increment,modifiers.shift);
         let pivot_changed=self.transform_target.as_ref().is_some_and(|target|
             self.editor.doc.value()["nodes"][target]["params"]["pivot"]!=json!(pivot));
-        if values!=modal.last || pivot_changed {
+        if values!=modal.last || pivot_changed || base_changed {
             let op=modal.step(values);
-            self.transform_node_at(op,Some(pivot),Some(orientation));
+            let offset=if modal.base_stage!=BaseStage::Off && modal.kind!=ModalKind::Move {
+                modal.base_point.zip(modal.base_target).map(|(base,target)|base_snap_offset(base,target))
+            } else {None};
+            self.transform_node_at_with_offset(op,Some(pivot),Some(orientation),offset);
         }
         if confirm {
             let next_cage = modal.cage.then(|| modal.after_cage_apply(pivot));

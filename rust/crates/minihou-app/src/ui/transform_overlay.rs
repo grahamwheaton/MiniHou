@@ -1,6 +1,6 @@
 //! Viewport hints for the active modal operator.
 use eframe::egui::{self, pos2, Color32, Pos2, Rect, Stroke};
-use super::{modal_transform::{CageHandle, Constraint, Modal, SketchStage}, transform_gizmo::project, SnapTo, View};
+use super::{modal_transform::{BaseStage, CageHandle, Constraint, Modal, SketchStage}, transform_gizmo::project, SnapTo, View};
 
 fn line(ui: &egui::Ui, rect: Rect, a: Pos2, b: Pos2, color: Color32, width: f32) {
     ui.painter_at(rect).line_segment([a,b], Stroke::new(width,color));
@@ -49,6 +49,36 @@ pub fn show(ui: &egui::Ui, rect: Rect, v: &View<'_>, modal: &Modal) {
         }
         painter.circle_filled(target,6.,v.theme.accent);
         painter.circle_stroke(target,9.,Stroke::new(1.5_f32,Color32::WHITE));
+    }
+    if modal.base_stage!=BaseStage::Off {
+        let mark=|world: Option<[f32;3]>, label: &str, color: Color32| {
+            if let Some(pos)=world.and_then(|p|project(v.camera,rect,p)) {
+                painter.circle_stroke(pos,8.,Stroke::new(2.,color));
+                painter.text(pos+egui::vec2(11.,-11.),egui::Align2::LEFT_BOTTOM,label,
+                    egui::FontId::proportional(13.),color);
+            }
+        };
+        mark(modal.base_point,"Base",v.theme.accent);
+        mark(modal.base_target,"Target",Color32::WHITE);
+        if let Some(base)=modal.base_point.and_then(|p|project(v.camera,rect,p)) {
+            let offset=modal.base_point.zip(modal.base_target)
+                .map(|(a,b)|super::modal_transform::base_snap_offset(a,b)).unwrap_or([0.;3]);
+            let shifted=modal.base_target.and_then(|p|project(v.camera,rect,p)).unwrap_or(base);
+            if let Some(source)=modal.source_direction.and_then(|p|project(v.camera,rect,[0,1,2].map(|i|p[i]+offset[i]))) {
+                line(ui,rect,shifted,source,v.theme.accent,2.);
+            }
+            if let Some(target)=modal.target_direction.and_then(|p|project(v.camera,rect,[0,1,2].map(|i|p[i]+offset[i]))) {
+                line(ui,rect,shifted,target,Color32::WHITE,2.);
+            }
+            if modal.base_stage==BaseStage::Target { line(ui,rect,base,modal.pointer,Color32::LIGHT_GRAY,1.); }
+            if modal.base_stage==BaseStage::TargetDirection { line(ui,rect,shifted,modal.pointer,Color32::WHITE,1.); }
+        }
+        let label=match modal.base_stage {
+            BaseStage::Base=>"Pick base point",BaseStage::Target=>"Pick target point",
+            BaseStage::SourceDirection=>"Pick source edge direction",BaseStage::TargetDirection=>"Pick target direction",
+            BaseStage::Done=>"Base snap",BaseStage::Off=>"" };
+        painter.text(modal.pointer+egui::vec2(16.,16.),egui::Align2::LEFT_TOP,label,
+            egui::FontId::proportional(13.),Color32::WHITE);
     }
     if modal.sketch != SketchStage::Off {
         let pivot = modal.sketch_pivot.and_then(|p|project(v.camera,rect,p)).unwrap_or(modal.pointer);

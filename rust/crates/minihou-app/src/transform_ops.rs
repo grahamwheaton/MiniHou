@@ -30,8 +30,11 @@ impl App {
         self.transform_node_at(op, pivot, self.transform_orientation);
     }
     pub(super) fn transform_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>) {
+        self.transform_node_at_with_offset(op,pivot,orientation_override,None);
+    }
+    pub(super) fn transform_node_at_with_offset(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>, base_offset: Option<[f32;3]>) {
         if self.subnet_scope.is_some() {
-            self.transform_scoped_node_at(op, pivot, orientation_override);
+            self.transform_scoped_node_at(op, pivot, orientation_override, base_offset);
             return;
         }
         if self.editor_state.selection == ui::SelectionMode::Object && self.active_object().is_none() { return; }
@@ -114,6 +117,7 @@ impl App {
                 },
             }
         };
+        let new_trs = if let Some(offset)=base_offset { transform_math::compose_translate(&new_trs,offset.map(f64::from)) } else { new_trs };
         let name = match op { TransformOp::Move(_) => "translate", TransformOp::Rotate(_) => "rotate",
             TransformOp::Scale(_) => "scale" };
         let delta = transform_math::mul4(&new_trs.to_matrix(),
@@ -187,7 +191,7 @@ impl App {
             Err(e) => self.file_status = format!("Could not transform node: {e}"),
         }
     }
-    fn transform_scoped_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>) {
+    fn transform_scoped_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>, base_offset: Option<[f32;3]>) {
         let Some((path, selected)) = self.subnet_scope.clone() else { return; };
         let Some(active) = self.active_object().map(str::to_owned) else { return; };
         let offset = active_range(&active, &self.display_ranges).map(|range| range.start).unwrap_or(0);
@@ -229,6 +233,7 @@ impl App {
                 transform_math::ScaleResult::ShearNeedsSecondNode { second_node, .. } => second_node,
             },
         };
+        let new_trs = if let Some(offset)=base_offset { transform_math::compose_translate(&new_trs,offset.map(f64::from)) } else { new_trs };
         let delta = transform_math::mul4(&new_trs.to_matrix(),
             &transform_math::inverse_affine(&initial.to_matrix()).unwrap_or(transform_math::IDENTITY_4));
         self.transform_delta = Some(LastOperator::MatrixDelta { delta, frame,
