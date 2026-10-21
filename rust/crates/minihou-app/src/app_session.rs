@@ -84,7 +84,8 @@ impl App {
         let mut materials=minihou_app::materials::Registry::new(path.parent().unwrap_or(std::path::Path::new(".")));
         materials.register_graph(doc.value()); let _=materials.register_sidecar(&path);
         let worker = CookWorker::start_with_python(&doc, Some(python_gate()), Scene::new)?;
-        let mut app = Self { selected:display.clone(), selected_set: std::collections::BTreeSet::from([display.clone()]), display, editor:EditorDocument::new(doc, path), worker,
+        let mut app = Self { selected:display.clone(), selected_set: std::collections::BTreeSet::from([display.clone()]), display,
+            subnet_scope:None, subnet_pending_selection:None, editor:EditorDocument::new(doc, path), worker,
             cooking:CookState::default(), state,gpu:None,target:None,materials,
             camera:Camera::frame([0.;3],1.),orbit_drag:None,bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             http:http_ui::HttpUi::default(),http_time:(1.,24.),

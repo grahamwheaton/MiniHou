@@ -30,6 +30,10 @@ impl App {
         self.transform_node_at(op, pivot, self.transform_orientation);
     }
     pub(super) fn transform_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>) {
+        if self.subnet_scope.is_some() {
+            self.transform_scoped_node_at(op, pivot, orientation_override);
+            return;
+        }
         if self.editor_state.selection == ui::SelectionMode::Object && self.active_object().is_none() { return; }
         let Some(active)=self.active_object().map(str::to_owned) else {return;};
         let offset=active_range(&active,&self.display_ranges).map(|r|r.start).unwrap_or(0);
@@ -183,6 +187,73 @@ impl App {
             Err(e) => self.file_status = format!("Could not transform node: {e}"),
         }
     }
+    fn transform_scoped_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>) {
+        let Some((path, selected)) = self.subnet_scope.clone() else { return; };
+        let Some(active) = self.active_object().map(str::to_owned) else { return; };
+        let offset = active_range(&active, &self.display_ranges).map(|range| range.start).unwrap_or(0);
+        let group = group_text(&self.selected_points().iter().map(|point| point - offset).collect::<Vec<_>>());
+        if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
+            self.file_status = "Select points, edges, or faces to transform".into();
+            return;
+        }
+        let first = self.transform_before.is_none();
+        if first { self.finish_history(); self.transform_before = Some(self.editor.doc.clone()); }
+        let before = self.transform_before.as_ref().unwrap();
+        let Some(mut inner) = ui::network::scope_doc(self.editor.doc.value(), &path) else { return; };
+        let Some(before_inner) = ui::network::scope_doc(before.value(), &path) else { return; };
+        let source = if inner["nodes"][&selected]["type"] == "subnet_output" {
+            inner["nodes"][&selected]["inputs"]["geo"].as_str().unwrap_or(&selected).to_owned()
+        } else { selected };
+        let resolved_pivot = pivot.unwrap_or_else(|| self.selection_center().unwrap_or(self.bounds.0));
+        let orientation = orientation_override.unwrap_or(self.editor_state.orientation);
+        let is_local = matches!(orientation, ui::Orientation::Local | ui::Orientation::Gimbal);
+        let Some(target) = ensure_transform_target(&mut inner, &source, group.is_empty(), self.transform_target.as_deref()) else { return; };
+        let mut initial = if before_inner["nodes"].get(&target).is_some() {
+            transform_math::TrsParams::from_params(&before_inner["nodes"][&target]["params"])
+        } else { transform_math::TrsParams { pivot: resolved_pivot.map(f64::from), ..Default::default() } };
+        if before_inner["nodes"].get(&target).is_some() && pivot.is_some() && !matches!(op, TransformOp::Move(_)) {
+            initial = initial.with_world_pivot_preserving_matrix(resolved_pivot.map(f64::from));
+        }
+        let frame = self.orientation_frame(orientation, &initial);
+        let new_trs = match op {
+            TransformOp::Move(delta) => transform_math::compose_translate(&initial, delta.map(f64::from)),
+            TransformOp::Rotate(angles) => {
+                if let Some(axis) = (angles.iter().filter(|a| a.abs() > 1e-6).count() == 1)
+                    .then(|| angles.iter().position(|a| a.abs() > 1e-6)).flatten() {
+                    transform_math::compose_rotate_axis(&initial, frame, axis, angles[axis] as f64, is_local)
+                } else { transform_math::compose_rotate_euler(&initial, frame, angles.map(f64::from), is_local) }
+            },
+            TransformOp::Scale(factors) => match transform_math::compose_scale(&initial, frame,
+                factors.map(f64::from), is_local, 1e-6) {
+                transform_math::ScaleResult::Direct(trs) => trs,
+                transform_math::ScaleResult::ShearNeedsSecondNode { second_node, .. } => second_node,
+            },
+        };
+        let delta = transform_math::mul4(&new_trs.to_matrix(),
+            &transform_math::inverse_affine(&initial.to_matrix()).unwrap_or(transform_math::IDENTITY_4));
+        self.transform_delta = Some(LastOperator::MatrixDelta { delta, frame,
+            label: match op { TransformOp::Move(_) => "Move", TransformOp::Rotate(_) => "Rotate", TransformOp::Scale(_) => "Scale" } });
+        let params = &mut inner["nodes"][&target]["params"];
+        if !params.is_object() { *params = json!({}); }
+        params["translate"] = json!(new_trs.translate);
+        params["rotate"] = json!(new_trs.rotate);
+        params["scale"] = json!(new_trs.scale);
+        params["uniform_scale"] = json!(new_trs.uniform_scale);
+        params["pivot"] = json!(new_trs.pivot);
+        params["axis_rotation"] = json!(new_trs.axis_rotation);
+        if first { params["group"] = json!(group); proportional_params(params, &self.editor_state); }
+        let Some(root) = ui::network::embed_scope(self.editor.doc.value(), &path, inner) else { return; };
+        let edit = Edit::Replace(root);
+        match self.editor.doc.edit(&edit) {
+            Ok(()) => {
+                self.send(edit);
+                self.transform_target = Some(target.clone());
+                self.subnet_scope = Some((path, target.clone()));
+                self.subnet_pending_selection = Some(vec![target]);
+            }
+            Err(error) => self.file_status = format!("Could not transform inner node: {error}"),
+        }
+    }
     pub(super) fn finish_transform(&mut self) {
         self.finish_transform_from(false);
     }
@@ -193,11 +264,15 @@ impl App {
         }
         let _ = is_modal;
         if let Some(target) = self.transform_target.take() {
+            if self.subnet_scope.is_some() {
+                self.subnet_pending_selection = Some(vec![target]);
+            } else {
             if self.editor_state.selection != ui::SelectionMode::Object {
                 self.selected_set = std::collections::BTreeSet::from([target.clone()]);
                 self.selected = target;
             } else if !self.editor.doc.value()["nodes"].get(&self.selected).is_some_and(|n| n["type"] == "output") {
                 self.selected = target;
+            }
             }
         }
         self.transform_pivot = None;
@@ -206,6 +281,18 @@ impl App {
     }
     pub(super) fn cancel_transform(&mut self) {
         if let Some(before) = self.transform_before.take() {
+            if let Some((path, target)) = &self.subnet_scope {
+                if let (Some(current), Some(original)) = (ui::network::scope_doc(self.editor.doc.value(), path),
+                    ui::network::scope_doc(before.value(), path)) {
+                    if original["nodes"].get(target).is_none() {
+                        if let Some(source) = current["nodes"][target]["inputs"]["geo"].as_str() {
+                            let source = source.to_owned();
+                            self.subnet_scope = Some((path.clone(), source.clone()));
+                            self.subnet_pending_selection = Some(vec![source]);
+                        }
+                    }
+                }
+            }
             if self.editor_state.selection == ui::SelectionMode::Object && before.value()["nodes"].get(&self.selected).is_none() {
                 let source = self.editor.doc.value()["nodes"][&self.selected]["inputs"]["geo"].as_str().unwrap_or("").to_owned();
                 self.selected_set.remove(&self.selected);

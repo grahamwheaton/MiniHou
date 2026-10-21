@@ -255,7 +255,7 @@ fn valid_path(doc: &serde_json::Value, path: &[String]) -> Vec<String> {
     }
     valid
 }
-fn scope_doc(doc: &serde_json::Value, path: &[String]) -> Option<serde_json::Value> {
+pub fn scope_doc(doc: &serde_json::Value, path: &[String]) -> Option<serde_json::Value> {
     if path.is_empty() {return None;}
     let mut scope=doc;
     for id in path {scope=&scope["nodes"][id]["inner"];}

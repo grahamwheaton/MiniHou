@@ -528,6 +528,7 @@ mod tests {
             extras: Default::default(),
             scene: Vec::new(),
             display_ranges: Vec::new(),
+            output_range_count: 0,
             stats: Default::default(),
             error: Some("bad cook".into()),
             milliseconds: 1.0,

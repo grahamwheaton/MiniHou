@@ -13,8 +13,9 @@ pub struct CookResponse<T> {
     pub preview: Option<(String, Arc<Geometry>, Option<Arc<Geometry>>)>,
     pub lod: Option<Arc<ClusterLod>>,
     pub prepared: Option<T>,
-    /// Display output ownership in the merged geometry (point indices).
+    /// Display output ranges followed by subnet-expanded ranges (point indices).
     pub display_ranges: Vec<(String, std::ops::Range<u32>)>,
+    pub output_range_count: usize,
     pub stats: CookStats,
     pub error: Option<String>,
     pub milliseconds: f64,
@@ -146,15 +147,56 @@ fn cook_batch_preview<T>(session: &mut Session, target: &mut String, requests: V
         .filter(|(id, _)| id.starts_with("__display_merge_"))
         .map(|(_, def)| def.inputs.iter().flat_map(|(_, ids)| ids.iter().cloned()).collect::<Vec<_>>())
         .unwrap_or_else(|| vec![target.clone()]);
+    let expanded = session.graph().to_value()["nodes"].as_object()
+        .and_then(|nodes| minihou_core::graph::expand_subnets(nodes).ok().flatten());
+    let expanded_counts = expanded.as_ref().and_then(|_| session.expanded_cached_point_counts());
     let mut offset = 0;
-    let display_ranges = outputs.into_iter().filter_map(|id| {
-        let count = session.cached_geometry(&id)?.npoints as u32;
+    let mut display_ranges: Vec<_> = outputs.into_iter().filter_map(|id| {
+        let count = session.cached_geometry(&id).map(|geometry| geometry.npoints as u32)
+            .or_else(|| expanded_counts.as_ref()?.get(&id).copied())?;
         let range = offset..offset + count;
         offset += count;
         Some((id, range))
     }).collect();
+    let output_range_count = display_ranges.len();
+    if let (Some(expanded), Some(counts)) = (expanded, expanded_counts) {
+        let roots = display_ranges.clone();
+        for (id, range) in roots { trace_expanded_ranges(&expanded, &counts, &id, range, &mut display_ranges, 0); }
+    }
     let prepared = geometry.as_ref().map(|g| prepare(g));
-    CookResponse { revision, geometry, preview, lod, prepared, display_ranges, extras, scene, stats, error, milliseconds }
+    CookResponse { revision, geometry, preview, lod, prepared, display_ranges, output_range_count, extras, scene, stats, error, milliseconds }
+}
+
+fn trace_expanded_ranges(nodes: &serde_json::Map<String, Value>, counts: &std::collections::HashMap<String, u32>,
+    id: &str, range: std::ops::Range<u32>, out: &mut Vec<(String, std::ops::Range<u32>)>, depth: usize) {
+    if depth > 64 || range.is_empty() { return; }
+    let Some(node) = nodes.get(id) else { return; };
+    if id.contains('/') && !id.rsplit('/').next().unwrap_or_default().starts_with('$') {
+        out.push((id.to_owned(), range.clone()));
+    }
+    fn source(value: &Value) -> Option<&str> {
+        if value["output"].as_u64().unwrap_or(0) != 0 { return None; }
+        value.as_str().or_else(|| value["node"].as_str())
+    }
+    if node["type"] == "merge" {
+        let Some(inputs) = node["inputs"]["geos"].as_array() else { return; };
+        let parts: Vec<_> = inputs.iter().filter_map(|input| {
+            let id = source(input)?;
+            Some((id, *counts.get(id)?))
+        }).collect();
+        if parts.len() != inputs.len() || parts.iter().map(|(_, count)| count).sum::<u32>() != range.len() as u32 { return; }
+        let mut start = range.start;
+        for (child, count) in parts {
+            trace_expanded_ranges(nodes, counts, child, start..start + count, out, depth + 1);
+            start += count;
+        }
+    } else if matches!(node["type"].as_str(), Some("output" | "subnet_output" | "subnet" | "transform" | "normal" | "null")) {
+        if let Some(child) = source(&node["inputs"]["geo"]) {
+            if counts.get(child).copied() == Some(range.len() as u32) {
+                trace_expanded_ranges(nodes, counts, child, range, out, depth + 1);
+            }
+        }
+    }
 }
 
 fn append_cook_stats(out:&mut CookStats, more:&CookStats) {
@@ -260,6 +302,29 @@ impl<T: Send + 'static> CookWorker<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subnet_merge_exposes_inner_display_ranges_for_picking() {
+        let value = json!({"display":"sub","nodes":{"sub":{"type":"subnet",
+            "input_sockets":[{"index":0,"name":"Input 1"}],
+            "output_sockets":[{"index":0,"name":"Output 1"}],
+            "inner":{"output":"output1","nodes":{
+                "a":{"type":"box"},"b":{"type":"box"},
+                "merge1":{"type":"merge","inputs":{"geos":["a","b"]}},
+                "output1":{"type":"subnet_output","port_index":0,"inputs":{"geo":"merge1"}}
+            }}}}});
+        let mut session = Document::parse(value.to_string()).unwrap().session().unwrap();
+        let mut target = "sub".to_owned();
+        let response = cook_batch(&mut session, &mut target,
+            vec![CookRequest { revision: 1, edit: Edit::Replace(value) }], |_| ());
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert_eq!(response.output_range_count, 1);
+        let a = response.display_ranges.iter().find(|(id, _)| id == "sub/a").unwrap().1.clone();
+        let b = response.display_ranges.iter().find(|(id, _)| id == "sub/b").unwrap().1.clone();
+        assert_eq!(a.start, 0);
+        assert_eq!(a.end, b.start);
+        assert_eq!(b.end, response.display_ranges[0].1.end);
+    }
 
     #[test]
     fn removing_last_node_cooks_empty_viewport_without_error() {

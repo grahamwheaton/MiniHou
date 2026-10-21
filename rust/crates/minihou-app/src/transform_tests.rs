@@ -526,6 +526,26 @@ fn output_node_selection_resolves_to_displayed_output() {
 }
 
 #[test]
+fn inner_transform_target_stays_inside_subnet_and_changes_displayed_geometry() {
+    let root = json!({"display":"sub","nodes":{"sub":{"type":"subnet","inner":{
+        "output":"output1","nodes":{"box1":{"type":"box"},
+            "output1":{"type":"subnet_output","port_index":0,"inputs":{"geo":"box1"}}}
+    }}}});
+    let path = vec!["sub".into()];
+    let before = Graph::from_value(&root).unwrap().cook(None).unwrap();
+    let mut inner = ui::network::scope_doc(&root, &path).unwrap();
+    let target = ensure_transform_target(&mut inner, "box1", true, None).unwrap();
+    inner["nodes"][&target]["params"]["translate"] = json!([3.0, 0.0, 0.0]);
+    let after = ui::network::embed_scope(&root, &path, inner).unwrap();
+    assert!(after["nodes"].get(&target).is_none());
+    assert_eq!(after["nodes"]["sub"]["inner"]["nodes"]["output1"]["inputs"]["geo"], target);
+    let cooked = Graph::from_value(&after).unwrap().cook(None).unwrap();
+    let original_x = before.p().chunks_exact(3).map(|p| p[0]).fold(f32::INFINITY, f32::min);
+    let moved_x = cooked.p().chunks_exact(3).map(|p| p[0]).fold(f32::INFINITY, f32::min);
+    assert!((moved_x - original_x - 3.0).abs() < 1e-4);
+}
+
+#[test]
 fn outputless_transform_end_resolves_preview_and_moves_selected_points() {
     let value = json!({"display":"box", "nodes": {
         "box":{"type":"box"},

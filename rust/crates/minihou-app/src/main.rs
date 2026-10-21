@@ -55,6 +55,7 @@ use minihou_core::python_bridge::PythonGate;
 struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
     selected: String, selected_set: std::collections::BTreeSet<String>, display: String,
+    subnet_scope: Option<(Vec<String>, String)>, subnet_pending_selection: Option<Vec<String>>,
     state: egui_wgpu::RenderState, gpu: Option<Gpu>, target: Option<Target>,
     materials:minihou_app::materials::Registry,
     camera: Camera, orbit_drag: Option<([f32;3], f32, f32, f32)>, bounds: ([f32;3], f32), mode: Mode,

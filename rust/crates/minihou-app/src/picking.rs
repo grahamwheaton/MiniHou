@@ -85,6 +85,31 @@ mod try_at_tests {
 
 pub const MAX_UNDECIMATED_POINTS: usize = 200_000;
 
+/// An inner node is evaluated under an expanded name, while the displayed
+/// geometry range is owned by its outer subnet (or a downstream output).
+pub(crate) fn scoped_display_owner<'a>(value: &serde_json::Value, path: &[String], selected: &str,
+    ranges: &'a [(String, std::ops::Range<u32>)]) -> Option<&'a str> {
+    let outer = path.first()?;
+    let mut inner = value;
+    for id in path { inner = inner.get("nodes")?.get(id)?.get("inner")?; }
+    let output = inner.get("output")?.as_str()?;
+    if inner.get("nodes")?.get(selected).is_none() ||
+        !crate::app_helpers::feeds_node(inner, selected, output) { return None; }
+    let expanded = format!("{}/{}", path.join("/"), selected);
+    if let Some((id, _)) = ranges.iter().find(|(id, _)| id == &expanded) { return Some(id); }
+    crate::app_helpers::resolve_displayed_node(value, outer, ranges)
+}
+
+pub(crate) fn picked_scoped_node(path: &[String], selected: &str,
+    ranges: &[(String, std::ops::Range<u32>)], point: u32) -> Option<String> {
+    let prefix = format!("{}/", path.join("/"));
+    let active = format!("{prefix}{selected}");
+    ranges.iter().find(|(id, range)| id == &active && range.contains(&point))
+        .or_else(|| ranges.iter().filter(|(id, range)| id.starts_with(&prefix) && range.contains(&point))
+            .min_by_key(|(_, range)| range.len()))
+        .and_then(|(id, _)| id.strip_prefix(&prefix).map(str::to_owned))
+}
+
 /// Decimation logic for point dots:
 /// When `npoints <= MAX_UNDECIMATED_POINTS`, returns stride 1 (all points shown) and None for status.
 /// When `npoints > MAX_UNDECIMATED_POINTS`, decimates dots by returning a stride > 1 and a status notice.
@@ -116,6 +141,27 @@ mod tests {
     use super::*;
     use minihou_app::{Camera, StandardView};
     use minihou_app::graph_edit::{is_primitive_node, node_has_center_param};
+
+    #[test]
+    fn subnet_inner_node_resolves_to_its_displayed_outer_range() {
+        let doc = serde_json::json!({"display":"out","nodes":{
+            "sub":{"type":"subnet","inner":{"output":"output1","nodes":{
+                "box1":{"type":"box"},"move1":{"type":"transform","inputs":{"geo":"box1"}},
+                "output1":{"type":"subnet_output","port_index":0,"inputs":{"geo":"move1"}}
+            }}},
+            "out":{"type":"output","inputs":{"geo":"sub"}}
+        }});
+        let ranges = vec![("out".to_owned(), 0..24)];
+        assert_eq!(scoped_display_owner(&doc, &["sub".into()], "box1", &ranges), Some("out"));
+        assert_eq!(scoped_display_owner(&doc, &["sub".into()], "move1", &ranges), Some("out"));
+        assert_eq!(scoped_display_owner(&doc, &["sub".into()], "missing", &ranges), None);
+        let mut expanded = ranges;
+        expanded.extend([("sub/move1".into(), 0..12), ("sub/box1".into(), 0..12),
+            ("sub/other".into(), 12..24)]);
+        assert_eq!(scoped_display_owner(&doc, &["sub".into()], "move1", &expanded), Some("sub/move1"));
+        assert_eq!(picked_scoped_node(&["sub".into()], "move1", &expanded, 3), Some("move1".into()));
+        assert_eq!(picked_scoped_node(&["sub".into()], "move1", &expanded, 15), Some("other".into()));
+    }
 
     #[test]
     fn snap_candidates_use_screen_distance_and_edges_are_not_midpoints() {
