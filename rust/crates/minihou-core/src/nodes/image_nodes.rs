@@ -155,13 +155,14 @@ fn grid_from_pixels(pix:&[f32],w:usize,h:usize,p:&Params,name:&str)->Result<Geom
     g.detail.insert("grid_columns".into(),json!(w));g.detail.insert("grid_rows".into(),json!(h));if !name.is_empty(){g.detail.insert("image".into(),json!(name));}Ok(g)
 }
 fn image_out(inputs:&Inputs,p:&Params)->Result<Geometry>{let g=inputs[0].first().ok_or_else(||Error::new("input 'geo' is not connected"))?;pixels(g,p)?;p.e("encoding",&["linear","srgb","data"])?;Ok((**g).clone())}
-/// RGBA pixels, bottom row first. Image alpha comes from the chosen source, as in Python (not the separate Alpha attribute).
+/// RGBA pixels, bottom row first. Cd uses the separate Alpha attribute when present.
 pub fn pixels(g:&Geometry,p:&Params)->Result<(usize,usize,Vec<f32>)>{
     let source=p.s("source")?;let name=if source.trim().is_empty(){"Cd"}else{source.trim()};
     let a=g.point.get(name).ok_or_else(||Error::new(format!("no point attribute {name:?} to make an image from; available: {}",g.point.keys().cloned().collect::<Vec<_>>().join(", "))))?;
     if a.width==0{return Err(Error::new("image source has no channels"));}let mut values:Vec<f32>=numbers(a).into_iter().map(|v|v as f32).collect();
     if p.b("normalize")?{if values.is_empty(){return Err(Error::new("cannot normalize an empty attribute"));}let lo=values.iter().copied().fold(f32::INFINITY,f32::min);let hi=values.iter().copied().fold(f32::NEG_INFINITY,f32::max);for x in &mut values{*x=if hi>lo{(*x-lo)/(hi-lo)}else{0.};}}
-    let mut rgba=Vec::with_capacity(g.npoints*4);for v in values.chunks_exact(a.width){rgba.extend(match a.width{1=>[v[0],v[0],v[0],1.],2=>[v[0],v[1],0.,1.],3=>[v[0],v[1],v[2],1.],_=>[v[0],v[1],v[2],v[3]]});}
+    let alpha=if name=="Cd" && a.width<4 {g.point.get("Alpha").filter(|alpha|alpha.width==1 && alpha.rows()==g.npoints).map(|alpha|numbers(alpha))}else{None};
+    let mut rgba=Vec::with_capacity(g.npoints*4);for (i,v) in values.chunks_exact(a.width).enumerate(){let mut pixel=match a.width{1=>[v[0],v[0],v[0],1.],2=>[v[0],v[1],0.,1.],3=>[v[0],v[1],v[2],1.],_=>[v[0],v[1],v[2],v[3]]};if let Some(alpha)=&alpha{pixel[3]=alpha[i] as f32;}rgba.extend(pixel);}
     if p.e("mode",&["lattice","bake"])?=="lattice"{
         let w=g.detail.get("grid_columns").and_then(Value::as_u64).unwrap_or(0) as usize;let h=g.detail.get("grid_rows").and_then(Value::as_u64).unwrap_or(0) as usize;
         if w==0||h==0||w.checked_mul(h)!=Some(g.npoints){return Err(Error::new("this geometry is not a pixel grid (no grid_columns / grid_rows for its points): use mode 'bake' to raster points by their position, or start from a grid or an image"));}return Ok((w,h,rgba));
@@ -175,6 +176,25 @@ pub fn pixels(g:&Geometry,p:&Params)->Result<(usize,usize,Vec<f32>)>{
     use super::*;
     #[test]fn bake_means_and_transparency(){let mut g=Geometry::points_only(vec![0.,0.,0.,0.,0.,0.,1.,1.,0.]).unwrap();g.point.insert("Cd".into(),Arc::new(Attr::f32(1,vec![0.,1.,1.])));let p=Params::resolve(IMAGE_OUT.params,json!({"mode":"bake","width":2,"height":2}).as_object()).unwrap();let(_,_,pix)=pixels(&g,&p).unwrap();assert_eq!(&pix[..4],&[0.5,0.5,0.5,1.]);assert_eq!(&pix[4..8],&[0.;4]);assert_eq!(&pix[12..],&[1.;4]);}
     #[test]fn image_grid_height_and_alpha(){let mut store=ExternalInputs::new();store.insert("image:A".into(),ExternalInput::Image{pixels:Arc::new(vec![0.5;16]),width:2,height:2,meta:json!({"is_float":true})});let p=Params::resolve(BLENDER_IMAGE.params,json!({"image":"A","height":"red","height_scale":2.}).as_object()).unwrap();let g=blender_image(&p,&store).unwrap();assert_eq!(g.p(),&[-5.,-5.,1.,5.,-5.,1.,-5.,5.,1.,5.,5.,1.]);assert_eq!(g.topology.vertex_point,vec![0,1,3,2]);assert_eq!(g.point["Alpha"].rows(),4);}
+    #[test]fn generated_png_alpha_reaches_image_output_and_rgb_stays_opaque(){
+        let cases=[
+            ("rgba",image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(2,2,vec![255,0,0,0, 0,255,0,64, 0,0,255,128, 255,255,255,255]).unwrap()),vec![128,255,0,64]),
+            ("rgb",image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(2,2,vec![255,0,0, 0,255,0, 0,0,255, 255,255,255]).unwrap()),vec![255;4]),
+        ];
+        for (kind,img,expected_alpha) in cases {
+            let path=std::env::temp_dir().join(format!("minihou-image-alpha-{}-{kind}.png",std::process::id()));
+            img.save_with_format(&path,image::ImageFormat::Png).unwrap();
+            let p=Params::resolve(IMAGE_FILE.params,json!({"file":path,"colorspace":"stored"}).as_object()).unwrap();
+            let g=image_file(&[],&p).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(g.point.contains_key("Alpha"),kind=="rgba");
+            assert_eq!(numbers(&g.point["Cd"]),vec![0.,0.,1., 1.,1.,1., 1.,0.,0., 0.,1.,0.]);
+            let out=Params::resolve(IMAGE_OUT.params,None).unwrap();
+            let (w,h,rgba)=pixels(&g,&out).unwrap();
+            assert_eq!((w,h),(2,2));
+            for (i,expected) in expected_alpha.iter().enumerate(){assert!((rgba[i*4+3]-*expected as f32/255.).abs()<1e-6);}
+        }
+    }
     #[test]fn test_image_file_validations(){
         let p_empty=Params::resolve(IMAGE_FILE.params,json!({"file":""}).as_object()).unwrap();
         assert_eq!(image_file(&[],&p_empty).unwrap_err().0,"set 'file' to a PNG file");
