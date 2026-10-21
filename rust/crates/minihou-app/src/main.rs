@@ -2,7 +2,7 @@ mod picking;
 mod subnet_edit;
 mod element_select;
 mod element_pick_glue;
-use element_pick_glue::{point_pickable, active_range, navigation_point, loop_cut_has_marks, loop_cut_selection, selection_exists_on_scene, selection_in_range, pick_displayed, pick_displayed_culled, keep_extrude_selection, pick_displayed_wire, wire_selection};
+use element_pick_glue::{point_pickable, active_range, navigation_point, loop_cut_has_marks, loop_cut_selection, selection_exists_on_scene, selection_in_range, pick_displayed, pick_displayed_culled, pick_displayed_behind, keep_extrude_selection, pick_displayed_wire, wire_selection};
 mod node_selection;
 mod node_add;
 mod selection_ui;

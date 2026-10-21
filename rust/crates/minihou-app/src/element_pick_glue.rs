@@ -41,6 +41,12 @@ pub(super) fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewpor
 pub(super) fn pick_displayed_culled(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,cull:bool)->Option<picking::Hit> {
     picking::pick_triangle_culled(scene.positions(),scene.triangle_indices(),o,d,cull,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
 }
+/// When X-ray exposes overlapping faces, another click on the selected front face reaches the next surface.
+pub(super) fn pick_displayed_behind(scene:&Scene,o:[f32;3],d:[f32;3],front:picking::Hit,
+    visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>)->Option<picking::Hit> {
+    picking::pick_triangle_after(scene.positions(),scene.triangle_indices(),o,d,front.t,
+        |tri|tri.iter().all(|id|point_pickable(visibility,ranges,selected,*id)))
+}
 /// A projected element is visible when no displayed triangle lies in front of it.
 pub(super) fn element_visible_at(scene:&Scene,camera:CameraInfo,rect:egui::Rect,point:[f32;3],
     visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,ignore_occlusion:bool)->bool {

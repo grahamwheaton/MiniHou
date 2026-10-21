@@ -11,6 +11,14 @@ pub use spatial::{position_bounds, SnapFeature, snap_feature, RegionShape, Selec
 
 pub use interact::{Selection, at, try_at, pick_triangle, pick_triangle_filtered, pick_triangle_culled, element_of, extend, highlight, intersect_horizontal_plane, drop_world_position, cursor_hit_position, primitive_rest_offset, intersect_ground_plane, intersect_ground_or_mesh};
 
+/// Nearest further surface on the same ray, for cycling through overlapping X-ray faces.
+pub fn pick_triangle_after(p:&[f32],tri:&[u32],origin:[f32;3],dir:[f32;3],after:f32,
+    visible:impl FnMut(&[u32])->bool)->Option<Hit> {
+    let start=after+1e-5;
+    let shifted=[0,1,2].map(|k|origin[k]+dir[k]*start);
+    pick_triangle_culled(p,tri,shifted,dir,false,visible).map(|mut hit|{hit.t+=start;hit})
+}
+
 /// Wireframe and X-ray expose elements on the far side of a surface.
 pub fn ignores_surface_occlusion(mode: crate::viewport::Mode, overlays_enabled: bool, xray: bool, wireframe: bool) -> bool {
     matches!(mode, crate::viewport::Mode::Wireframe | crate::viewport::Mode::WireframeGhost | crate::viewport::Mode::WireBoundingBox)
@@ -63,6 +71,19 @@ fn hidden_point_edge_and_face_are_selected_only_in_xray_or_wireframe() {
         }
     }
     assert!(element_in_front(&bvh,&p,&tris,origin,dir,[0.,0.,1.],1e-4,false,|_|true));
+}
+
+#[cfg(test)]
+#[test]
+fn xray_face_click_can_reach_the_surface_behind_the_selected_face() {
+    let p=[-1.,-1.,1., 1.,-1.,1., 0.,1.,1.,
+           -1.,-1.,0., 1.,-1.,0., 0.,1.,0.];
+    let tris=[0,1,2,3,4,5];
+    let origin=[0.,0.,3.]; let dir=[0.,0.,-1.];
+    let front=pick_triangle(&p,&tris,origin,dir).unwrap();
+    assert_eq!(front.tri,0);
+    assert_eq!(pick_triangle_after(&p,&tris,origin,dir,front.t,|_|true).unwrap().tri,1);
+    assert!(pick_triangle_after(&p,&tris,origin,dir,front.t,|_|false).is_none());
 }
 
 #[cfg(test)] mod bvh_navigation_tests {

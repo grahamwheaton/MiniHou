@@ -474,7 +474,12 @@ impl eframe::App for App {
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
-                        let hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,false) };
+                        let mut hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,false) };
+                        if mode==ui::SelectionMode::Faces && ignore_pick_occlusion && !extend && self.selection.tris.len()>0 {
+                            if let Some(front)=hit.filter(|front|self.selection.tris.contains(&(front.tri as u32))) {
+                                hit=pick_displayed_behind(scene,o,d,front,pick_visibility,&self.display_ranges,&pick_set).or(Some(front));
+                            }
+                        }
                         let wire = if self.object_hidden || (hit.is_some() && !(ignore_pick_occlusion && matches!(mode,ui::SelectionMode::Points|ui::SelectionMode::Edges))) { None }
                             else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode,ignore_pick_occlusion) };
                         if mode == ui::SelectionMode::Object {
