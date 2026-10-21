@@ -141,6 +141,9 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
                 AddConnection::Input { node, port } => crate::graph_edit::WirePickup::begin(v.doc, node, port),
                 _ => None,
             };
+            if let Some(pickup) = &state.pickup {
+                state.wire_output_index = pickup.source_output(v.doc).unwrap_or(0);
+            }
             state.wire = Some(state.pickup.as_ref().map_or_else(|| port.clone(), |p| AddConnection::Output(p.original.from.clone())));
             state.box_start = None;
             state.drag = None;
@@ -180,7 +183,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
             });
             let next = match target {
                 Some(AddConnection::Input { node, port }) if v.doc["nodes"][&node]["type"] == "subnet" && port.starts_with("in") =>
-                    pickup.release(v.doc, None).and_then(|base| crate::subnet_edit::connect_input(&base, &node, &port, &pickup.original.from)),
+                    pickup.release(v.doc, None).and_then(|base| crate::subnet_edit::connect_input_from(&base, &node, &port, &pickup.original.from, source_output)),
                 Some(AddConnection::Input { node, port }) => pickup.release(v.doc, Some((&node, &port))),
                 None if over => pickup.release(v.doc, None),
                 _ => None,

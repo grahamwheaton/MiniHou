@@ -92,6 +92,13 @@ impl WirePickup {
         let from = endpoint_node(refs).or_else(|| refs.as_array()?.last().and_then(endpoint_node))?;
         Some(Self { original: WireRef { from: from.into(), to: node.into(), port: port.into() } })
     }
+    pub fn source_output(&self, value: &Value) -> Option<usize> {
+        let original = value.get("nodes")?.get(&self.original.to)?.get("inputs")?.get(&self.original.port)?;
+        let endpoint = if let Some(refs) = original.as_array() {
+            refs.iter().find(|reference| endpoint_node(reference) == Some(&self.original.from))?
+        } else { original };
+        endpoint_output(endpoint)
+    }
     pub fn release(&self, value: &Value, target: Option<(&str, &str)>) -> Option<Value> {
         if target == Some((self.original.to.as_str(), self.original.port.as_str())) { return None; }
         let original = value.get("nodes")?.get(&self.original.to)?.get("inputs")?.get(&self.original.port)?;

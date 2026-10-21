@@ -138,6 +138,45 @@
         assert!(matches!(flag_action(3, "a", false), UiAction::SetDisplay(node) if node == "a"));
     }
     #[test]
+    fn pickup_to_subnet_input_preserves_secondary_source_output() {
+        let mut doc = serde_json::json!({"nodes": {
+            "box": {"type": "box"},
+            "fill": {"type": "flood_fill", "inputs": {"geometry": "box"}},
+            "move": {"type": "transform", "inputs": {"geo": {"node": "fill", "output": 1}}},
+            "sub": {"type": "subnet", "inputs": {"geo": "box"}}
+        }, "display": "move"});
+        crate::subnet_edit::initialize(&mut doc, "sub");
+        let graph = minihou_core::Graph::from_value(&doc).unwrap();
+        let f = Fixture::new();
+        let mut view = f.view(); view.doc = &doc; view.graph = &graph;
+        let mut state = State { physics: false, zoom: 1.0, ..Default::default() };
+        state.moved = [("box".into(), pos2(80., 80.)), ("fill".into(), pos2(320., 80.)),
+            ("move".into(), pos2(320., 300.)), ("sub".into(), pos2(650., 300.))].into();
+        let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1100., 700.));
+        let ports = canvas_ports(&view, &node_positions(&state, &view));
+        let from = screen(canvas, &state, ports.iter().find(|(port, _)|
+            *port == AddConnection::Input { node: "move".into(), port: "geo".into() }).unwrap().1);
+        let to = screen(canvas, &state, ports.iter().find(|(port, _)|
+            *port == AddConnection::Input { node: "sub".into(), port: "in0".into() }).unwrap().1);
+        let ctx = egui::Context::default();
+        let mut out = Actions::default();
+        let frame = |events, state: &mut State, out: &mut Actions| {
+            let input = egui::RawInput { events, screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280., 800.))), ..Default::default() };
+            let _ = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| {
+                canvas_ui(ui, canvas, &view, out, state, Id::new("pickup_subnet"));
+            }); });
+        };
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+        frame(vec![egui::Event::PointerMoved(from)], &mut state, &mut out);
+        frame(vec![button(from, true)], &mut state, &mut out);
+        assert_eq!(state.wire_output_index, 1);
+        frame(vec![egui::Event::PointerMoved(to)], &mut state, &mut out);
+        frame(vec![button(to, false)], &mut state, &mut out);
+        assert!(matches!(out.0.as_slice(), [UiAction::NetworkGesture { next, .. }]
+            if next["nodes"]["sub"]["inputs"]["in0"] == serde_json::json!({"node": "fill", "output": 1})
+                && next["nodes"]["move"]["inputs"]["geo"].is_null()));
+    }
+    #[test]
     fn grid_snap_and_ctrl_inversion() {
         let at = pos2(47.0, -17.0);
         assert_eq!(snap(at, 32.0, true, false), pos2(32.0, -32.0));
