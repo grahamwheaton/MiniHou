@@ -90,10 +90,14 @@ fn filtered_group_names<'a>(names: &'a [String], search: &str) -> Vec<&'a str> {
     group_fuzzy::ranked_matches(names.iter().map(String::as_str), search)
 }
 
+// The dropdown, picker, and two gaps occupy roughly 76 points. Leave a little
+// slack so the field does not paint over the row's reset button.
+fn group_text_width(width: f32) -> f32 { (width - 80.).max(8.) }
+
 pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, enabled: bool,
     groups: impl FnOnce() -> Vec<String>) -> (bool, bool) {
     let mut text = value.as_str().unwrap_or_default().to_owned();
-    let edit = ui.add_sized([(width - 56.).max(8.), 22.], egui::TextEdit::singleline(&mut text)
+    let edit = ui.add_sized([group_text_width(width), 22.], egui::TextEdit::singleline(&mut text)
         .hint_text("Group name or wildcard"));
     if edit.changed() { *value = json!(text); }
     ui.add_enabled_ui(enabled, |ui| {
@@ -244,5 +248,11 @@ mod tests {
         assert_eq!(filtered_group_names(&names, "fce"), ["face", "FaceCenter"]);
         assert!(filtered_group_names(&names, "missing").is_empty());
         assert_eq!(filtered_group_names(&names, "").len(), names.len());
+    }
+
+    #[test]
+    fn group_field_reserves_room_for_dropdown_and_picker() {
+        assert_eq!(group_text_width(180.), 100.);
+        assert_eq!(group_text_width(60.), 8.);
     }
 }

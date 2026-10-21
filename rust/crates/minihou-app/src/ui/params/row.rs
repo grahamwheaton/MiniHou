@@ -54,7 +54,7 @@ impl ParamRowLayout {
         );
 
         let fields_x = label_rect.right() + gap;
-        let fields_right = reset_rect.left() - 6.0;
+        let fields_right = reset_rect.left() - 8.0;
         let control_rect = Rect::from_min_max(
             Pos2::new(fields_x, row_rect.top() + 3.),
             Pos2::new(fields_right.max(fields_x + 10.0), row_rect.bottom() - 3.),
@@ -67,6 +67,20 @@ impl ParamRowLayout {
             expose_rect,
             reset_rect,
         }
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn edges_row_has_gaps_between_controls() {
+        let row = Rect::from_min_size(Pos2::ZERO, Vec2::new(420., 28.));
+        let layout = ParamRowLayout::compute(row);
+        assert!(layout.label_rect.right() < layout.control_rect.left());
+        assert!(layout.control_rect.right() + 7. <= layout.reset_rect.left());
+        assert!(layout.reset_rect.right() + 7. <= layout.expose_rect.left());
     }
 }
 
