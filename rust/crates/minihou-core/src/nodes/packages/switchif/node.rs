@@ -268,8 +268,8 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 let val = item.get("enable_value")
                     .or_else(|| item.get("expr"))
                     .or_else(|| item.get("value"))
-                    .unwrap_or(&Value::Null);
-                tests_list.push((enable, test_type.to_string(), val.clone()));
+                    .cloned().unwrap_or_else(|| Value::String("1".to_owned()));
+                tests_list.push((enable, test_type.to_string(), val));
             }
         }
     }
@@ -279,9 +279,12 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
 
     let mut test_results = Vec::new();
-    for (enable, _test_type, val) in &tests_list {
+    for (enable, test_type, val) in &tests_list {
         if !enable {
             continue;
+        }
+        if test_type != "expression" {
+            return Err(Error::new(format!("unsupported test type '{test_type}'")));
         }
         test_results.push(eval_test_value(val, test_geo)?);
     }
