@@ -1,4 +1,28 @@
 //! Case-insensitive subsequence ranking for detected input group names.
+use eframe::egui;
+use serde_json::{json, Value};
+
+/// Searchable menu shared by input group and attribute fields.
+pub fn dropdown(ui: &mut egui::Ui, value: &mut Value, label: &str, names: impl FnOnce() -> Vec<String>) {
+    ui.menu_button("▼", |ui| {
+        ui.set_min_width(180.);
+        let search_id = ui.id().with("detected_name_search");
+        let mut search = ui.ctx().data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
+        ui.add(egui::TextEdit::singleline(&mut search).hint_text(format!("Search {label}")));
+        ui.ctx().data_mut(|d| d.insert_temp(search_id, search.clone()));
+        let names = names();
+        if names.is_empty() { ui.label(format!("No {label} on input")); }
+        else {
+            let matches = ranked_matches(names.iter().map(String::as_str), &search);
+            if matches.is_empty() { ui.label(format!("No matching {label}")); }
+            egui::ScrollArea::vertical().max_height(240.).show(ui, |ui| {
+                for name in matches {
+                    if ui.button(name).clicked() { *value = json!(name); ui.close(); }
+                }
+            });
+        }
+    }).response.on_hover_text(format!("{label} detected on the input"));
+}
 
 /// Return matching names with the closest, earliest matches first.
 pub fn ranked_matches<'a>(names: impl IntoIterator<Item = &'a str>, query: &str) -> Vec<&'a str> {

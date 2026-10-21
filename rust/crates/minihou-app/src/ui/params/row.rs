@@ -7,8 +7,8 @@ use super::super::{Actions, UiAction, View};
 use super::header::{flag_icon, icon, invalid_reason, node_error, paint_text, title, value_of};
 use super::output_groups::{is_output_group_field, output_group_label, output_group_toggle, target_field};
 use super::param_values::{is_color_param, is_file_param, is_ramp_param};
-use super::pick::{pick_domain_for, pick_field};
-use super::value_links::{input_group_names, parameter_menu, vector_channel_menu};
+use super::pick::{attribute_field, is_input_attribute_field, pick_domain_for, pick_field};
+use super::value_links::{input_attribute_names, input_group_names, parameter_menu, vector_channel_menu};
 use super::widgets::{color_widget, file_widget, ramp_widget, widget_styled};
 
 const DISABLED: &str = "The Rust backend does not support it yet";
@@ -367,6 +367,9 @@ pub(crate) fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, 
                         pairs:meta.is_some_and(|m| m["pick_format"] == "pairs") });
                 }
                 clicked
+            } else if kind == ParamKind::String && is_input_attribute_field(param.name, meta) && typ != "attribute_create" {
+                attribute_field(ui, &mut value, layout.control_rect.width(), || input_attribute_names(v, id, param.name));
+                false
             } else {
                 let mut channel_menu = |ui: &mut egui::Ui, axis| vector_channel_menu(ui, v, out, id, param.name, axis);
                 widget_styled(

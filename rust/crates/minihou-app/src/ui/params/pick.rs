@@ -20,6 +20,30 @@ pub fn is_input_group_field(name: &str, meta: Option<&Value>) -> bool {
     by_name || selection_list
 }
 
+pub fn is_input_attribute_field(name: &str, meta: Option<&Value>) -> bool {
+    if meta.is_some_and(|m| !is_string_meta(Some(m))) { return false; }
+    !matches!(name, "output_attrib" | "output_attribute")
+        && (matches!(name, "attribute" | "attributes" | "attrib")
+            || name.ends_with("_attribute") || name.ends_with("_attrib"))
+}
+
+pub fn input_attributes(g: &minihou_core::Geometry) -> Vec<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for table in [&g.point, &g.vertex, &g.edge, &g.prim] {
+        for name in table.keys() {
+            if !name.starts_with("group_") && !name.starts_with("edge_group_") { names.insert(name.clone()); }
+        }
+    }
+    names.extend(g.detail.keys().filter(|name| !name.starts_with("group_")).cloned());
+    names.into_iter().collect()
+}
+
+pub fn attribute_field(ui: &mut egui::Ui, value: &mut Value, width: f32, attributes: impl FnOnce() -> Vec<String>) {
+    let mut text = value.as_str().unwrap_or_default().to_owned();
+    if ui.add_sized([(width - 38.).max(8.), 22.], egui::TextEdit::singleline(&mut text)).changed() { *value = json!(text); }
+    group_fuzzy::dropdown(ui, value, "attributes", attributes);
+}
+
 fn name_domain(name: &str, meta: Option<&Value>) -> SelectionMode {
     let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("").to_lowercase();
     if name.contains("edge") || doc.contains("edge") { SelectionMode::Edges }
@@ -100,26 +124,7 @@ pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool
     let edit = ui.add_sized([group_text_width(width), 22.], egui::TextEdit::singleline(&mut text)
         .hint_text("Group name or wildcard"));
     if edit.changed() { *value = json!(text); }
-    ui.add_enabled_ui(enabled, |ui| {
-        ui.menu_button("▼", |ui| {
-            ui.set_min_width(180.);
-            let search_id = ui.id().with("group_dropdown_search");
-            let mut search = ui.ctx().data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
-            ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search groups"));
-            ui.ctx().data_mut(|d| d.insert_temp(search_id, search.clone()));
-            let names = groups();
-            if names.is_empty() { ui.label("No groups on input"); }
-            else {
-                let matches = filtered_group_names(&names, &search);
-                if matches.is_empty() { ui.label("No matching groups"); }
-                egui::ScrollArea::vertical().max_height(240.).show(ui, |ui| {
-                    for name in matches {
-                        if ui.button(name).clicked() { *value = json!(name); ui.close(); }
-                    }
-                });
-            }
-        }).response.on_hover_text("Groups detected on the input");
-    });
+    ui.add_enabled_ui(enabled, |ui| group_fuzzy::dropdown(ui, value, "groups", groups));
     let arrow = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
         .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
         .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)");
@@ -248,6 +253,20 @@ mod tests {
         assert_eq!(filtered_group_names(&names, "fce"), ["face", "FaceCenter"]);
         assert!(filtered_group_names(&names, "missing").is_empty());
         assert_eq!(filtered_group_names(&names, "").len(), names.len());
+    }
+
+    #[test]
+    fn attribute_fields_offer_detected_attributes() {
+        use minihou_core::geometry::Attr;
+        use std::sync::Arc;
+        assert!(is_input_attribute_field("piece_attrib", Some(&json!({"kind":"str"}))));
+        assert!(is_input_attribute_field("distance_scale_attribute", None));
+        assert!(!is_input_attribute_field("output_attrib", None));
+        let mut g = minihou_core::Geometry::points_only(vec![0., 0., 0.]).unwrap();
+        g.point.insert("weight".into(), Arc::new(Attr::f32(1, vec![1.])));
+        g.point.insert("group_selected".into(), Arc::new(Attr::i32(1, vec![1])));
+        assert!(input_attributes(&g).contains(&"weight".to_owned()));
+        assert!(!input_attributes(&g).contains(&"group_selected".to_owned()));
     }
 
     #[test]

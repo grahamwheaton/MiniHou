@@ -14,11 +14,19 @@ pub(crate) fn clipboard_id() -> egui::Id {
 }
 
 pub(crate) fn input_group_names(v: &View<'_>, id: &str, field: &str, mode: SelectionMode) -> Vec<String> {
-    let Some((_, node)) = v.graph.nodes.iter().find(|(name, _)| name == id) else { return Vec::new(); };
+    input_geometry(v, id, field).map(|g| pick::input_groups(&g, mode)).unwrap_or_default()
+}
+
+pub(crate) fn input_attribute_names(v: &View<'_>, id: &str, field: &str) -> Vec<String> {
+    input_geometry(v, id, field).map(|g| pick::input_attributes(&g)).unwrap_or_default()
+}
+
+fn input_geometry(v: &View<'_>, id: &str, field: &str) -> Option<std::sync::Arc<minihou_core::Geometry>> {
+    let (_, node) = v.graph.nodes.iter().find(|(name, _)| name == id)?;
     let port_index = if field == "group2" { 1 } else { 0 };
-    let Some(port) = nodes::get(&node.node_type).and_then(|spec| spec.inputs.get(port_index)) else { return Vec::new(); };
-    let Some(source) = node.inputs.iter().find(|(name, _)| name == port.name).and_then(|(_, refs)| refs.first()) else { return Vec::new(); };
-    v.graph.cook(Some(source)).map(|g| pick::input_groups(&g, mode)).unwrap_or_default()
+    let port = nodes::get(&node.node_type)?.inputs.get(port_index)?;
+    let source = node.inputs.iter().find(|(name, _)| name == port.name).and_then(|(_, refs)| refs.first())?;
+    v.graph.cook(Some(source)).ok()
 }
 
 pub(crate) fn open_expression(ctx: &egui::Context, doc: &Value, node: &str, path: &str) {
