@@ -60,6 +60,24 @@ impl App {
             self.last_operator = Some(LastOperator::Duplicate);
         }
     }
+    pub(super) fn duplicate_viewport_selection(&mut self) {
+        if self.editor_state.selection == ui::SelectionMode::Object {
+            self.duplicate_viewport_objects();
+            return;
+        }
+        let Some(source) = self.active_object().map(str::to_owned) else { return };
+        let Some(params) = self.selection_node_params("split") else { return };
+        let Some((value, [_split, transform, merge])) =
+            graph_edit::duplicate_selection_nodes(self.editor.doc.value(), &source, params) else { return };
+        if self.commit_document(value, "duplicate viewport selection") {
+            self.selected = merge.clone();
+            self.selected_set = [merge.clone()].into();
+            self.display = merge;
+            self.transform_target = Some(transform);
+            self.pending_duplicate_move = Some(self.display.clone());
+            self.last_operator = Some(LastOperator::Duplicate);
+        }
+    }
     /// Dissolve a node, rewiring its inputs to consumers.
     pub(super) fn dissolve_node(&mut self, id: &str) {
         let ids = if self.selected_set.contains(id) { self.selected_set.iter().cloned().collect::<Vec<_>>() } else { vec![id.to_owned()] };

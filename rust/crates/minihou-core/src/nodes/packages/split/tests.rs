@@ -69,3 +69,30 @@ fn unused_groups_are_removed_per_piece() {
     assert!(!picked.prim.contains_key("group_empty"));
     assert!(!rest.prim.contains_key("group_pick"));
 }
+
+#[test]
+fn extract_selected_point_and_edge_without_a_whole_face() {
+    let g = box_with_group();
+    let points = Params::resolve(NODE.params, serde_json::json!({"group":"0", "group_type":"points", "extract_elements":true}).as_object()).unwrap();
+    let picked = cook(&[vec![Arc::new(g.clone())]], &points).unwrap();
+    assert_eq!(picked.npoints, 1);
+    assert_eq!(picked.nprims(), 0);
+    let outputs = NODE.cook_outputs(&[vec![Arc::new(g.clone())]], &points).unwrap();
+    assert_eq!(outputs.0.len(), 2);
+    assert_eq!(outputs[0].npoints, 1);
+    assert_eq!(outputs[0].nprims(), 0);
+    assert_eq!(outputs[1].topology.vertex_point, g.topology.vertex_point);
+    let edges = Params::resolve(NODE.params, serde_json::json!({"group":"p0-1", "group_type":"edges", "extract_elements":true}).as_object()).unwrap();
+    let picked = cook(&[vec![Arc::new(g.clone())]], &edges).unwrap();
+    assert_eq!(picked.npoints, 2);
+    assert_eq!(picked.nprims(), 1);
+    assert!(!picked.topology.is_closed(0));
+    picked.validate().unwrap();
+    let outputs = NODE.cook_outputs(&[vec![Arc::new(g.clone())]], &edges).unwrap();
+    assert_eq!(outputs.0.len(), 2);
+    assert_eq!(outputs[0].npoints, 2);
+    assert_eq!(outputs[0].nprims(), 1);
+    assert_eq!(outputs[1].topology.vertex_point, g.topology.vertex_point);
+    outputs[0].validate().unwrap();
+    outputs[1].validate().unwrap();
+}

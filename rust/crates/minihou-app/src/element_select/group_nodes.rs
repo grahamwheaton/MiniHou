@@ -95,7 +95,7 @@ impl Topology {
     /// as its group, `select_loop` / `select_ring` the selected edges as seeds (other modes converted to edges),
     /// `select_path` the selected elements as ordered waypoints. `None` for other nodes or an empty selection.
     pub fn node_params(&self, node_type: &str, sel: &Selection) -> Option<serde_json::Value> {
-        let special = SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "boundary_select" | "select_sharp_edges");
+        let special = SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "boundary_select" | "select_sharp_edges" | "split");
         if !(special || find_input_group_field(node_type).is_some()) || sel.is_empty() { return None; }
         let name = match sel.mode { SelectionMode::Points => "points", SelectionMode::Edges => "edges", SelectionMode::Faces => "primitives", SelectionMode::Object => return None };
         let ids = self.ids(sel);
@@ -109,6 +109,7 @@ impl Topology {
                 serde_json::json!({"domain": name, "method": "pattern", "pattern": group_pattern()})
             }
             "blast" => serde_json::json!({"domain": name, "group": group_pattern()}),
+            "split" => serde_json::json!({"group_type": name, "group": join(sel.mode, &ids)}),
             "boundary_select" => {
                 let dom = match sel.mode { SelectionMode::Faces => "faces", SelectionMode::Points => "points", _ => "edges" };
                 serde_json::json!({"group": join(sel.mode, &ids), "domain": dom})
