@@ -262,8 +262,15 @@ def bind_target(graph, owner):
             node["params"]["object"] = "@target"
             changed.append(f"nodes.{nid}.params.object: {owner!r} -> '@target'")
         inputs = node.get("inputs") or {}
-        nid = next((inputs[key] for key in ("geo", "geometry", "input")
-                    if isinstance(inputs.get(key), str)), None)
+        def endpoint(value):
+            if isinstance(value, list):
+                value = value[0] if value else None
+            if isinstance(value, dict):
+                value = value.get("node")
+            return value if isinstance(value, str) else None
+
+        nid = next((source for key in ("geo", "geometry", "input", "geos", "in0", "a", "source")
+                    if (source := endpoint(inputs.get(key))) is not None), None)
     return out, changed
 
 

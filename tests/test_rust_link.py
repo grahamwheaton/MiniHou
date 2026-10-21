@@ -185,6 +185,23 @@ class RustLinkTests(unittest.TestCase):
         self.assertEqual(migrated["nodes"]["cutter"]["params"]["object"], "Plane A")
         self.assertEqual(graph["nodes"]["source"]["params"]["object"], "Plane A")
 
+    def test_owner_migration_follows_merge_and_subnet_primary_inputs(self):
+        embed = import_module(PKG + ".embed")
+        for primary in ({"geos": [{"node": "source", "output": 1}, "other"]},
+                        {"in0": {"node": "source", "output": 1}, "in1": "other"}):
+            with self.subTest(primary=primary):
+                graph = {"nodes": {
+                    "source": {"type": "blender_object", "params": {"object": "Plane A"}},
+                    "other": {"type": "blender_object", "params": {"object": "Plane A"}},
+                    "branch": {"type": "merge" if "geos" in primary else "subnet",
+                               "inputs": primary},
+                    "out": {"type": "output", "inputs": {"geo": "branch"}}},
+                    "display": "out"}
+                migrated, fields = embed.bind_target(graph, "Plane A")
+                self.assertEqual(fields, ["nodes.source.params.object: 'Plane A' -> '@target'"])
+                self.assertEqual(migrated["nodes"]["source"]["params"]["object"], "@target")
+                self.assertEqual(migrated["nodes"]["other"]["params"]["object"], "Plane A")
+
     def test_dynamic_modifier_inputs_roundtrip(self):
         definitions = [
             ("f", "Float", "float", 1.0), ("i", "Integer", "int", 2),
