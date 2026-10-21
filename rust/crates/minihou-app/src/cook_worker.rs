@@ -262,7 +262,7 @@ impl<T: Send + 'static> CookWorker<T> {
     pub fn start_with_python(doc: &Document, python: Option<Arc<minihou_core::python_bridge::PythonGate>>, prepare: impl Fn(&Geometry) -> T + Send + 'static) -> Result<Self> {
         let mut session = doc.session()?;
         session.set_python_gate(python);
-        let mut target = session.graph().main_output()?;
+        let mut target = if session.graph().nodes.is_empty() { String::new() } else { session.graph().main_output()? };
         let (sender, receiver) = mpsc::channel();
         let (queries, query_rx) = mpsc::channel();
         let latest = Arc::new(Mutex::new(None));

@@ -13,7 +13,9 @@ impl App {
                 if let Some((frame,fps))=link_time {link.frame=frame;link.fps=fps;}
                 self.link = Some(link);
                 self.blender.link_message = "Listening on 127.0.0.1:8765; waiting for Blender.".into();
-                self.send(Edit::Replace(self.editor.doc.value().clone()));
+                if !display_is_empty(self.editor.doc.value()) {
+                    self.send(Edit::Replace(self.editor.doc.value().clone()));
+                }
             }
             Err(e) => {
                 let hint = if e.kind() == std::io::ErrorKind::AddrInUse {

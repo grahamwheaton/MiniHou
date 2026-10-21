@@ -3,7 +3,7 @@ use super::*;
 #[test]
 #[ignore = "manual viewport performance probe"]
 fn profile_face_mode() {
-    let graph = Graph::from_json(include_str!("default_graph.json")).unwrap();
+    let graph = Graph::from_json(include_str!("test_data/demo_graph.json")).unwrap();
     let scene = Scene::new(&graph.cook(Some("output1")).unwrap());
     let topo = element_select::Topology::new(scene.positions(),scene.triangle_indices(),scene.edge_indices());
     let instance = wgpu::Instance::default();

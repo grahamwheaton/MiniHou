@@ -1,5 +1,17 @@
 use super::*;
 
+fn should_cook_on_start(value: &Value) -> bool { !display_is_empty(value) }
+
+#[cfg(test)]
+#[test]
+fn fresh_start_has_no_nodes_and_queues_no_cook() {
+    let doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+    assert!(doc.value()["nodes"].as_object().unwrap().is_empty());
+    assert!(!should_cook_on_start(doc.value()));
+    let worker = CookWorker::start(&doc, Scene::new).unwrap();
+    assert!(worker.poll().is_none());
+}
+
 impl App {
     /// Load the field's current group text as the live selection (purple), on the topology the ids came from.
     pub(super) fn pick_load(&mut self) {
@@ -80,7 +92,8 @@ impl App {
         Self::new_document(doc, path, state, true)
     }
     pub(super) fn new_document(doc: Document, path: PathBuf, state: egui_wgpu::RenderState, start_link: bool) -> Result<Self> {
-        let display = Graph::from_value(doc.value())?.main_output()?;
+        let graph = Graph::from_value(doc.value())?;
+        let display = if graph.nodes.is_empty() { String::new() } else { graph.main_output()? };
         let mut materials=minihou_app::materials::Registry::new(path.parent().unwrap_or(std::path::Path::new(".")));
         materials.register_graph(doc.value()); let _=materials.register_sidecar(&path);
         let worker = CookWorker::start_with_python(&doc, Some(python_gate()), Scene::new)?;
@@ -119,8 +132,10 @@ impl App {
         app.blender_paths = installs.into_iter().map(|(_, p)| p).collect();
         app.blender.addon_installed = false;
         if start_link { app.restart_blender_link(); }
-        app.send(Edit::Replace(app.editor.doc.value().clone()));
-        app.send(Edit::Preview(app.selected.clone()));
+        if should_cook_on_start(app.editor.doc.value()) {
+            app.send(Edit::Replace(app.editor.doc.value().clone()));
+            app.send(Edit::Preview(app.selected.clone()));
+        }
         Ok(app)
     }
     pub(super) fn send(&mut self, edit: Edit) {

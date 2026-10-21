@@ -33,7 +33,7 @@ fn selected_node_transform_drags_reach_display_and_undo() {
             ("rotate", json!([0., 0., 15.]), json!([0., 0., 30.])),
             ("scale", json!([1.2, 1., 1.]), json!([1.5, 1., 1.])),
         ] {
-            let mut value: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+            let mut value: Value = serde_json::from_str(include_str!("test_data/demo_graph.json")).unwrap();
             if selected == "normal1" { value["display"] = json!(["output1", "grid1"]); }
             let mut doc = Document::parse(value.to_string()).unwrap();
             let before = doc.clone();
@@ -72,7 +72,7 @@ fn selected_node_transform_drags_reach_display_and_undo() {
 
 #[test]
 fn viewport_drag_repairs_transform_hanging_after_output() {
-    let mut value: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+    let mut value: Value = serde_json::from_str(include_str!("test_data/demo_graph.json")).unwrap();
     value["nodes"]["transform2"] = json!({"type":"transform", "inputs":{"geo":"output1"}});
     let mut doc = Document::parse(value.to_string()).unwrap();
     let before = doc.clone();
@@ -100,7 +100,7 @@ fn viewport_drag_repairs_transform_hanging_after_output() {
 #[test]
 fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     use egui::{pos2, Event, PointerButton, RawInput, Rect};
-    let mut demo: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+    let mut demo: Value = serde_json::from_str(include_str!("test_data/demo_graph.json")).unwrap();
     demo["nodes"]["grid1"]["params"]["center"] = json!([0.25, 0.2, 0.]);
     demo["nodes"]["hidden_transform"] = json!({"type": "transform", "inputs": {"geo": "grid1"}});
     let doc = Document::parse(demo.to_string()).unwrap();
@@ -176,7 +176,7 @@ fn viewport_drag_cooks_move_rotate_scale_for_object_and_point_groups() {
             ("rotate", [TransformOp::Rotate([0., 0., 15.]), TransformOp::Rotate([0., 0., 30.]), TransformOp::Rotate([0., 0., 45.])], json!([0., 0., 45.])),
             ("scale", [TransformOp::Scale([1.2, 1., 1.]), TransformOp::Scale([1.5, 1., 1.]), TransformOp::Scale([2., 1., 1.])], json!([2., 1., 1.])),
         ] {
-            let mut doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+            let mut doc = Document::parse(include_str!("test_data/demo_graph.json").to_owned()).unwrap();
             let before = doc.clone();
             let worker = CookWorker::start(&doc, Scene::new).unwrap();
             let mut state = CookState::default();
@@ -242,7 +242,7 @@ fn viewport_drag_cooks_move_rotate_scale_for_object_and_point_groups() {
 
 #[test]
 fn viewport_transform_replaces_only_its_entry_in_a_display_set() {
-    let mut value: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+    let mut value: Value = serde_json::from_str(include_str!("test_data/demo_graph.json")).unwrap();
     value["display"] = json!(["output1", "grid1"]);
     let doc = Document::parse(value.to_string()).unwrap();
     let worker = CookWorker::start(&doc, Scene::new).unwrap();
@@ -262,7 +262,7 @@ fn viewport_transform_replaces_only_its_entry_in_a_display_set() {
 fn modal_g_x_r_y_numeric_and_s_cage_cook_through_incremental_edits() {
     use ui::modal_transform::{CageHandle, Kind, Modal};
     use egui::{pos2, vec2, Key};
-    let source_doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+    let source_doc = Document::parse(include_str!("test_data/demo_graph.json").to_owned()).unwrap();
     let camera = CameraInfo { ray_right:[1.,0.,0.], ray_up:[0.,1.,0.], ray_forward:[0.,0.,-1.], ..Default::default() };
     let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
     let initial_worker=CookWorker::start(&source_doc,Scene::new).unwrap();
@@ -326,7 +326,7 @@ fn modal_g_x_r_y_numeric_and_s_cage_cook_through_incremental_edits() {
 
 #[test]
 fn repeat_move_three_times_cooks_incrementally_with_single_transform_node() {
-    let source_doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+    let source_doc = Document::parse(include_str!("test_data/demo_graph.json").to_owned()).unwrap();
     let worker = CookWorker::start(&source_doc, Scene::new).unwrap();
     let mut state = CookState::default();
     send(&worker, &mut state, Edit::Replace(source_doc.value().clone()));
@@ -485,7 +485,7 @@ fn shearing_scale_appends_one_transform_node_and_cooks() {
 
 #[test]
 fn output_node_selection_resolves_to_displayed_output() {
-    let value: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+    let value: Value = serde_json::from_str(include_str!("test_data/demo_graph.json")).unwrap();
     let display_ranges = vec![("output1".to_string(), 0..1000)];
 
     // When the output node itself is selected

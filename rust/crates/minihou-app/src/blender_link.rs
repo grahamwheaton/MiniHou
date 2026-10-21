@@ -289,6 +289,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fresh_start_has_no_blender_geometry_update() {
+        let doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("untitled.json")).unwrap();
+        let snapshot = server.shared.snapshot.lock().unwrap();
+        assert!(snapshot.document["nodes"].as_object().unwrap().is_empty());
+        assert!(snapshot.geometry.is_none());
+        assert_eq!(snapshot.seq, 0);
+    }
+
+    #[test]
     fn blender_input_reset_transform_uses_live_reference_matrix() {
         let graph = json!({"display":"b","nodes":{"b":{"type":"blender_object"}}});
         let doc = Document::parse(graph.to_string()).unwrap();

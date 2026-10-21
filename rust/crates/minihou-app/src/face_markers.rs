@@ -48,7 +48,7 @@ impl FaceMarkers {
     use super::*;
     #[test] fn face_markers_are_cached_and_render_selection() {
         let Some((device, queue)) = super::super::display_render_tests::adapter() else { eprintln!("No GPU adapter"); return; };
-        let graph = minihou_core::Graph::from_json(include_str!("default_graph.json")).unwrap();
+        let graph = minihou_core::Graph::from_json(include_str!("test_data/demo_graph.json")).unwrap();
         let scene = Scene::new(&graph.cook(Some("output1")).unwrap());
         let topo = crate::element_select::Topology::new(scene.positions(),scene.triangle_indices(),scene.edge_indices());
         let selected: Vec<_> = (0..scene.triangles() as u32).collect();

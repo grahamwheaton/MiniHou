@@ -280,7 +280,7 @@ fn cube(extra:bool) -> Geometry {
         })) else { eprintln!("No wgpu adapter available, skipping selection render test"); return; };
         eprintln!("Selection render adapter: {:?}", adapter.get_info());
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
-        let graph = minihou_core::Graph::from_json(include_str!("default_graph.json")).unwrap();
+        let graph = minihou_core::Graph::from_json(include_str!("test_data/demo_graph.json")).unwrap();
         let scene = Scene::new(&graph.cook(Some("output1")).unwrap());
         let selection = crate::picking::Selection {
             mode: crate::ui::SelectionMode::Faces,
