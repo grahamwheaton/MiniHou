@@ -87,6 +87,9 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                 let output_toggles: Vec<_> = outputs.iter().filter_map(|param| output_group_toggle(typ, param.name, param_meta(typ, param.name))).collect();
                 let mut section=None;
                 for param in spec.params {
+                    if typ == "switchif" && matches!(param.name,
+                        "mergecondition" | "testinput" | "numtests" | "tests" |
+                        "enable" | "test_type" | "type" | "enable_value" | "expr") { continue; }
                     if typ == "bezier" && param.name == "controls" { continue; }
                     if typ == "knife" && param.name == "cuts" { continue; }
                     if typ == "attribute_create" && param.name != "group" { continue; }
@@ -109,6 +112,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                 if typ == "attribute_create" { attribute_create_panel(ui,v,out,id,flags.locked); }
                 if typ == "bezier" { bezier_controls_panel(ui,v,out,id,flags.locked); }
                 if typ == "knife" { knife_chains_panel(ui,v,out,id,flags.locked); }
+                if typ == "switchif" { switchif_tests_panel(ui,v,out,id,flags.locked); }
             }
             if typ == "modifier_input" { modifier_inputs_panel(ui, v, out, id); }
             if let Some(message) = super::waiting::waiting_of(&v.cooking.stats, id) { ui.add_space(4.); super::waiting::panel_note(ui, v.theme, message); }
@@ -121,6 +125,51 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             }
         }
     });
+}
+
+fn switchif_tests_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, locked: bool) {
+    let params = &v.doc["nodes"][id]["params"];
+    let count = params["number_of_tests"].as_u64().unwrap_or(2).min(256) as usize;
+    let mut tests = params["tests"].as_array().cloned().unwrap_or_default();
+    tests.resize_with(count, || json!({"enable": true, "test_type": "expression", "enable_value": "1"}));
+    let mut changed = false;
+    ui.add_space(5.);
+    ui.label(egui::RichText::new("Tests").strong().color(v.theme.accent));
+    for (index, test) in tests.iter_mut().take(count).enumerate() {
+        ui.push_id(("switchif_test", index), |ui| {
+            ui.add_enabled_ui(!locked, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Test {}", index + 1));
+                    let mut enabled = test["enable"].as_bool().unwrap_or(true);
+                    if ui.checkbox(&mut enabled, "Enable").changed() {
+                        test["enable"] = json!(enabled);
+                        changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Test Type");
+                    egui::ComboBox::from_id_salt("test_type")
+                        .selected_text("Expression")
+                        .show_ui(ui, |ui| { ui.label("Expression"); });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Enable value");
+                    let mut expression = test["enable_value"].as_str()
+                        .or_else(|| test["expr"].as_str()).unwrap_or("1").to_owned();
+                    if ui.text_edit_singleline(&mut expression).changed() {
+                        test["enable_value"] = json!(expression);
+                        changed = true;
+                    }
+                });
+                ui.add_space(4.);
+            });
+        });
+    }
+    if changed {
+        out.push(UiAction::Edit { edit: Edit::Param {
+            node: id.to_owned(), name: "tests".to_owned(), value: json!(tests),
+        }, continuous: false });
+    }
 }
 
 
