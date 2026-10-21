@@ -117,6 +117,9 @@ pub fn fly(ctx: &egui::Context, rect: Rect, camera: &mut Camera, enabled: bool) 
         use crate::ui::{self, Actions, Tool, UiAction};
         let ctx = egui::Context::default();
         let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.,600.));
+        assert!(ui::transform_gizmo::active_kind(&ctx).is_none());
+        assert_eq!(ui::modal_transform::BaseStage::enter(ui::modal_transform::base_snap_shortcut(
+            Key::B,ui::transform_gizmo::active_kind(&ctx).is_some())),ui::modal_transform::BaseStage::Off);
         let mut fixture = ui::testing::Fixture::new();
         fixture.editor.tool = Tool::Move;
         fixture.camera.projection = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]];
@@ -129,6 +132,9 @@ pub fn fly(ctx: &egui::Context, rect: Rect, camera: &mut Camera, enabled: bool) 
             egui::CentralPanel::default().show(ctx, |ui| ui::transform_gizmo::show(ui,rect,&view,&mut Actions::default()));
         });
         assert!(ui::transform_gizmo::active(&ctx));
+        assert_eq!(ui::transform_gizmo::active_kind(&ctx),Some(Tool::Move));
+        assert_eq!(ui::modal_transform::BaseStage::enter(ui::modal_transform::base_snap_shortcut(
+            Key::B,ui::transform_gizmo::active_kind(&ctx).is_some())),ui::modal_transform::BaseStage::Base);
         ui::transform_gizmo::finish_input(&ctx);
         assert!(!ui::transform_gizmo::active(&ctx));
         fixture.editor.tool = Tool::Select;

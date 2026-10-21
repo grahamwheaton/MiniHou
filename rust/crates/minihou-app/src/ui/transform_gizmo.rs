@@ -130,6 +130,10 @@ fn snap_point(mesh: Option<(&[f32], &[u32])>, v: &View, rect: Rect, pointer: Pos
 pub fn active(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<Drag>(egui::Id::new("transform_gizmo_drag")).is_some()
     || d.get_temp::<PlaneDrag>(egui::Id::new("transform_plane_drag")).is_some()
     || d.get_temp::<FreeDrag>(egui::Id::new("transform_free_drag")).is_some()) }
+pub fn active_kind(ctx: &egui::Context) -> Option<Tool> { ctx.data(|d|
+    d.get_temp::<Drag>(egui::Id::new("transform_gizmo_drag")).map(|drag|drag.kind)
+        .or_else(||d.get_temp::<PlaneDrag>(egui::Id::new("transform_plane_drag")).map(|_|Tool::Move))
+        .or_else(||d.get_temp::<FreeDrag>(egui::Id::new("transform_free_drag")).map(|drag|drag.kind))) }
 /// Release input ownership while retaining the last applied transform.
 pub fn finish_input(ctx: &egui::Context) {
     ctx.data_mut(|d| {

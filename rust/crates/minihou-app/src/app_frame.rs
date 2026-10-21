@@ -28,6 +28,13 @@ impl eframe::App for App {
         if self.param_pick.is_some() {
             if let Some(cancel) = param_pick_end(ctx, self.last_viewport) { self.finish_param_pick(ctx, cancel); }
         }
+        if let Some(kind)=ui::transform_gizmo::active_kind(ctx).filter(|_|ctx.input(|i|
+            ui::modal_transform::base_snap_shortcut(egui::Key::B,i.key_pressed(egui::Key::B)))) {
+            self.cancel_transform();
+            ui::transform_gizmo::finish_input(ctx);
+            self.start_modal(ctx,match kind { ui::Tool::Rotate=>ModalKind::Rotate,
+                ui::Tool::Scale=>ModalKind::Scale, _=>ModalKind::Move });
+        }
         let busy = self.modal.is_some() || self.model_modal.is_some() || self.mirror.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx) || ui::curve_tool::active(ctx);
         let fly_frame = viewport_input::fly(ctx, self.last_viewport, &mut self.camera,
             self.prefs.viewport.fly_navigation && !busy && !ui::selection_region::active(ctx) && !ctx.wants_keyboard_input());
