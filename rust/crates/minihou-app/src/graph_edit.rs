@@ -17,6 +17,8 @@ mod wires;
 pub use wires::*;
 mod clipboard;
 pub use clipboard::*;
+mod duplicate_selection;
+pub use duplicate_selection::*;
 mod node_edit;
 pub use node_edit::*;
 

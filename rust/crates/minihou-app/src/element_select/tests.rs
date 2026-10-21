@@ -506,6 +506,7 @@
             assert_eq!(t.node_params(node, &adjacent_points).unwrap()["domain"], "points");
         }
         assert_eq!(t.node_params("blast", &points).unwrap(), serde_json::json!({"domain": "points", "group": "7 3 9"}));
+        assert_eq!(t.node_params("split", &points), t.node_params("blast", &points));
         assert_eq!(t.node_params("blast", &edges).unwrap(), serde_json::json!({"domain": "edges", "group": "6-7 7-8"}));
         assert_eq!(t.node_params("blast", &face).unwrap(), serde_json::json!({"domain": "primitives", "group": "0"}));
         assert!(t.node_params("box", &points).is_none());
