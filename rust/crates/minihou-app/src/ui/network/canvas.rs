@@ -108,7 +108,9 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         if let Some((port, world)) = hit_port {
             state.wire_output_index = if matches!(port, AddConnection::Output(_)) {
                 ports.iter().filter(|(candidate, _)| candidate == port)
-                    .position(|(_, position)| position == world).unwrap_or(0)
+                    .position(|(_, position)| position == world)
+                    .and_then(|position| match port { AddConnection::Output(node) => output_index(&v.doc["nodes"][node],position), _ => None })
+                    .unwrap_or(0)
             } else { 0 };
             state.pickup = match port {
                 AddConnection::Input { node, port } => crate::graph_edit::WirePickup::begin(v.doc, node, port),
@@ -162,7 +164,9 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         } else if let Some((target, target_world)) = hit_port {
             let target_output = if matches!(target, AddConnection::Output(_)) {
                 ports.iter().filter(|(candidate, _)| candidate == target)
-                    .position(|(_, position)| position == target_world).unwrap_or(0)
+                    .position(|(_, position)| position == target_world)
+                    .and_then(|position| match target { AddConnection::Output(node) => output_index(&v.doc["nodes"][node],position), _ => None })
+                    .unwrap_or(0)
             } else { 0 };
             let subnet_connection = match (&source, target) {
                 (AddConnection::Output(from), AddConnection::Input { node, port })

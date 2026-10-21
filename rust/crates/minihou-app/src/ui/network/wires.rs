@@ -22,6 +22,16 @@ pub(super) fn output_count(raw: &serde_json::Value) -> usize {
     raw["output_sockets"].as_array().map_or(1, |sockets| sockets.len().max(1))
 }
 
+pub(super) fn output_position(raw: &serde_json::Value, index: usize) -> Option<usize> {
+    raw["output_sockets"].as_array().map_or(Some(index), |sockets|
+        sockets.iter().position(|socket| socket["index"].as_u64() == Some(index as u64)))
+}
+
+pub(super) fn output_index(raw: &serde_json::Value, position: usize) -> Option<usize> {
+    raw["output_sockets"].as_array().map_or(Some(position), |sockets|
+        sockets.get(position)?.get("index")?.as_u64().and_then(|index| usize::try_from(index).ok()))
+}
+
 pub(super) fn output_offset(index: usize, count: usize) -> Vec2 {
     vec2(CARD.x * 0.5 + (index as f32 - (count.saturating_sub(1)) as f32 * 0.5) * 16.0, CARD.y)
 }
@@ -41,6 +51,9 @@ mod subnet_port_tests {
         assert_eq!(input_slots(node, &doc["nodes"]["sub"]), vec!["in0", "in1"]);
         assert_ne!(input_offset(0, 2), input_offset(1, 2));
         assert_ne!(output_offset(0, 2), output_offset(1, 2));
+        let sparse=json!({"output_sockets":[{"index":0,"name":"First"},{"index":3,"name":"Fourth"}]});
+        assert_eq!(output_index(&sparse,1),Some(3));
+        assert_eq!(output_position(&sparse,3),Some(1));
     }
 }
 
@@ -138,7 +151,9 @@ pub(super) fn curves_for(canvas: Rect, state: &State, graph: &minihou_core::Grap
             *offset += 1;
             let Some(&start) = lookup.get(source.as_str()) else { continue };
             let endpoint = def.output_for(port, source_index, source);
-            let a = screen(canvas, state, start + output_offset(endpoint.output, output_count(&doc["nodes"][source])));
+            let raw=&doc["nodes"][source];
+            let Some(position)=output_position(raw,endpoint.output) else { continue };
+            let a = screen(canvas, state, start + output_offset(position, output_count(raw)));
             let b = screen(canvas, state, end + input_offset(index, slots.len()));
             let wire = WireRef { from: source.clone(), to: target.clone(), port: port.clone() };
             if seen.insert(wire.clone()) { wires.push((wire, network_wires::curve(a,b))); }
