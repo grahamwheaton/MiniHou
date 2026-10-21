@@ -65,7 +65,7 @@ fn plain(name: &str) -> bool { model::group_name(name.trim()).is_ok() }
 
 pub const GROW: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "grow", inputs: GEO, params: crate::params!(
     "group": ""; "domain": "primitives"; "mode": "grow"; "steps": 1; "face_step": true;
-    "keep_selection": true; "result_group_name": ""; "output_group": false; "output_group_name": "grown"), cook: grow };
+    "keep_selection": true; "result_group_name": ""; "output_group": false; "output_group_name": "grown"; "use_flow": false), cook: grow };
 fn grow(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = GROW.one(inputs, 0)?;
     let d = domain(p)?;
@@ -76,7 +76,19 @@ fn grow(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let before = members(&g, d, &pattern)?;
     let mut after = before.clone();
     if steps > 0 && after.iter().any(|x| *x) {
-        SelectTopology::from_geometry(&g).grow(d, &mut after, steps as usize, p.b("face_step")?, shrink);
+        let topo = SelectTopology::from_geometry(&g);
+        let face_step = p.b("face_step")?;
+        let axis = if p.b("use_flow")? && !shrink { flow_axis(&topo, g.p(), d, &before) } else { None };
+        if let Some(axis) = axis {
+            for _ in 0..steps {
+                let prev = after.clone();
+                topo.grow_step(d, &mut after, face_step);
+                keep_along(&topo, g.p(), d, &prev, &mut after, axis);
+                if after == prev { break; }
+            }
+        } else {
+            topo.grow(d, &mut after, steps as usize, face_step, shrink);
+        }
     }
     let mut out = (*g).clone();
     if p.b("keep_selection")? {
@@ -90,7 +102,66 @@ fn grow(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
     Ok(out)
 }
-
+/// Centre of element `i` of `d` (the point, the edge midpoint, the polygon's mean point).
+fn centre(t: &SelectTopology, p: &[f32], d: Domain, i: usize) -> [f64; 3] {
+    let at = |k: u32| crate::select_topo::at(p, k).map(f64::from);
+    match d {
+        Domain::Points => at(i as u32),
+        Domain::Edges => { let (a, b) = t.edges[i]; let (a, b) = (at(a), at(b)); [0, 1, 2].map(|k| (a[k] + b[k]) / 2.) }
+        Domain::Faces => {
+            let vs = t.poly_verts.get(i as u32);
+            let mut c = [0.; 3];
+            for &v in vs { let q = at(v); for k in 0..3 { c[k] += q[k] / vs.len().max(1) as f64; } }
+            c
+        }
+    }
+}
+/// Dominant axis of a symmetric 3x3 matrix (power iteration) when it is clearly line-like (largest eigenvalue well above the rest).
+fn dominant_axis(m: [[f64; 3]; 3]) -> Option<[f64; 3]> {
+    let mul = |v: [f64; 3]| [0, 1, 2].map(|r| (0..3).map(|c| m[r][c] * v[c]).sum::<f64>());
+    let norm = |v: [f64; 3]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let mut v = [0.577, 0.5773, 0.5774];
+    for _ in 0..64 { let w = mul(v); let n = norm(w); if n < 1e-12 { return None; } v = w.map(|x| x / n); }
+    let lambda = norm(mul(v));
+    let trace = m[0][0] + m[1][1] + m[2][2];
+    // the other two eigenvalues sum to trace - lambda: a line has (almost) nothing left over
+    (lambda > 1e-12 && trace - lambda < 0.25 * lambda).then_some(v)
+}
+/// Direction of the selection for `use_flow`: a chain of edges runs along its edges, points and polygons along the line
+/// through their centres. `None` (grow in all directions) for a single point / polygon or a selection that is not line-like.
+fn flow_axis(t: &SelectTopology, p: &[f32], d: Domain, sel: &[bool]) -> Option<[f64; 3]> {
+    let ids: Vec<usize> = sel.iter().enumerate().filter(|x| *x.1).map(|x| x.0).collect();
+    let mut m = [[0.; 3]; 3];
+    if d == Domain::Edges {
+        for &i in &ids {
+            let (a, b) = t.edges[i];
+            let (a, b) = (crate::select_topo::at(p, a), crate::select_topo::at(p, b));
+            let v = [0, 1, 2].map(|k| (b[k] - a[k]) as f64);
+            let n = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+            if n < 1e-12 { continue; }
+            for r in 0..3 { for c in 0..3 { m[r][c] += v[r] * v[c] / (n * n); } }
+        }
+    } else {
+        if ids.len() < 2 { return None; }
+        let cs: Vec<[f64; 3]> = ids.iter().map(|&i| centre(t, p, d, i)).collect();
+        let mean = [0, 1, 2].map(|k| cs.iter().map(|c| c[k]).sum::<f64>() / cs.len() as f64);
+        for c in &cs { for r in 0..3 { for k in 0..3 { m[r][k] += (c[r] - mean[r]) * (c[k] - mean[k]); } } }
+    }
+    dominant_axis(m)
+}
+/// Drops the elements added since `prev` that do not lie within about 37 degrees of `axis` (either way) from the selected element nearest to them.
+fn keep_along(t: &SelectTopology, p: &[f32], d: Domain, prev: &[bool], now: &mut [bool], axis: [f64; 3]) {
+    let old: Vec<[f64; 3]> = prev.iter().enumerate().filter(|x| *x.1).map(|x| centre(t, p, d, x.0)).collect();
+    for i in 0..now.len() {
+        if !now[i] || prev[i] { continue; }
+        let c = centre(t, p, d, i);
+        let dist = |o: &[f64; 3]| (0..3).map(|k| (c[k] - o[k]).powi(2)).sum::<f64>();
+        let Some(near) = old.iter().min_by(|a, b| dist(a).total_cmp(&dist(b))) else { continue; };
+        let v = [0, 1, 2].map(|k| c[k] - near[k]);
+        let n = dist(near).sqrt();
+        if n > 1e-9 && (0..3).map(|k| v[k] * axis[k]).sum::<f64>().abs() / n < 0.8 { now[i] = false; }
+    }
+}
 pub const SELECT_PATH: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "select_path", inputs: GEO, params: crate::params!(
     "domain": "points"; "start": 0; "end": 1; "waypoints": ""; "method": "shortest_distance"; "closed": false;
     "group_name": "path"; "combine": "replace"), cook: select_path };
@@ -239,6 +310,33 @@ mod tests {
         assert_eq!(prims(&out, "sel").len(), 13);
     }
 
+    #[test]
+    fn use_flow_grows_along_the_selection_direction() {
+        // grid(5, 5): point (i, j) is j * 6 + i. A vertical two-edge line at x = 2 from y = 1 to y = 3.
+        let mut g = grid(5, 5);
+        let e = crate::topo::edges(&g.topology, g.npoints);
+        let on: Vec<f32> = (0..e.len()).map(|i| matches!((e.points[2 * i], e.points[2 * i + 1]), (8, 14) | (14, 20)) as u8 as f32).collect();
+        edge_tools::write_values(&mut g, "edge_group_line", &on, true).unwrap();
+        let params = |flow: bool, steps: i32| json!({"group": "line", "domain": "edges", "face_step": false, "use_flow": flow, "steps": steps, "result_group_name": "out"});
+        let all = edges(&run(&GROW, g.clone(), params(false, 1)).unwrap(), "out");
+        assert!(all.contains(&(13, 14)) && all.contains(&(14, 15)) && all.contains(&(2, 8)) && all.contains(&(20, 26)));
+        // on: only the two edges that continue north and south
+        assert_eq!(edges(&run(&GROW, g.clone(), params(true, 1)).unwrap(), "out"), vec![(2, 8), (8, 14), (14, 20), (20, 26)]);
+        // two steps keep running along the line
+        assert_eq!(edges(&run(&GROW, g.clone(), params(true, 2)).unwrap(), "out"), vec![(2, 8), (8, 14), (14, 20), (20, 26), (26, 32)]);
+        // off by default
+        let default = json!({"group": "line", "domain": "edges", "face_step": false, "result_group_name": "out"});
+        assert_eq!(edges(&run(&GROW, g, default).unwrap(), "out"), all);
+        // a single polygon has no direction: flow falls back to growing all round
+        let one = run(&GROW, with_prims(grid(5, 5), "s", &[12]), json!({"group": "s", "face_step": false, "use_flow": true})).unwrap();
+        assert_eq!(prims(&one, "s"), vec![7, 11, 12, 13, 17]);
+        // a row of faces grows along the row only
+        let row = run(&GROW, with_prims(grid(7, 3), "s", &[9, 10, 11]), json!({"group": "s", "use_flow": true})).unwrap();
+        assert_eq!(prims(&row, "s"), vec![8, 9, 10, 11, 12]);
+        // shrink ignores the option
+        let shrunk = run(&GROW, with_prims(grid(5, 5), "s", &[6, 7, 8, 11, 12, 13, 16, 17, 18]), json!({"group": "s", "mode": "shrink", "use_flow": true})).unwrap();
+        assert_eq!(prims(&shrunk, "s"), vec![12]);
+    }
     #[test]
     fn shrink_is_select_less_with_removed_delta() {
         let g = with_prims(grid(5, 5), "sel", &[6, 7, 8, 11, 12, 13, 16, 17, 18]);

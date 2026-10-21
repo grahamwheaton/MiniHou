@@ -39,13 +39,21 @@ pub fn node_group_name(def: &Value) -> Option<&str> {
         "boundary_select" => Some(def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()).unwrap_or("boundary")),
         "select_sharp_edges" => Some(def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()).unwrap_or("sharp_edges")),
         "edge_group" | "edge_group_promote" => Some(def["params"]["name"].as_str().unwrap_or("edges")),
+        "grow" => Some(grow_group_name(def)),
         "select_loop" => Some(def["params"]["group_name"].as_str().unwrap_or("loop")),
         "select_ring" => Some(def["params"]["group_name"].as_str().unwrap_or("ring")),
         "select_path" => Some(def["params"]["group_name"].as_str().unwrap_or("path")),
         _ => def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()),
     }
 }
-pub fn geometry(g:&minihou_core::Geometry,name:&str)->(Vec<f32>,Vec<f32>) {
+/// The group `grow` writes its resulting selection to: Result Group, else the input group's name, else "selection".
+fn grow_group_name(def: &Value) -> &str {
+    let p = &def["params"];
+    let named = |k: &str| p[k].as_str().map(str::trim).filter(|s| !s.is_empty());
+    named("result_group_name")
+        .or_else(|| named("group").filter(|s| s.chars().all(|c| c.is_alphanumeric() || c == '_') && !s.starts_with(|c: char| c.is_ascii_digit())))
+        .unwrap_or("selection")
+}pub fn geometry(g:&minihou_core::Geometry,name:&str)->(Vec<f32>,Vec<f32>) {
     let key=format!("group_{name}");let mut faces=Vec::new();let mut lines=Vec::new();
     let member=|a:&minihou_core::geometry::Attr| match &a.data {
         minihou_core::geometry::AttrData::F32(v)=>v.chunks(a.width).map(|r|r[0]!=0.).collect::<Vec<_>>(),
