@@ -35,7 +35,7 @@ impl eframe::App for App {
             let selection_actions = self.keymap.poll_selection(ctx, &KeyContext {
                 viewport_hovered: self.viewport_hover, network_hovered: false,
                 in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) });
-            let select_press = matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform) && ctx.input(|i| i.pointer.primary_pressed()
+            let select_press = !ui::curve_tool::modal_active(ctx) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform) && ctx.input(|i| i.pointer.primary_pressed()
                 && i.pointer.latest_pos().is_some_and(|p| self.last_viewport.contains(p)
                     && ui::viewport_ui::selection_canvas_contains(self.last_viewport, p)));
             let lasso_press = ctx.input(|i| i.pointer.secondary_pressed() && i.modifiers.ctrl

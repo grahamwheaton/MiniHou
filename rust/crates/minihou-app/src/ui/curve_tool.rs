@@ -22,6 +22,7 @@ fn selected_parts(ctx:&egui::Context,node:&str)->Vec<Selected> {ctx.data(|d|d.ge
 pub fn set_selected(ctx:&egui::Context,node:&str,selection:Selected) { ctx.data_mut(|d|{d.insert_temp(selection_id(node),selection);d.insert_temp(selection_set_id(node),vec![selection]);}); }
 fn extend_selected(ctx:&egui::Context,node:&str,selection:Selected) {let mut parts=selected_parts(ctx,node);if !parts.contains(&selection){parts.push(selection);}ctx.data_mut(|d|{d.insert_temp(selection_id(node),selection);d.insert_temp(selection_set_id(node),parts);});}
 pub fn active(ctx:&egui::Context)->bool { ctx.data(|d|d.get_temp::<Drag>(drag_id()).is_some()) }
+pub fn modal_active(ctx:&egui::Context)->bool { ctx.data(|d|d.get_temp::<Drag>(drag_id()).is_some_and(|d|d.modal)) }
 pub fn cancel(ctx:&egui::Context) { ctx.data_mut(|d|d.remove::<Drag>(drag_id())); }
 pub fn start_modal(ctx:&egui::Context,node:&str,controls:&Value,kind:super::modal_transform::Kind,pointer:Pos2)->bool {
     let Some(cs)=parse(controls) else {return false;};
@@ -345,6 +346,40 @@ pub fn show(ui:&mut egui::Ui,rect:Rect,v:&View,out:&mut Actions,double_click:boo
         let handle=screen(&v,rect,cs[0].right).unwrap();
         assert!(hit(rect,&v,handle,&ctx),"the selected, non-displayed bezier's handle is hit-testable");
         f.selected="xform1".into();assert!(!is_active_node(&f.view()));
+    }
+    #[test] fn modal_primary_click_confirms_one_edit() {
+        use crate::ui::testing::Fixture;
+        use eframe::egui::{vec2,Event,Modifiers,RawInput};
+        let mut f=Fixture::new();let cs=controls();
+        f.doc=minihou_app::Document::parse(serde_json::json!({"version":1,"nodes":{"curve1":{"type":"bezier","params":{"controls":write(&cs)}}},"display":"curve1"}).to_string()).unwrap();
+        f.graph=minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected="curve1".into();f.selected_set=std::collections::BTreeSet::from([f.selected.clone()]);f.display=f.selected.clone();
+        f.editor.snap.enabled=false;
+        f.camera=crate::ui::CameraInfo{ortho:true,projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],ray_origin:[0.,0.,10.],ray_forward:[0.,0.,-1.],ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],..Default::default()};
+        let ctx=egui::Context::default();let rect=Rect::from_min_size(Pos2::ZERO,vec2(800.,600.));
+        let start=screen(&f.view(),rect,cs[0].right).unwrap();let target=start+vec2(40.,20.);
+        set_selected(&ctx,"curve1",Selected{index:0,part:Part::Right});
+        assert!(start_modal(&ctx,"curve1",&write(&cs),super::super::modal_transform::Kind::Move,start));
+        let frame=|events:Vec<Event>| {
+            let raw=RawInput{screen_rect:Some(rect),events,..Default::default()};
+            let mut actions=Actions::default();let view=f.view();
+            let _=ctx.run(raw,|ctx| {egui::CentralPanel::default().show(ctx,|ui|show(ui,rect,&view,&mut actions,false));});
+            actions.0
+        };
+        let button=|pressed|Event::PointerButton{pos:target,button:PointerButton::Primary,pressed,modifiers:Modifiers::NONE};
+        assert!(frame(vec![Event::PointerMoved(target)]).is_empty());
+        assert!(modal_active(&ctx));
+        assert!(frame(vec![button(true)]).is_empty());
+        assert!(modal_active(&ctx));
+        let edits=frame(vec![button(false)]);
+        assert!(!active(&ctx));
+        assert_eq!(edits.len(),1);
+        match &edits[0] {
+            UiAction::Edit{edit:Edit::Param{node,name,value},continuous:false} => {
+                assert_eq!(node,"curve1");assert_eq!(name,"controls");assert_ne!(value,&write(&cs));
+            }
+            other=>panic!("expected a committed curve edit, got {other:?}"),
+        }
     }
     #[test] fn raw_pointer_routes_handle_press_drag_and_single_edit() {
         use crate::ui::testing::Fixture;
