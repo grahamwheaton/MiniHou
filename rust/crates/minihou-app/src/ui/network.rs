@@ -288,6 +288,13 @@ pub fn embed_scope(doc: &serde_json::Value, path: &[String], inner: serde_json::
     Some(next)
 }
 pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -> Option<UiAction> {
+    if let UiAction::AddSubnetOutput(boundary) = &action {
+        let (subnet, parents) = path.split_last()?;
+        let scope = if parents.is_empty() { doc.clone() } else { scope_doc(doc, parents)? };
+        let scope = crate::subnet_edit::add_output_socket(&scope, subnet, boundary)?;
+        let next = if parents.is_empty() { scope } else { embed_scope(doc, parents, scope)? };
+        return Some(UiAction::Edit { edit: Edit::Replace(next), continuous: false });
+    }
     if let UiAction::Edit { edit: Edit::Exposed(entries), .. } = &action {
         let (parent, id) = path.split_last()?;
         let mut scope = if id.is_empty() { doc.clone() } else { scope_doc(doc, id)? };

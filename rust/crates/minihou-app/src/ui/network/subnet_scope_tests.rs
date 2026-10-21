@@ -54,3 +54,29 @@
         let next=embed_scope(&doc,&["group".into()],inner).unwrap();
         assert_eq!(next["nodes"]["group"]["inner"]["output"],"b");
     }
+    #[test]
+    fn add_output_option_on_input_and_output_boundaries_carries_distinct_streams() {
+        let doc=json!({"nodes":{
+            "source":{"type":"point"},
+            "sub":{"type":"subnet","input_sockets":[{"index":0,"name":"Input 1"}],
+                "output_sockets":[{"index":0,"name":"Output 1"}],"inputs":{"in0":"source"},
+                "inner":{"nodes":{
+                    "input1":{"type":"subnet_input","port_index":0},
+                    "move":{"type":"transform","inputs":{"geo":"input1"},"params":{"translate":[2,0,0]}},
+                    "output1":{"type":"subnet_output","port_index":0,"inputs":{"geo":"move"}}
+                },"output":"output1"}},
+            "first":{"type":"null","inputs":{"geo":"sub"}},
+            "second":{"type":"null","inputs":{"geo":{"node":"sub","output":1}}}
+        }});
+        let path=["sub".into()];
+        let Some(UiAction::Edit {edit:Edit::Replace(next),..})=scoped_edit(&doc,&path,UiAction::AddSubnetOutput("input1".into()))
+            else {panic!("expected output socket edit")};
+        assert_eq!(next["nodes"]["sub"]["output_sockets"].as_array().unwrap().len(),2);
+        let graph=minihou_core::Graph::from_value(&next).unwrap();
+        assert_eq!(graph.cook(Some("first")).unwrap().p(),&[2.0,0.0,0.0]);
+        assert_eq!(graph.cook(Some("second")).unwrap().p(),&[0.0,0.0,0.0]);
+        let Some(UiAction::Edit {edit:Edit::Replace(next),..})=scoped_edit(&next,&path,UiAction::AddSubnetOutput("output1".into()))
+            else {panic!("expected output boundary edit")};
+        assert_eq!(next["nodes"]["sub"]["output_sockets"].as_array().unwrap().len(),3);
+        assert_eq!(next["nodes"]["sub"]["inner"]["nodes"]["output3"]["inputs"]["geo"],"move");
+    }
