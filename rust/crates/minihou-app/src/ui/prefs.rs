@@ -164,9 +164,13 @@ impl Preferences {
             assert_eq!(p.viewport.default_shading,mode.label()); assert_eq!(p.viewport.object_visibility,visibility);
             assert_eq!(Preferences::from_json(&p.to_json()),p);
         } }
-        for (old,mode) in [("Solid",Mode::FlatShaded),("Shaded",Mode::SmoothShaded),("Wire",Mode::Wireframe),("ShadedWire",Mode::SmoothWireShaded)] {
+        for (old,mode) in [("Solid",Mode::FlatShaded),("Shaded",Mode::SmoothShaded),("Wire",Mode::Wireframe)] {
             let p=Preferences::from_json(&json!({"viewport":{"default_shading":old}}));
             assert_eq!(p.viewport.default_shading,mode.label()); assert_eq!(p.viewport.object_visibility,ObjectVisibility::ShowAll);
+        }
+        for removed in ["Shaded Bounding Box", "MatCap Wire Shaded", "Flat Wire Shaded", "Smooth Wire Shaded", "ShadedWire"] {
+            let p=Preferences::from_json(&json!({"viewport":{"default_shading":removed}}));
+            assert_eq!(p.viewport.default_shading,Mode::SmoothShaded.label());
         }
         assert_eq!(Preferences::from_json(&json!({"viewport":{"object_visibility":"future mode"}})).viewport.object_visibility,ObjectVisibility::ShowAll);
     }

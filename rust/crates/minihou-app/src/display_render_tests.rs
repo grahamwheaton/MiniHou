@@ -66,14 +66,14 @@ fn display_modes_and_object_visibility_headless() {
             std::fs::write(directory.join(format!("mode-{i:02}.ppm")),ppm).unwrap();
         }
     }
-    assert_eq!(changed(&images[2],&render(&device,&queue,&gpu,Mode::Wireframe,Overlay { xray:true,..options },false)),0,"X-ray must keep pure wireframe surface-free");
+    assert_eq!(changed(&images[1],&render(&device,&queue,&gpu,Mode::Wireframe,Overlay { xray:true,..options },false)),0,"X-ray must keep pure wireframe surface-free");
     // Surface, topology and shading semantics must produce actual pixel differences.
-    for (a,b) in [(0,2),(1,8),(2,3),(2,4),(4,5),(6,10),(8,10),(8,9),(10,11)] {
+    for (a,b) in [(0,1),(1,2),(1,3),(3,4),(5,7),(6,7)] {
         assert!(changed(&images[a],&images[b])>3,"{} and {} are indistinguishable",Mode::ALL[a].label(),Mode::ALL[b].label());
     }
     let background=images[0][0];
     let covered=|i:usize| images[i].iter().filter(|p| **p!=background).count();
-    assert!(covered(4)<covered(2),"hidden-line depth must remove occluded edges");
+    assert!(covered(3)<covered(1),"hidden-line depth must remove occluded edges");
     for mode in Mode::ALL {
         let show=render(&device,&queue,&gpu,mode,options,true);
         assert!(show.iter().filter(outline).count()>0,"{} lost its selected silhouette",mode.label());
@@ -109,10 +109,10 @@ fn lod_and_proxy_ownership_headless() {
     assert_eq!((gpu.partition_tri.selected,gpu.partition_tri.total),(12,24));
     assert_eq!((gpu.partition_edge.selected,gpu.partition_edge.total),(12,24));
     let hide=Overlay { visibility:ObjectVisibility::HideOthers,..Default::default() };
-    let lod_image=render(&device,&queue,&gpu,Mode::SmoothWireShaded,hide,true);
+    let lod_image=render(&device,&queue,&gpu,Mode::SmoothShaded,hide,true);
     let mut full=Gpu::new(&device,&scene);
     full.select_objects(&device,&scene,vec![0..4]); full.set_object_ranges(&device,&scene,vec![0..4,4..8]);
-    let full_image=render(&device,&queue,&full,Mode::SmoothWireShaded,hide,true);
+    let full_image=render(&device,&queue,&full,Mode::SmoothShaded,hide,true);
     // Sorting LOD line endpoints can round an interpolated channel by one UNORM unit.
     assert!(lod_image.iter().zip(&full_image).all(|(a,b)| a.iter().zip(b).all(|(a,b)| a.abs_diff(*b)<=1)),"LOD/full render exceeded one-unit rounding tolerance");
     gpu.upload(&device,&scene.proxied(0.5));
@@ -120,7 +120,7 @@ fn lod_and_proxy_ownership_headless() {
     assert!(gpu.partition_tri.selected>0 && gpu.partition_tri.selected<gpu.partition_tri.total);
     // Full-resolution bounds stay identical across proxy levels.
     full.select_objects(&device,&scene,vec![4..8]); full.set_object_ranges(&device,&scene,vec![0..4,4..8]);
-    assert_eq!(changed(&render(&device,&queue,&gpu,Mode::ShadedBoundingBox,hide,true),&render(&device,&queue,&full,Mode::ShadedBoundingBox,hide,true)),0);
+    assert_eq!(changed(&render(&device,&queue,&gpu,Mode::WireBoundingBox,hide,true),&render(&device,&queue,&full,Mode::WireBoundingBox,hide,true)),0);
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn bounds_of_edge_only_objects_keep_selection_outline_headless() {
     gpu.select_objects(&device,&scene,vec![0..4]); gpu.set_object_ranges(&device,&scene,vec![0..4,4..8]);
     assert_eq!(gpu.object_mask_n,0);
     assert_eq!(gpu.nl_selected,8);
-    for mode in [Mode::WireBoundingBox,Mode::ShadedBoundingBox] {
+    for mode in [Mode::WireBoundingBox] {
         let image=render(&device,&queue,&gpu,mode,Overlay { visibility:ObjectVisibility::HideOthers,..Default::default() },true);
         assert!(image.iter().filter(outline).count()>0,"edge-only object lost bounds silhouette");
     }

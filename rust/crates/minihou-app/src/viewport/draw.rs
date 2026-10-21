@@ -79,7 +79,7 @@ impl Gpu {
         let fade = t * t * (3.0 - 2.0 * t);
         let editing = selection_mode != crate::ui::SelectionMode::Object;
         let sketchup_clean = mode.matcap() && overlay.matcap==MatCap::SketchUpClean;
-        let is_shaded_wire = sketchup_clean || (mode.wire_shaded() && (editing || overlay.wireframe))
+        let is_shaded_wire = sketchup_clean
             || (overlay.wireframe && mode.shaded() && !mode.bounds())
             || (editing && !mode.bounds());
         let show_wire = mode.wire() || is_shaded_wire || (overlay.xray && editing);
@@ -133,7 +133,7 @@ impl Gpu {
             }
             if overlay.geometry.faces && !visible.is_empty() {
                 if mode.shaded() || mode == Mode::WireframeGhost {
-                    let textured=overlay.textures && matches!(mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded)
+                    let textured=overlay.textures && matches!(mode,Mode::FlatShaded|Mode::SmoothShaded)
                         && overlay.object_color==ObjectColor::Single && !self.tex_batches.is_empty();
                     if textured {
                         pass.set_pipeline(if overlay.xray {&self.pipe_tex_xray}else if is_shaded_wire {&self.pipe_tex_bias}else{&self.pipe_tex});

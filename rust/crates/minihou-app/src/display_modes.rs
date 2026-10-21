@@ -3,43 +3,39 @@ use std::ops::Range;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Mode {
-    WireBoundingBox, ShadedBoundingBox, Wireframe, WireframeGhost,
-    HiddenLineInvisible, HiddenLineGhost, MatCapShaded, MatCapWireShaded,
-    FlatShaded, FlatWireShaded, #[default] SmoothShaded, SmoothWireShaded,
+    WireBoundingBox, Wireframe, WireframeGhost,
+    HiddenLineInvisible, HiddenLineGhost, MatCapShaded,
+    FlatShaded, #[default] SmoothShaded,
 }
 impl Mode {
-    pub const ALL: [Self; 12] = [Self::WireBoundingBox, Self::ShadedBoundingBox, Self::Wireframe,
+    pub const ALL: [Self; 8] = [Self::WireBoundingBox, Self::Wireframe,
         Self::WireframeGhost, Self::HiddenLineInvisible, Self::HiddenLineGhost, Self::MatCapShaded,
-        Self::MatCapWireShaded, Self::FlatShaded, Self::FlatWireShaded, Self::SmoothShaded, Self::SmoothWireShaded];
+        Self::FlatShaded, Self::SmoothShaded];
     // Source compatibility for the existing Z pie and callers.
     #[allow(non_upper_case_globals)] pub const Solid: Self = Self::FlatShaded;
     #[allow(non_upper_case_globals)] pub const Shaded: Self = Self::SmoothShaded;
     #[allow(non_upper_case_globals)] pub const Wire: Self = Self::Wireframe;
-    #[allow(non_upper_case_globals)] pub const ShadedWire: Self = Self::SmoothWireShaded;
     pub fn label(self) -> &'static str { match self {
-        Self::WireBoundingBox => "Wireframe Bounding Box", Self::ShadedBoundingBox => "Shaded Bounding Box",
+        Self::WireBoundingBox => "Wireframe Bounding Box",
         Self::Wireframe => "Wireframe", Self::WireframeGhost => "Wireframe Ghost",
         Self::HiddenLineInvisible => "Hidden Line Invisible", Self::HiddenLineGhost => "Hidden Line Ghost",
-        Self::MatCapShaded => "MatCap Shaded", Self::MatCapWireShaded => "MatCap Wire Shaded",
-        Self::FlatShaded => "Flat Shaded", Self::FlatWireShaded => "Flat Wire Shaded",
-        Self::SmoothShaded => "Smooth Shaded", Self::SmoothWireShaded => "Smooth Wire Shaded",
+        Self::MatCapShaded => "MatCap Shaded",
+        Self::FlatShaded => "Flat Shaded",
+        Self::SmoothShaded => "Smooth Shaded",
     } }
     pub fn parse(s: &str) -> Self {
         match s { "Solid" => Self::Solid, "Shaded" => Self::Shaded, "Wire" => Self::Wire,
-            "ShadedWire" | "Shaded + Wire" => Self::ShadedWire,
             _ => Self::ALL.into_iter().find(|m| m.label() == s).unwrap_or_default() }
     }
     pub fn cycle(self, forward: bool) -> Self {
         let i = Self::ALL.iter().position(|m| *m == self).unwrap();
         Self::ALL[(i + if forward { 1 } else { Self::ALL.len() - 1 }) % Self::ALL.len()]
     }
-    pub fn bounds(self) -> bool { matches!(self, Self::WireBoundingBox | Self::ShadedBoundingBox) }
-    pub fn flat(self) -> bool { matches!(self, Self::FlatShaded | Self::FlatWireShaded | Self::ShadedBoundingBox) }
-    pub fn matcap(self) -> bool { matches!(self, Self::MatCapShaded | Self::MatCapWireShaded) }
-    pub fn wire_shaded(self) -> bool { matches!(self, Self::MatCapWireShaded | Self::FlatWireShaded | Self::SmoothWireShaded) }
-    pub fn shaded(self) -> bool { matches!(self, Self::ShadedBoundingBox | Self::MatCapShaded | Self::MatCapWireShaded |
-        Self::FlatShaded | Self::FlatWireShaded | Self::SmoothShaded | Self::SmoothWireShaded) }
-    pub fn wire(self) -> bool { !self.shaded() || self.wire_shaded() }
+    pub fn bounds(self) -> bool { self == Self::WireBoundingBox }
+    pub fn flat(self) -> bool { self == Self::FlatShaded }
+    pub fn matcap(self) -> bool { self == Self::MatCapShaded }
+    pub fn shaded(self) -> bool { matches!(self, Self::MatCapShaded | Self::FlatShaded | Self::SmoothShaded) }
+    pub fn wire(self) -> bool { !self.shaded() }
     pub fn hidden(self) -> bool { matches!(self, Self::HiddenLineInvisible | Self::HiddenLineGhost) }
 }
 
@@ -145,8 +141,11 @@ pub fn clay_matcap(size: u32) -> Vec<u8> {
     use super::*;
     #[test] fn modes_round_trip_and_cycle() {
         for m in Mode::ALL { assert_eq!(Mode::parse(m.label()), m); assert_eq!(m.cycle(true).cycle(false), m); }
-        assert_eq!(Mode::ALL[11].cycle(true), Mode::ALL[0]);
-        for (old, new) in [("Solid",Mode::FlatShaded),("Shaded",Mode::SmoothShaded),("Wire",Mode::Wireframe),("ShadedWire",Mode::SmoothWireShaded)] { assert_eq!(Mode::parse(old),new); }
+        assert_eq!(Mode::ALL[7].cycle(true), Mode::ALL[0]);
+        for (old, new) in [("Solid",Mode::FlatShaded),("Shaded",Mode::SmoothShaded),("Wire",Mode::Wireframe)] { assert_eq!(Mode::parse(old),new); }
+        for removed in ["Shaded Bounding Box", "MatCap Wire Shaded", "Flat Wire Shaded", "Smooth Wire Shaded", "ShadedWire", "Shaded + Wire"] {
+            assert_eq!(Mode::parse(removed), Mode::SmoothShaded);
+        }
         assert_eq!(Mode::parse("unknown"),Mode::SmoothShaded);
     }
     #[test] fn ownership_partition_survives_reordered_lod_indices() {

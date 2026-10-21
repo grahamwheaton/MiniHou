@@ -92,7 +92,7 @@ pub(super) fn falloff_samples(f: Falloff) -> [f32; 13] { std::array::from_fn(|i|
 pub(super) fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover, v: &View, out: &mut Actions) -> Rect {
     let th = v.theme;
     let ed = v.editor;
-    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 19, Popover::Shading => 19, Popover::Visibility => 3 };
+    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 19, Popover::Shading => Mode::ALL.len() + 7, Popover::Visibility => 3 };
     let height = 30. + rows as f32 * 24. + 10.;
     let x = (anchor.right() - 232.).clamp(viewport.left() + 6., (viewport.right() - 238.).max(viewport.left() + 6.));
     let pop = Rect::from_min_size(Pos2::new(x, anchor.bottom() + 4.), Vec2::new(232., height));
@@ -106,22 +106,23 @@ pub(super) fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, whic
             for (i,mode) in Mode::ALL.into_iter().enumerate() {
                 if display_row(ui,row(i),("display",i),mode.label(),v.mode==mode,Icon::Display(mode),th) { out.push(UiAction::SetMode(mode)); }
             }
-            section(ui,row(12),"MATCAP",th);
+            let next = Mode::ALL.len();
+            section(ui,row(next),"MATCAP",th);
             for (i,matcap) in crate::viewport::MatCap::ALL.into_iter().enumerate() {
-                let r=row(13+i);
+                let r=row(next+1+i);
                 if pop_row(ui,r,("matcap",i),matcap.label(),ed.matcap==matcap,false,"",th) {
                     out.push(UiAction::Editor(EditorChange::MatCap(matcap)));
                 }
                 matcap_swatch(ui,r,matcap);
             }
-            if pop_row(ui,row(16),"matcap_flat","Flat normals",ed.matcap_flat,true,"",th) {
+            if pop_row(ui,row(next+4),"matcap_flat","Flat normals",ed.matcap_flat,true,"",th) {
                 out.push(UiAction::Editor(EditorChange::MatCapFlat(!ed.matcap_flat)));
             }
-            let active=matches!(v.mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded);
-            if pop_row(ui,row(17),"materials_textures","Materials / Textures",ed.textures,true,if active {""}else{"Shaded modes only"},th) {
+            let active=matches!(v.mode,Mode::FlatShaded|Mode::SmoothShaded);
+            if pop_row(ui,row(next+5),"materials_textures","Materials / Textures",ed.textures,true,if active {""}else{"Shaded modes only"},th) {
                 out.push(UiAction::Editor(EditorChange::Textures(!ed.textures)));
             }
-            if pop_row(ui,row(18),"texture_inspector","Texture inspector",ed.texture_inspector,true,"",th) {
+            if pop_row(ui,row(next+6),"texture_inspector","Texture inspector",ed.texture_inspector,true,"",th) {
                 out.push(UiAction::Editor(EditorChange::TextureInspector(!ed.texture_inspector)));
             }
         },
