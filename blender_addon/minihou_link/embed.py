@@ -289,13 +289,13 @@ def _asset_owner(ng):
             return owner
     if len(users) == 1:
         owner = users[0].name
-        # A legacy asset may arrive without its original owner object. Its copied
-        # Source Object socket still names that owner until the instance is split.
+        # A legacy asset may arrive without its original owner object. Only use
+        # the Source Object as owner when the graph's primary root names it.
         try:
             from . import modifiers
             mod = next(mod for mod in users[0].modifiers if mod.node_group == ng)
             source = modifiers.get_source(mod)
-            if source is not None and source.name != owner:
+            if source is not None and source.name != owner and bind_target(runtime_graph(ng), source.name)[1]:
                 owner = source.name
         except (ImportError, AttributeError, KeyError, StopIteration):
             pass
