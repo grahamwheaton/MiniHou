@@ -168,7 +168,7 @@ impl eframe::App for App {
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
                 if !response.dragged() { self.orbit_drag=None; }
-                if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx)
+                if !fly_frame && !region_frame && response.dragged() && self.modal.as_ref().is_none_or(|modal| modal.cage && response.dragged_by(egui::PointerButton::Middle)) && self.model_modal.is_none() && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx)
                     && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| (!ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) || ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
                     let modifiers = ctx.input(|i| i.modifiers);
                     let orbiting = match self.prefs.viewport.navigation {

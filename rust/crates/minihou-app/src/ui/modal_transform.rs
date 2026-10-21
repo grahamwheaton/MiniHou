@@ -75,6 +75,11 @@ impl Modal {
     pub fn cycle_snap(&mut self) { self.snap_to = match self.snap_to.iter().next().unwrap_or_default() { SnapTo::Increment => SnapTo::Vertex,
         SnapTo::Vertex => SnapTo::Edge, SnapTo::Edge => SnapTo::Face, _ => SnapTo::Increment }.into(); }
     pub fn wheel(&mut self, delta: f32) { self.radius = (self.radius * (delta * 0.12).exp()).clamp(0.001, 1e6); }
+    pub fn middle_press(&mut self, pos: Pos2) {
+        if self.cage { return; }
+        if self.constraint != Constraint::Free { self.constraint = Constraint::Free; }
+        else { self.mmb_start = Some(pos); }
+    }
     pub fn status(&self, snap: bool) -> String {
         let title = match self.kind { Kind::Move => "Move", Kind::Rotate => "Rotate", Kind::Scale => "Scale" };
         let numbers = if self.kind == Kind::Move {
@@ -306,6 +311,14 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         m.constraint=Constraint::Free;m.mmb_start=Some(pos2(10.,10.));m.middle_release(pos2(60.,10.),frame,camera);
         assert_eq!(m.constraint,Constraint::Axis(0,false), "a drag still picks the dragged axis");
     }
+    #[test] fn middle_button_does_not_start_a_cage_drag() {
+        let mut modal=Modal::new(Kind::Scale,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+        modal.cage=true;
+        modal.middle_press(pos2(10.,10.));
+        assert_eq!(modal.mmb_start,None);
+        assert_eq!(modal.cage_handle,None);
+        assert_eq!(modal.constraint,Constraint::Free);
+    }
     #[test] fn double_g_in_edge_mode_starts_edge_slide() {
         use crate::ui::SelectionMode as M;
         assert!(double_g_slides(Kind::Move,M::Edges));
@@ -407,10 +420,10 @@ impl App {
                 }
                 egui::Event::PointerButton { button:egui::PointerButton::Secondary, pressed:true, .. } => cancel=true,
                 egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:true, .. } => {
-                    if modal.constraint!=Constraint::Free { modal.constraint=Constraint::Free; } else { modal.mmb_start=Some(pos); }
+                    modal.middle_press(pos);
                 }
                 egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:false, .. } => {
-                    modal.middle_release(pos,frame,camera);
+                    if !modal.cage { modal.middle_release(pos,frame,camera); }
                 }
                 _=>{}
             }
