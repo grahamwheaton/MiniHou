@@ -178,7 +178,9 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
         ui.heading("Parameters");
         let parameters = minihou_core::controller::parameters(node);
         if parameters.is_empty() { ui.small("Add a section and parameter below to create a control."); }
-        for entry in parameters {
+        for section in node["controller_sections"].as_array().into_iter().flatten() {
+            if let Some(name) = section["name"].as_str() { ui.label(egui::RichText::new(name).strong()); }
+            for entry in section["parameters"].as_array().into_iter().flatten() {
             let Some(name) = entry["name"].as_str() else { continue; };
             let kind = entry["kind"].as_str().unwrap_or("float");
             let old = node["params"].get(name).unwrap_or(&entry["default"]);
@@ -197,6 +199,7 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
                     if edited { out.push(UiAction::Edit {edit: Edit::Param {node:id.into(),name:name.into(),value},continuous:true}); }
                 });
             });
+            }
         }
         ui.separator();
         ui.heading("Edit Sections");
@@ -322,10 +325,11 @@ mod controller_panel_tests {
         let ctx = egui::Context::default();
         let mut out = Actions::default();
         let frame = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| controller_panel(ui, &f.view(), &mut out, "driver"));
+            egui::CentralPanel::default().show(ctx, |ui| super::super::show(ui, &f.view(), &mut out));
         });
         assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "Parameters")));
         assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "width")));
+        assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "Shape")));
         assert!(out.0.is_empty());
     }
 }
