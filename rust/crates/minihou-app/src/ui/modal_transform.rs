@@ -24,6 +24,11 @@ impl Constraint {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchStage { Off, Pivot, Reference, Angle }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BaseStage { Off, Base, Target, SourceDirection, TargetDirection, Done }
+impl BaseStage {
+    pub fn enter(active: bool) -> Self { if active { Self::Base } else { Self::Off } }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CageHandle { Face(usize, bool), Corner([bool; 3]) }
 
 #[derive(Clone, Debug)]
@@ -36,6 +41,8 @@ pub struct Modal {
     pub initial_proportional: bool, pub initial_radius: f32,
     pub trackball: bool, pub sketch: SketchStage, pub sketch_pivot: Option<[f32; 3]>,
     pub sketch_reference: Option<Pos2>, pub cage: bool, pub cage_handle: Option<CageHandle>,
+    pub base_stage: BaseStage, pub base_point: Option<[f32; 3]>, pub base_target: Option<[f32; 3]>,
+    pub source_direction: Option<[f32; 3]>, pub target_direction: Option<[f32; 3]>,
     pub cage_start: Pos2, pub bounds: ([f32; 3], [f32; 3]),
     pub reference: Option<[f32; 3]>, pub target: Option<[f32; 3]>,
     pub target_shape: Option<[[f32;3];3]>,
@@ -47,6 +54,8 @@ impl Modal {
             numeric: Default::default(), field: 0, snap_to: snap_to.into(), target_kind: None, proportional, radius,
             initial_proportional:proportional, initial_radius:radius, trackball: false,
             sketch: SketchStage::Off, sketch_pivot: None, sketch_reference: None,
+            base_stage: BaseStage::Off, base_point: None, base_target: None,
+            source_direction: None, target_direction: None,
             cage: false, cage_handle: None, cage_start: start, bounds, reference: None, target: None, target_shape:None,
             last: if kind == Kind::Scale { [1.; 3] } else { [0.; 3] }, mmb_start: None }
     }
@@ -84,12 +93,32 @@ impl Modal {
             else { format!("{:.3}{}", self.last.iter().copied().find(|v| *v != 0. && *v != 1.).unwrap_or(self.last[0]), if self.kind == Kind::Rotate { "°" } else { "×" }) };
         format!("{title}  {}  {numbers}  (Snap: {}){}{}", self.constraint.label(),
             if snap { self.snap_to.label() } else { "Off".into() }, if self.proportional { "  Proportional" } else { "" },
-            if self.cage { "  Cage" } else if self.sketch != SketchStage::Off { "  Two-point" }
+            if self.base_stage != BaseStage::Off { match self.base_stage {
+                BaseStage::Base => "  Base snap: pick base", BaseStage::Target => "  Base snap: pick target",
+                BaseStage::SourceDirection => "  Base snap: pick source edge direction",
+                BaseStage::TargetDirection => "  Base snap: pick target direction", BaseStage::Done => "  Base snap", BaseStage::Off => "" } }
+            else if self.cage { "  Cage" } else if self.sketch != SketchStage::Off { "  Two-point" }
             else if self.trackball { "  Trackball" } else { "" })
     }
     #[allow(clippy::too_many_arguments)]
     pub fn desired(&self, center: Pos2, pixels_per_unit: f32, frame: [[f32; 3]; 3], camera: CameraInfo,
         snap: bool, increment: f32, precision: bool) -> ([f32; 3], [f32; 3]) {
+        if self.base_stage != BaseStage::Off {
+            let pivot = self.base_point.unwrap_or(self.pivot);
+            let values = match self.kind {
+                Kind::Move => self.base_point.zip(self.base_target).map(|(a,b)|base_snap_offset(a,b)).unwrap_or(self.last),
+                Kind::Rotate => {
+                    let mut values=[0.;3];
+                    if let (Some(base),Some(source),Some(target))=(self.base_point,self.source_direction,self.target_direction) {
+                        let axis=match self.constraint { Constraint::Axis(a,_)=>a, _=>dominant_axis(camera.ray_forward) };
+                        if let Some(angle)=rotate_alignment_angle(base,source,target,frame[axis]) { values[axis]=angle; }
+                    }
+                    values
+                }
+                Kind::Scale => self.last,
+            };
+            return (values,pivot);
+        }
         let speed = if precision { 0.1 } else { 1. };
         let delta = (self.pointer - self.start) * speed;
         let step = match self.kind { Kind::Move => increment, Kind::Rotate => 5., Kind::Scale => 0.1 };
@@ -211,6 +240,22 @@ pub fn angle_between(start: Pos2, end: Pos2, pivot: Pos2) -> f32 {
     let a = start - pivot; let b = end - pivot;
     (a.x * b.y - a.y * b.x).atan2(a.dot(b)).to_degrees()
 }
+pub fn base_snap_offset(base: [f32;3], target: [f32;3]) -> [f32;3] {
+    [0,1,2].map(|i|target[i]-base[i])
+}
+/// Signed rotation of two directions about an axis. Returns None for a direction parallel to it.
+pub fn rotate_alignment_angle(base: [f32;3], source: [f32;3], target: [f32;3], axis: [f32;3]) -> Option<f32> {
+    let length=dot(axis,axis).sqrt(); if length<1e-6 { return None; }
+    let n=axis.map(|x|x/length);
+    let projected=|point: [f32;3]| {
+        let v=base_snap_offset(base,point); let along=dot(v,n);
+        [0,1,2].map(|i|v[i]-n[i]*along)
+    };
+    let a=projected(source); let b=projected(target);
+    if dot(a,a)<1e-12 || dot(b,b)<1e-12 { return None; }
+    let cross=[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+    Some(dot(n,cross).atan2(dot(a,b)).to_degrees())
+}
 pub fn cage_transform(bounds: ([f32; 3], [f32; 3]), handle: CageHandle, motion: Vec2, pixels_per_unit: f32,
     center: bool, camera: CameraInfo) -> ([f32; 3], [f32; 3]) {
     let (lo, hi) = bounds;
@@ -255,6 +300,23 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
 #[cfg(test)] mod tests {
     use super::*;
     use eframe::egui::pos2;
+    #[test] fn base_snap_geometry_and_rotation_direction() {
+        assert_eq!(base_snap_offset([2.,-1.,4.],[-3.,5.,1.]),[-5.,6.,-3.]);
+        let base=[1.,2.,3.];
+        let source=[3.,2.,3.];
+        let target=[1.,4.,3.];
+        assert!((rotate_alignment_angle(base,source,target,[0.,0.,1.]).unwrap()-90.).abs()<1e-5);
+        assert!((rotate_alignment_angle(base,target,source,[0.,0.,1.]).unwrap()+90.).abs()<1e-5);
+        assert_eq!(rotate_alignment_angle(base,[1.,2.,4.],target,[0.,0.,1.]),None);
+    }
+    #[test] fn b_enters_base_snap_only_during_modal_transform() {
+        assert_eq!(BaseStage::enter(false),BaseStage::Off);
+        for kind in [Kind::Move,Kind::Rotate,Kind::Scale] {
+            let mut modal=Modal::new(kind,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Vertex,false,1.);
+            modal.base_stage=BaseStage::enter(true);
+            assert_eq!(modal.base_stage,BaseStage::Base);
+        }
+    }
     #[test] fn typed_move_uses_display_units_but_angles_and_scale_do_not() {
         use crate::units::{UnitSettings,LengthUnit};
         let mut m=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
