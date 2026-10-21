@@ -58,6 +58,36 @@ def custom_attribute_object():
 
 
 class EdgeLinkTests(unittest.TestCase):
+    def test_intentional_other_source_is_not_duplicated_on_repeated_pumps(self):
+        embed = importlib.import_module(PKG + ".embed")
+        source = Path(test_rust_link.ROOT / "blender_addon/minihou_link/modifiers.py")
+        function = next(node for node in ast.parse(source.read_text(encoding="utf-8")).body
+                        if isinstance(node, ast.FunctionDef) and node.name == "_unique")
+        group = {"id": "original", embed.GRAPH: json.dumps({"nodes": {
+            "root": {"type": "blender_object", "params": {"object": "Owner"}}}, "display": "root"})}
+        owner = types.SimpleNamespace(name="Owner", as_pointer=lambda: 1)
+        other = types.SimpleNamespace(name="Other")
+        mod = types.SimpleNamespace(node_group=group, source=other, as_pointer=lambda: 2)
+        owners = {}
+        state = {"_owners": owners, "instance_id": lambda item: item.node_group["id"],
+                 "get_source": lambda item: item.source, "embed": embed}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), state)
+        for _ in range(2):
+            self.assertEqual(state["_unique"]([(owner, mod)]), {"original"})
+            self.assertIs(mod.node_group, group)
+            self.assertIs(mod.source, other)
+        self.assertEqual(group[embed.ASSET_OWNER], "Owner")
+
+        fake_modifiers = types.ModuleType(PKG + ".modifiers")
+        fake_modifiers.get_source = lambda item: item.source
+        owner.modifiers = [mod]
+        group["minihou_modifier_id"] = "original"
+        del group[embed.ASSET_OWNER]
+        with patch.object(embed, "bpy", types.SimpleNamespace(data=types.SimpleNamespace(objects=[owner]))), \
+                patch.dict(sys.modules, {PKG + ".modifiers": fake_modifiers}):
+            self.assertEqual(embed._asset_owner(group), "Owner")
+        self.assertEqual(group[embed.ASSET_OWNER], "Owner")
+
     def test_read_prefix_sends_drop_target_mesh(self):
         source = Path(test_rust_link.ROOT / "blender_addon/minihou_link/modifiers.py")
         function = next(node for node in ast.parse(source.read_text(encoding="utf-8")).body

@@ -572,10 +572,13 @@ def _unique(entries):
         owner = (obj.as_pointer(), mod.as_pointer())
         if not mod.node_group.get(embed.ASSET_OWNER) and _owners.get(ident) == owner:
             mod.node_group[embed.ASSET_OWNER] = obj.name
-        # A single pasted asset can arrive without its original object in this file.
-        # Its copied Source Object still identifies the old owner in that case.
-        pasted_asset = (mod.node_group.get(embed.ASSET_OWNER) != obj.name
-                        and get_source(mod) not in (None, obj))
+        # A different Source Object alone may be an intentional binding. Legacy
+        # pasted assets also have a primary graph root naming their old owner.
+        source = get_source(mod)
+        asset_owner = mod.node_group.get(embed.ASSET_OWNER)
+        pasted_asset = (source not in (None, obj) and
+                        ((asset_owner and asset_owner != obj.name) or
+                         embed.bind_target(embed.runtime_graph(mod.node_group), source.name)[1]))
         if ident in seen or pasted_asset:
             old_cache = _cache(mod)
             old_values = proxy.read_values(mod, mod.node_group, parameters(mod))

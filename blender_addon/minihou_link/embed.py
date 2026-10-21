@@ -262,8 +262,15 @@ def bind_target(graph, owner):
             node["params"]["object"] = "@target"
             changed.append(f"nodes.{nid}.params.object: {owner!r} -> '@target'")
         inputs = node.get("inputs") or {}
-        nid = next((inputs[key] for key in ("geo", "geometry", "input")
-                    if isinstance(inputs.get(key), str)), None)
+        def endpoint(value):
+            if isinstance(value, list):
+                value = value[0] if value else None
+            if isinstance(value, dict):
+                value = value.get("node")
+            return value if isinstance(value, str) else None
+
+        nid = next((source for key in ("geo", "geometry", "input", "geos", "in0", "a", "source")
+                    if (source := endpoint(inputs.get(key))) is not None), None)
     return out, changed
 
 
@@ -282,13 +289,13 @@ def _asset_owner(ng):
             return owner
     if len(users) == 1:
         owner = users[0].name
-        # A legacy asset may arrive without its original owner object. Its copied
-        # Source Object socket still names that owner until the instance is split.
+        # A legacy asset may arrive without its original owner object. Only use
+        # the Source Object as owner when the graph's primary root names it.
         try:
             from . import modifiers
             mod = next(mod for mod in users[0].modifiers if mod.node_group == ng)
             source = modifiers.get_source(mod)
-            if source is not None and source.name != owner:
+            if source is not None and source.name != owner and bind_target(runtime_graph(ng), source.name)[1]:
                 owner = source.name
         except (ImportError, AttributeError, KeyError, StopIteration):
             pass
