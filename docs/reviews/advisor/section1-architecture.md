@@ -1,0 +1,15 @@
+Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-core/src/nodes/mod.rs#L334-L344), [`network_menu_data.rs`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/ui/network_menu_data.rs#L36-L41), and [`shelf_data.rs`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/ui/shelf_data.rs#L34-L39). However, ~110 nodes remain hardcoded in `LEGACY` ([`nodes/mod.rs`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-core/src/nodes/mod.rs#L198-L333)), and parameter UI ranges/docs rely on static [`param_meta.json`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/lib.rs#L62-L93).
+* **README housekeeping — Holds:** [`minihou-app/README.md`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/README.md#L97-L101) still claims no spatial node canvas, node creation/deletion, or picking.
+
+**(2) Real risk and magnitude**
+* **Medium risk:** Calling cold, uncached `Graph::cook` on the UI thread in [`deform_gizmo.rs`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/ui/deform_gizmo.rs#L312) and [`sketch.rs`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/ui/sketch.rs#L217) bypasses `Session` caches and freezes the UI if the upstream subgraph contains heavy nodes (e.g., SDF/boolean/subdivide).
+
+**(3) Smallest safe fix**
+* Reuse cached/preview geometry from [`CookState`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/cook_worker.rs#L211-L220) (`v.cooking.preview` / `v.cooking.geometry`) instead of calling `Graph::cook` on the UI thread in [`deform_gizmo.rs`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/ui/deform_gizmo.rs#L312) and [`sketch.rs`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-app/src/ui/sketch.rs#L217), and add a package contract test iterating over `packages::SPECS`.
+
+**(4) Test that would prove it**
+* A unit test in `minihou-core` asserting every entry in [`package_catalogue()`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-core/src/nodes/mod.rs#L194) resolves default [`Params::resolve`](file:///C:/Users/Grayw/Documents/Minihou_Rust/.claude/worktrees/native-ui-cont/rust/crates/minihou-core/src/params.rs) and has matching `param_meta`, plus a UI test verifying `Shortcut::Fit` and sketch target selection read `v.cooking` without invoking `Graph::cook`.
+
+**(5) What could not be verified**
+* Actual frame-time stalls during interactive GPU uploads and mesh-cut previews on dense meshes without running an interactive desktop/GPU profiling session.
+
