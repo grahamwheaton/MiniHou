@@ -31,7 +31,7 @@ pub(super) fn toggle_popover(open: Option<Popover>, next: Popover) -> Option<Pop
 pub(super) const OVERLAYS: [(&str, &str); 6] = [("Grid floor", ""), ("Axis gizmo", ""), ("Edges in solid", ""), ("Stats", ""), ("Normals", ""), ("Bounding box", "")];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub(super) enum Icon { Display(Mode), Visibility(ObjectVisibility), Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays, Xray, Solid, Shaded, Wire, ShadedWire, Frame,
+pub(super) enum Icon { Display(Mode), Visibility(ObjectVisibility), Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays, Xray, Solid, Shaded, Wire, Frame,
     Select, BoxSelect, CircleSelect, LassoSelect, Cursor, Move, Rotate, Scale, ScaleCage, Transform, Measure, Line, Polyline, Polygon, Rectangle, Circle, Knife, LoopCut, ToStart, Prev, Play, Pause, Next, ToEnd }
 
 /// Where every header control sits, from the viewport's left/top/width. Pure so it can be tested at any width.
@@ -128,7 +128,7 @@ pub(super) fn icon(p: &egui::Painter, ic: Icon, r: Rect, col: Color32, tick: boo
                 let alpha=if matches!(mode,Mode::WireframeGhost | Mode::HiddenLineGhost) { 0.2 } else { [0.85,0.4,0.6][i] };
                 p.add(egui::Shape::convex_polygon(face,if filled { tint.gamma_multiply(alpha) } else { Color32::TRANSPARENT },Stroke::new(0.9*s,tint)));
             }
-            if mode.wire_shaded() || mode==Mode::Wireframe { line(&[(2.,4.),(13.,11.5)]); }
+            if mode==Mode::Wireframe { line(&[(2.,4.),(13.,11.5)]); }
             if mode==Mode::HiddenLineGhost { line(&[(3.,11.5),(8.,9.),(13.,11.5)]); }
         }
         Icon::Visibility(visibility) => {
@@ -157,7 +157,6 @@ pub(super) fn icon(p: &egui::Painter, ic: Icon, r: Rect, col: Color32, tick: boo
         Icon::Solid => { p.circle_filled(at(8., 8.), 5.5 * s, col); }
         Icon::Shaded => { circle(8., 8., 5.5); fill_poly(&[(8., 2.5), (10.5, 3.2), (12.2, 5.), (13.5, 8.), (12.2, 11.), (10.5, 12.8), (8., 13.5)]); }
         Icon::Wire => { circle(8., 8., 5.5); line(&[(2.5, 8.), (5., 9.7), (8., 10.2), (11., 9.7), (13.5, 8.)]); line(&[(2.5, 8.), (5., 6.3), (8., 5.8), (11., 6.3), (13.5, 8.)]); line(&[(8., 2.5), (8., 13.5)]); }
-        Icon::ShadedWire => { p.circle_filled(at(8., 8.), 5.5 * s, col.gamma_multiply(0.45)); circle(8., 8., 5.5); line(&[(2.5, 8.), (8., 10.2), (13.5, 8.)]); line(&[(2.5, 8.), (8., 5.8), (13.5, 8.)]); line(&[(8., 2.5), (8., 13.5)]); }
         Icon::Frame => { line(&[(1.5, 4.5), (1.5, 1.5), (4.5, 1.5)]); line(&[(11.5, 1.5), (14.5, 1.5), (14.5, 4.5)]); line(&[(14.5, 11.5), (14.5, 14.5), (11.5, 14.5)]); line(&[(4.5, 14.5), (1.5, 14.5), (1.5, 11.5)]); poly(&[(5.5, 5.5), (10.5, 5.5), (10.5, 10.5), (5.5, 10.5)]); }
         Icon::BoxSelect => { poly(&[(2., 2.), (14., 2.), (14., 14.), (2., 14.)]); }
         Icon::CircleSelect => { circle(8., 8., 6.); dot(8., 8., 1.); }
@@ -212,7 +211,6 @@ pub(super) fn show_shading_pie(ctx:&egui::Context, viewport:Rect,v:&View,out:&mu
             (Mode::Wireframe,Vec2::new(-140.,0.),egui::Key::Num4),
             (Mode::FlatShaded,Vec2::new(140.,0.),egui::Key::Num6),
             (Mode::SmoothShaded,Vec2::new(0.,-76.),egui::Key::Num8),
-            (Mode::SmoothWireShaded,Vec2::new(0.,76.),egui::Key::Num2),
         ].into_iter().enumerate() {
             let row=Rect::from_center_size(c+offset,Vec2::new(158.,30.));
             ui.painter().rect_filled(row,4.,v.theme.panel);

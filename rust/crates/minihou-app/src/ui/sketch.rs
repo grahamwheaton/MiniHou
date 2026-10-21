@@ -117,6 +117,10 @@ fn measurement_endpoint(row: &Value, slot: usize, doc: &Value, display: &str, po
 fn selected_id() -> egui::Id { egui::Id::new("sketch_selected_measurement") }
 pub fn selected_measurement(ctx:&egui::Context) -> Option<usize> { ctx.data(|d|d.get_temp(selected_id())) }
 pub fn clear_measurement_selection(ctx:&egui::Context) {ctx.data_mut(|d|d.remove::<usize>(selected_id()));}
+fn format_measurement_distance(distance: f64, units: crate::units::UnitSettings) -> String {
+    let millimetres = (distance * units.unit_scale * 1000.).round();
+    crate::units::format_display(millimetres * 0.001 / units.display.metres(), units.display)
+}
 fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bool {
     let Some(rows) = v.doc.get("measurements").and_then(|x| x.as_array()) else { return false; };
     if let Some(index) = selected_measurement(ui.ctx()) {
@@ -149,7 +153,7 @@ fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bo
         let color=if stale_a||stale_b {v.theme.dim} else {v.theme.tpl};
         p.line_segment([pa, pb], Stroke::new(1.5_f32, color));
         let label=pa.lerp(pb,0.5)+vec2(8.,-8.);
-        p.text(label, Align2::LEFT_BOTTOM, format!("{}{}",crate::units::format(length(sub(b, a)) as f64, v.units),if stale_a||stale_b {" [detached]"} else {""}), FontId::monospace(12.), color);
+        p.text(label, Align2::LEFT_BOTTOM, format!("{}{}",format_measurement_distance(length(sub(b, a)) as f64, v.units),if stale_a||stale_b {" [detached]"} else {""}), FontId::monospace(12.), color);
         let target=Rect::from_min_size(label+vec2(-4.,-20.),vec2(160.,24.));
         let response=ui.interact(target,egui::Id::new(("measurement",index)),egui::Sense::click());
         if response.clicked() {ui.ctx().data_mut(|d|d.insert_temp(selected_id(),index));consumed=true;}
@@ -311,7 +315,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     if let Some(res) = &s.result { paint_primitives(&p, &res.primitives, |q| transform_gizmo::project(v.camera, rect, q), v.theme.panel); }
     if mode == SketchMode::Tape && screen.len() == 2 {
         if let (Some(&a), Some(h)) = (s.points.first(), s.hover) {
-            p.text(screen[0].lerp(screen[1], 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, crate::units::format(length(sub(h, a)) as f64, v.units), FontId::monospace(12.), v.theme.warn);
+            p.text(screen[0].lerp(screen[1], 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, format_measurement_distance(length(sub(h, a)) as f64, v.units), FontId::monospace(12.), v.theme.warn);
         }
     }
     let chip = Rect::from_min_size(pos2(rect.left() + 56., rect.top() + 48.), vec2(265., 28.));

@@ -320,7 +320,10 @@ mod tests {
     fn shading_and_visibility_dropdowns_are_adjacent() {
         let h = header_layout(0., 0., 800., false);
         assert!(h.shading.right() < h.visibility.left());
-        assert_eq!(Mode::ALL.len(),12);
+        assert_eq!(Mode::ALL.map(Mode::label), [
+            "Wireframe Bounding Box", "Wireframe", "Wireframe Ghost", "Hidden Line Invisible",
+            "Hidden Line Ghost", "MatCap Shaded", "Flat Shaded", "Smooth Shaded",
+        ]);
     }
 
     #[test]

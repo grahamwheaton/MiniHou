@@ -312,6 +312,15 @@
         extract_texts(&full.shapes, &mut texts);
         assert!(texts.iter().any(|t| t.contains("1000 mm")), "expected 1000 mm in {texts:?}");
     }
+    #[test] fn measurement_readout_rounds_to_nearest_millimetre() {
+        use crate::units::{LengthUnit, UnitSettings};
+        let mm = UnitSettings::default();
+        assert_eq!(format_measurement_distance(0.001499, mm), "1 mm");
+        assert_eq!(format_measurement_distance(0.001501, mm), "2 mm");
+        assert_eq!(format_measurement_distance(0.0004, mm), "0 mm");
+        assert_eq!(format_measurement_distance(0.1499, UnitSettings::new(LengthUnit::Mm, 0.01)), "1 mm");
+        assert_eq!(format_measurement_distance(1.2346, UnitSettings::new(LengthUnit::M, 1.)), "1.235 m");
+    }
     #[test] fn measurement_anchor_tracks_point_and_detaches_on_topology_change() {
         let doc=json!({"nodes":{"box1":{"measurement_identity":"stable"}}});
         let row=json!({"points":[[1.,2.,3.],[0.,0.,0.]],"refs":[{"node":"box1","identity":"stable","point":1,"point_count":2},null]});
