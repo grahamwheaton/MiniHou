@@ -187,7 +187,7 @@ mod packages {
     }
 }
 
-pub(crate) fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {
+pub fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {
     packages::subnet_public_params(node)
 }
 
