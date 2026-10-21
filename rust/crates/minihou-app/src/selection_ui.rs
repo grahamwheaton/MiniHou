@@ -84,7 +84,8 @@ impl App {
         // while a field is being picked the displayed pick source is the active object (the selected node is not displayed)
         if let Some(pick) = &self.param_pick { return active_range(&pick.source, &self.display_ranges).map(|_| pick.source.as_str()); }
         if self.object_hidden || !self.selected_set.contains(&self.selected) { return None; }
-        resolve_displayed_node(self.editor.doc.value(), &self.selected, &self.display_ranges[..self.output_range_count])
+        resolve_active_displayed_node(self.editor.doc.value(), &self.selected, &self.display_ranges,
+            self.output_range_count, self.selected_preview)
     }
     pub(crate) fn active_selection(&self) -> Option<picking::Selection> {
         Some(selection_in_range(&self.selection,self.scene.as_ref()?,active_range(self.active_object()?,&self.display_ranges)?))

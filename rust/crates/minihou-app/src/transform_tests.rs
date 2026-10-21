@@ -525,3 +525,41 @@ fn output_node_selection_resolves_to_displayed_output() {
     assert_eq!(resolve_displayed_node(&multi, "orphan", &multi_ranges), None);
 }
 
+#[test]
+fn outputless_transform_end_resolves_preview_and_moves_selected_points() {
+    let value = json!({"display":"box", "nodes": {
+        "box":{"type":"box"},
+        "transform":{"type":"transform","inputs":{"geo":"box"}}
+    }});
+    let doc = Document::parse(value.to_string()).unwrap();
+    let mut session = doc.session().unwrap();
+    let box_geo = session.cook(Some("box")).unwrap();
+    let transform_geo = session.cook(Some("transform")).unwrap();
+    let mut scene = Scene::new(&box_geo);
+    let mut ranges = vec![("box".to_owned(), 0..box_geo.npoints as u32)];
+    assert!(include_selected_preview(&mut scene, &mut ranges, "transform", Some(&transform_geo)));
+    let active = resolve_active_displayed_node(doc.value(), "transform", &ranges, 1, true);
+    assert_eq!(active, Some("transform"));
+    assert_eq!(resolve_active_displayed_node(doc.value(), "transform", &ranges, 1, false), None);
+    let range = active_range(active.unwrap(), &ranges).unwrap();
+    let selection = picking::Selection { mode: ui::SelectionMode::Points,
+        points: vec![range.start, range.start + 1], ..Default::default() };
+    let selected = selection_in_range(&selection, &scene, range);
+    let local_points: Vec<_> = selected_point_ids(&selected, ui::SelectionMode::Points, scene.triangle_indices())
+        .into_iter().map(|id| id - range.start).collect();
+    assert_eq!(local_points, vec![0, 1]);
+
+    let mut moved = value.clone();
+    let target = ensure_transform_target(&mut moved, active.unwrap(), false, None).unwrap();
+    moved["nodes"][&target]["params"] = json!({"group":group_text(&local_points), "translate":[2., 0., 0.]});
+    let moved_doc = Document::parse(moved.to_string()).unwrap();
+    let result = moved_doc.session().unwrap().cook(Some(&target)).unwrap();
+    for id in 0..transform_geo.npoints {
+        let before = &transform_geo.p()[id * 3..id * 3 + 3];
+        let after = &result.p()[id * 3..id * 3 + 3];
+        let shift = if local_points.contains(&(id as u32)) { 2. } else { 0. };
+        assert!((after[0] - before[0] - shift).abs() < 1e-4, "point {id}");
+        assert_eq!(&after[1..], &before[1..], "point {id}");
+    }
+}
+
