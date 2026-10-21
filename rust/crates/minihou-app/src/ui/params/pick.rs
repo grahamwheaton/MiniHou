@@ -4,6 +4,7 @@ use minihou_app::param_meta;
 use serde_json::{json, Value};
 use crate::ui::SelectionMode;
 use super::output_groups::{explicit_pick, is_output_group_field, is_string_meta};
+use super::group_fuzzy;
 
 pub const PICK_PURPLE: Color32 = Color32::from_rgb(184, 82, 245);
 /// Orange used for object selection and the barrier group.
@@ -85,6 +86,10 @@ pub fn input_groups(g: &minihou_core::Geometry, mode: SelectionMode) -> Vec<Stri
     names.into_iter().collect()
 }
 
+fn filtered_group_names<'a>(names: &'a [String], search: &str) -> Vec<&'a str> {
+    group_fuzzy::ranked_matches(names.iter().map(String::as_str), search)
+}
+
 pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, enabled: bool,
     groups: impl FnOnce() -> Vec<String>) -> (bool, bool) {
     let mut text = value.as_str().unwrap_or_default().to_owned();
@@ -92,11 +97,22 @@ pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool
         .hint_text("Group name or wildcard"));
     if edit.changed() { *value = json!(text); }
     ui.add_enabled_ui(enabled, |ui| {
-        ui.menu_button("▾", |ui| {
+        ui.menu_button("▼", |ui| {
+            ui.set_min_width(180.);
+            let search_id = ui.id().with("group_dropdown_search");
+            let mut search = ui.ctx().data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
+            ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search groups"));
+            ui.ctx().data_mut(|d| d.insert_temp(search_id, search.clone()));
             let names = groups();
             if names.is_empty() { ui.label("No groups on input"); }
-            for name in names {
-                if ui.button(&name).clicked() { *value = json!(name); ui.close(); }
+            else {
+                let matches = filtered_group_names(&names, &search);
+                if matches.is_empty() { ui.label("No matching groups"); }
+                egui::ScrollArea::vertical().max_height(240.).show(ui, |ui| {
+                    for name in matches {
+                        if ui.button(name).clicked() { *value = json!(name); ui.close(); }
+                    }
+                });
             }
         }).response.on_hover_text("Groups detected on the input");
     });
@@ -217,5 +233,16 @@ mod tests {
         assert_eq!(input_groups(&g, SelectionMode::Points), ["points"]);
         assert_eq!(input_groups(&g, SelectionMode::Edges), ["edges"]);
         assert_eq!(input_groups(&g, SelectionMode::Faces), ["faces"]);
+        let point_names = input_groups(&g, SelectionMode::Points);
+        assert_eq!(filtered_group_names(&point_names, "PTS"), ["points"]);
+        assert!(filtered_group_names(&point_names, "faces").is_empty());
+    }
+
+    #[test]
+    fn dropdown_filters_and_ranks_detected_names() {
+        let names = vec!["scatter".into(), "FaceCenter".into(), "face".into(), "other".into()];
+        assert_eq!(filtered_group_names(&names, "fce"), ["face", "FaceCenter"]);
+        assert!(filtered_group_names(&names, "missing").is_empty());
+        assert_eq!(filtered_group_names(&names, "").len(), names.len());
     }
 }
