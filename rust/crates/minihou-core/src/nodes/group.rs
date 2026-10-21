@@ -198,7 +198,20 @@ fn split(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 points[edges.points[index * 2 + 1] as usize] = true;
             }
         }
-        return super::modify::keep_points(&g, &points);
+        let retained: Vec<_> = points.iter().enumerate().filter_map(|(i, &keep)| keep.then_some(i)).collect();
+        let mut remap = vec![-1i32; g.npoints];
+        for (new, &old) in retained.iter().enumerate() { remap[old] = new as i32; }
+        let chosen: Vec<_> = selected.iter().enumerate().filter_map(|(i, &keep)| keep.then_some(i)).collect();
+        let vp: Vec<_> = chosen.iter().flat_map(|&i| [
+            remap[edges.points[i * 2] as usize], remap[edges.points[i * 2 + 1] as usize]
+        ]).collect();
+        let offsets = (0..=chosen.len()).map(|i| (i * 2) as i32).collect();
+        let positions = retained.iter().flat_map(|&i| g.p()[i * 3..i * 3 + 3].iter().copied()).collect();
+        let mut out = Geometry::from_arrays(positions, vp, offsets, Some(vec![false; chosen.len()]))?;
+        out.point = gather_table(&g.point, &retained);
+        out.edge = gather_table(&g.edge, &chosen);
+        out.detail = g.detail.clone();
+        return Ok(out);
     }
     let domain = if domain == "points" { "point" } else { "prim" };
     let selected = mask(&g, domain, &pattern)?;
@@ -233,6 +246,16 @@ mod tests {
         let selected = split(&[vec![g]], &p).unwrap();
         assert_eq!(selected.nprims(), 1);
         assert_eq!(selected.npoints, 3);
+        selected.validate().unwrap();
+    }
+    #[test]
+    fn split_selected_edge_keeps_a_line() {
+        let g = Arc::new(Geometry::from_arrays(vec![0.; 9], vec![0,1,2], vec![0,3], None).unwrap());
+        let p = Params::resolve(SPLIT.params, serde_json::json!({"group":"0-1", "domain":"edges"}).as_object()).unwrap();
+        let selected = split(&[vec![g]], &p).unwrap();
+        assert_eq!(selected.npoints, 2);
+        assert_eq!(selected.nprims(), 1);
+        assert!(!selected.topology.is_closed(0));
         selected.validate().unwrap();
     }
     #[test]
