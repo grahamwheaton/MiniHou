@@ -11,9 +11,9 @@ fn activates(press: Pos2, pointer: Pos2, movement: bool) -> bool {
 fn movement_key(key: Key) -> bool {
     matches!(key, Key::W | Key::A | Key::S | Key::D | Key::E | Key::Q | Key::Space)
 }
-/// Confirmation preserves selection unless the click hits a different object.
-pub fn selects_object(confirming: bool, hit: bool, already_selected: bool) -> bool {
-    !confirming || (hit && !already_selected)
+/// A click that completed a modal operation belongs to that operation through release.
+pub fn selection_click_available(confirming: bool) -> bool {
+    !confirming
 }
 pub fn fly(ctx: &egui::Context, rect: Rect, camera: &mut Camera, enabled: bool) -> bool {
     let id = egui::Id::new("viewport_fly");
@@ -59,12 +59,9 @@ pub fn fly(ctx: &egui::Context, rect: Rect, camera: &mut Camera, enabled: bool) 
 
 #[cfg(test)] mod tests {
     use super::*;
-    #[test] fn modal_confirmation_selects_only_a_different_object() {
-        assert!(!selects_object(true, false, false));
-        assert!(!selects_object(true, true, true));
-        assert!(selects_object(true, true, false));
-        assert!(selects_object(false, false, false)); // Ordinary empty clicks still deselect.
-        assert!(selects_object(false, true, true));
+    #[test] fn modal_confirmation_consumes_the_selection_click() {
+        assert!(!selection_click_available(true));
+        assert!(selection_click_available(false));
     }
     #[test] fn rmb_click_waits_for_drag_or_movement() {
         let start = egui::pos2(10., 10.);

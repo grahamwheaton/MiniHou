@@ -46,7 +46,7 @@ impl eframe::App for App {
                 self.apply(ctx, selection_actions);
             }
         }
-        // Process confirmation before constructing View so the same click can reach selection.
+        // Process confirmation before constructing View; its click stays owned by the modal through release.
         let mut started_pushpull=false;
         if self.pushpull_pick {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.pointer.secondary_pressed()) {
@@ -435,8 +435,9 @@ impl eframe::App for App {
                 }
                 // the release of the click that confirmed a loop cut must not re-select under the cursor
                 let swallow_click=ctx.data(|d|d.get_temp::<bool>(egui::Id::new("mesh_cut_swallow_click"))).unwrap_or(false);
+                let confirming_modal=ctx.data(|d|d.get_temp::<bool>(egui::Id::new("modal_confirm_click"))).unwrap_or(false);
                 if swallow_click && !ctx.input(|i|i.pointer.primary_down()) { ctx.data_mut(|d|d.remove::<bool>(egui::Id::new("mesh_cut_swallow_click"))); }
-                if !swallow_click && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect,&v,p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
+                if !swallow_click && viewport_input::selection_click_available(confirming_modal) && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect,&v,p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
                     && self.param_pick.as_ref().is_none_or(|pick| pick.ready && pick_source_ready(&self.display, &self.display_ranges, &pick.source)) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
@@ -451,10 +452,7 @@ impl eframe::App for App {
                                 .map(|id| vec![id.to_owned()]).unwrap_or_default();
                             // Empty space clears the shared network/object selection, including with Shift.
                             let extend = extend && !ids.is_empty();
-                            let confirming = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("modal_confirm_click")).unwrap_or(false));
-                            if viewport_input::selects_object(confirming, !ids.is_empty(), ids.iter().all(|id| self.selected_set.contains(id))) {
-                                out.push(UiAction::SelectSet { ids, extend });
-                            }
+                            out.push(UiAction::SelectSet { ids, extend });
                         }
                         if mode == ui::SelectionMode::Object {
                             self.selection = picking::Selection { mode, ..Default::default() };
