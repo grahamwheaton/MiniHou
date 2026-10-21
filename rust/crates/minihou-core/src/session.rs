@@ -75,8 +75,6 @@ pub(super) struct FrameEntry {
     pub(super) used: u64,
 }
 
-const DEFAULT_FRAME_BUDGET: usize = 2 * 1024 * 1024 * 1024;
-
 pub struct Session {
     graph: Graph,
     external: nodes::blender_input::ExternalInputs,
@@ -109,7 +107,8 @@ pub const SUPERSEDED: &str = "cook superseded by a newer edit";
 
 impl Session {
     pub fn new(graph: Graph) -> Session {
-        Session { graph, external: Default::default(), external_versions: Default::default(), external_revision:0, cache: HashMap::new(), frames: HashMap::new(), frame_recipes: HashMap::new(), frame_bytes: 0, frame_budget: DEFAULT_FRAME_BUDGET, bytes: 0, budget: None, keep_versions: 2, clock: 0, last: CookStats::default(), time: (1.0, crate::timectx::DEFAULT_FPS), python: None, cancel: None }
+        let limits = crate::limits::Limits::default();
+        Session { graph, external: Default::default(), external_versions: Default::default(), external_revision:0, cache: HashMap::new(), frames: HashMap::new(), frame_recipes: HashMap::new(), frame_bytes: 0, frame_budget: limits.cache_frame_bytes as usize, bytes: 0, budget: None, keep_versions: limits.cache_frames_per_node, clock: 0, last: CookStats::default(), time: (1.0, crate::timectx::DEFAULT_FPS), python: None, cancel: None }
     }
 
     pub fn from_json(text: &str) -> Result<Session> {
@@ -306,7 +305,7 @@ impl Session {
     /// `None` or `Some(0)`: unlimited.
     pub fn set_budget_bytes(&mut self, budget: Option<usize>) {
         self.budget = budget.filter(|b| *b > 0);
-        self.frame_budget = self.budget.unwrap_or(DEFAULT_FRAME_BUDGET);
+        self.frame_budget = self.budget.unwrap_or(crate::limits::Limits::default().cache_frame_bytes as usize);
         self.evict();
         self.evict_frames();
     }
@@ -493,4 +492,19 @@ pub fn geometry_bytes(g: &Geometry) -> usize {
         }
     }
     b
+}
+
+#[cfg(test)]
+mod limit_default_tests {
+    use super::*;
+
+    #[test]
+    fn cache_defaults_and_frame_budget_reset_match_previous_values() {
+        let mut session = Session::new(Graph::from_json("{\"nodes\":{}}").unwrap());
+        assert_eq!(session.keep_versions, 2);
+        assert_eq!(session.frame_budget, 2 * 1024 * 1024 * 1024);
+        session.set_budget_bytes(Some(1024));
+        session.set_budget_bytes(None);
+        assert_eq!(session.frame_budget, 2 * 1024 * 1024 * 1024);
+    }
 }
