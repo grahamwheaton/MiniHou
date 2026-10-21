@@ -485,7 +485,8 @@
             let params = t.node_params(node, &face).unwrap();
             assert_eq!(params["domain"], "primitives");
             assert_eq!(params["seeds"].as_str().unwrap().split(' ').count(), 4);
-            assert_eq!(t.node_params(node, &points).unwrap()["domain"], "points");
+            let adjacent_points = Selection { points: vec![6, 7], ..sel(Points) };
+            assert_eq!(t.node_params(node, &adjacent_points).unwrap()["domain"], "points");
         }
         assert_eq!(t.node_params("blast", &points).unwrap(), serde_json::json!({"domain": "points", "group": "7 3 9"}));
         assert_eq!(t.node_params("blast", &edges).unwrap(), serde_json::json!({"domain": "edges", "group": "6-7 7-8"}));
