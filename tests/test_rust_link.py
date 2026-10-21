@@ -302,6 +302,31 @@ class RustLinkTests(unittest.TestCase):
         self.assertEqual(client.wait("interface", lambda h: not h["params"])[0]["structure"], empty["structure"])
         self.assertEqual(json.loads(host.graph_path.read_text()), PROXY)
 
+    def test_root_exposure_includes_subnet_input_but_not_inner_parameter(self):
+        graph = {"display": "sub", "exposed": [
+            {"name": "Root Size", "node": "box", "param": "size"},
+            {"name": "Subnet Offset", "node": "sub", "param": "move_translate"}],
+            "nodes": {
+                "box": {"type": "box"},
+                "sub": {"type": "subnet", "promoted_params": [
+                    {"name": "move_translate", "node": "move", "param": "translate", "default": [0, 0, 0]}],
+                    "inner": {"exposed": [{"name": "move_translate", "node": "move", "param": "translate"}],
+                              "nodes": {"point": {"type": "point"},
+                                        "move": {"type": "transform", "inputs": {"geo": "point"}}},
+                              "output": "move"}}}}
+        host = self.host(graph)
+        client = host.client()
+        interface = client.wait("interface")[0]
+        self.assertEqual([p["name"] for p in interface["params"]], ["Root Size", "Subnet Offset"])
+        self.assertEqual([p["node"] for p in interface["params"]], ["box", "sub"])
+        self.assertNotIn("move_translate", [p["name"] for p in interface["params"]])
+        client.geo()
+        self.assertTrue(client.link.set_param("Subnet Offset", [2, 3, 4]))
+        updated = client.wait("interface", lambda h: h["params"][1]["value"] == [2, 3, 4])[0]
+        self.assertEqual(updated["params"][1]["kind"], "vec3")
+        _, arrays = client.geo()
+        np.testing.assert_allclose(arrays["point/P"], [[2, 3, 4]])
+
     def test_per_subscriber_diffs_resync_and_inbox_conflation(self):
         host = self.host()
         a = host.client()
