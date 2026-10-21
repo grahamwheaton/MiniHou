@@ -492,10 +492,7 @@ impl eframe::App for App {
                             if !selecting_inner {
                                 // Empty space clears the shared network/object selection, including with Shift.
                                 let extend = extend && !ids.is_empty();
-                                let confirming = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("modal_confirm_click")).unwrap_or(false));
-                                if viewport_input::selects_object(confirming, !ids.is_empty(), ids.iter().all(|id| self.selected_set.contains(id))) {
-                                    out.push(UiAction::SelectSet { ids, extend });
-                                }
+                                out.push(UiAction::SelectSet { ids, extend });
                             }
                         }
                         if mode == ui::SelectionMode::Object {
