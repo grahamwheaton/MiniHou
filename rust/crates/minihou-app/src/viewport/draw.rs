@@ -278,7 +278,7 @@ impl Gpu {
                 }
             }
         }
-        let has_outline = if chunked && self.object_mask_points.is_some() {self.object_mask_n>0}
+        let has_outline = if chunked {self.object_mask_points.is_some() && self.object_mask_n>0}
             else {boxes.is_some_and(|b| b.tri.selected>0) || self.object_mask_n > 0 || (self.object_mask.is_none() && self.ntri_idx > 0)};
         if show_object_outline(selected_object, selection_mode) && has_outline {
             {
@@ -307,15 +307,17 @@ impl Gpu {
                 mask_pass.set_bind_group(0, &self.bind, &[]);
                 mask_pass.set_bind_group(1, &self.default_tex_bind, &[]);
                 mask_pass.set_pipeline(&self.pipe_mask);
-                mask_pass.set_vertex_buffer(0, vp.slice(..));
-                mask_pass.set_vertex_buffer(1, vn.slice(..));
-                mask_pass.set_vertex_buffer(2, vc.slice(..));
-                let mask_buffer=if boxes.is_some() { &tri.buffer } else { self.object_mask.as_ref().unwrap_or(&self.partition_tri.buffer) };
-                mask_pass.set_index_buffer(mask_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 let end = if boxes.is_some() { tri.selected } else if self.object_mask.is_some() { self.object_mask_n } else { self.ntri_idx };
                 if end > 0 {
                     if chunked {draw_chunks(&mut mask_pass,if self.mask_chunks.is_empty() {&self.face_chunks} else {&self.mask_chunks},use_cd,visibility,ChunkRange::All);}
-                    else {mask_pass.draw_indexed(0..end, 0, 0..1);}
+                    else {
+                        mask_pass.set_vertex_buffer(0, vp.slice(..));
+                        mask_pass.set_vertex_buffer(1, vn.slice(..));
+                        mask_pass.set_vertex_buffer(2, vc.slice(..));
+                        let mask_buffer=if boxes.is_some() { &tri.buffer } else { self.object_mask.as_ref().unwrap_or(&self.partition_tri.buffer) };
+                        mask_pass.set_index_buffer(mask_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        mask_pass.draw_indexed(0..end, 0, 0..1);
+                    }
                 }
             }
             {
