@@ -84,8 +84,15 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
 fn cook_multi(inputs: &Inputs, p: &Params) -> Result<NodeOutputs> {
     let g = NODE.one(inputs, 0)?;
-    let (selected, remainder) = pieces(&g, p)?;
-    let selected = if p.b("extract_elements")? { extract_elements(&g, p)? } else { selected };
+    let (selected, mut remainder) = pieces(&g, p)?;
+    let selected = if p.b("extract_elements")? {
+        let pattern = p.s("group")?;
+        let kind = p.e("group_type", &["primitives", "faces", "points", "edges"])?;
+        if !selection(&g, &pattern, &kind)?.iter().any(|&picked| picked) {
+            remainder = g.as_ref().clone();
+        }
+        extract_elements(&g, p)?
+    } else { selected };
     Ok(vec![selected, remainder].into())
 }
 
