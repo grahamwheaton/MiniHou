@@ -129,6 +129,8 @@ fn test_output_group_is_stored() {
     assert!(out_custom.edge.contains_key("group_border"), "out.edge should contain group_border");
     assert!(out_custom.edge.contains_key("edge_group_border"), "out.edge should contain edge_group_border");
     assert_eq!(edge_group_count(&out_custom, "border"), 4);
+    assert_eq!(crate::nodes::edge_tools::values(&out_custom, "group_border").unwrap(), vec![1.0; 4]);
+    assert_eq!(crate::nodes::group::flags(&out_custom.edge["group_border"]), vec![true; 4]);
 
     // Support output_group parameter alias
     let out_alias = run(&q, serde_json::json!({"output_group": "perimeter"})).unwrap();

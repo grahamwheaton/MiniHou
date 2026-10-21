@@ -116,44 +116,21 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     };
 
     let edge_attr = Arc::new(Attr::i32(1, edge_mask.iter().map(|&b| b as i32).collect()));
-    crate::nodes::edge_tools::write_values(
-        &mut out,
-        &format!("edge_group_{output_group_name}"),
-        &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
-        true,
-    )?;
-    crate::nodes::edge_tools::write_values(
-        &mut out,
-        &format!("group_{output_group_name}"),
-        &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
-        true,
-    )?;
-    out.edge.insert(
-        format!("group_{output_group_name}"),
-        edge_attr.clone(),
-    );
-    out.edge.insert(
-        format!("edge_group_{output_group_name}"),
-        edge_attr.clone(),
-    );
+    let vertex_values: Vec<f32> = edge_mask.iter().map(|&b| b as u8 as f32).collect();
+    store_group(&mut out, output_group_name, &edge_attr, &vertex_values)?;
     if output_group_name != "boundary" {
-        let _ = crate::nodes::edge_tools::write_values(
-            &mut out,
-            "edge_group_boundary",
-            &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
-            true,
-        );
-        let _ = crate::nodes::edge_tools::write_values(
-            &mut out,
-            "group_boundary",
-            &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
-            true,
-        );
-        out.edge.insert("group_boundary".into(), edge_attr.clone());
-        out.edge.insert("edge_group_boundary".into(), edge_attr);
+        store_group(&mut out, "boundary", &edge_attr, &vertex_values)?;
     }
 
     Ok(out)
+}
+
+fn store_group(out: &mut Geometry, name: &str, edge_attr: &Arc<Attr>, values: &[f32]) -> Result<()> {
+    for key in [format!("group_{name}"), format!("edge_group_{name}")] {
+        crate::nodes::edge_tools::write_values(out, &key, values, true)?;
+        out.edge.insert(key, edge_attr.clone());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
