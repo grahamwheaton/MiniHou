@@ -5,7 +5,13 @@ impl App {
         self.add_node_at(ctx, node_type, after, self.editor_state.cursor);
     }
     pub(crate) fn add_node_at(&mut self, ctx: &egui::Context, node_type: &str, after: Option<&str>, pos: [f32; 3]) {
-        let Some((mut value, id)) = graph_edit::add_at(self.editor.doc.value(), node_type, after, pos) else {
+        let merge_sources = (node_type == "merge" && self.selected_set.len() > 1)
+            .then(|| self.selected_set.iter().cloned().collect::<Vec<_>>());
+        let selected_merge = merge_sources.as_ref().and_then(|sources| after.map(|anchor| (sources, anchor)));
+        let Some((mut value, id)) = (match selected_merge {
+            Some((sources, anchor)) => graph_edit::add_selected_merge(self.editor.doc.value(), sources, anchor),
+            None => graph_edit::add_at(self.editor.doc.value(), node_type, after, pos),
+        }) else {
             self.file_status = format!("The Rust core has no {node_type} node yet");
             return;
         };
@@ -28,7 +34,11 @@ impl App {
             let Some(params) = params else { self.file_status = "Select points, edges or faces to blast".into(); return; };
             merge_params(&mut value, &id, params);
         } else if let Some(params) = params { merge_params(&mut value, &id, params); }
-        let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, after);
+        let before = if let Some((sources, _)) = selected_merge {
+            ui::network::position_add_merge(ctx, &self.editor.path, self.editor.doc.value(), &mut value, sources)
+        } else {
+            ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, after)
+        };
         self.finish_history();
         let original = self.editor.doc.clone();
         if let Some(before) = before { self.editor.doc = before; }
