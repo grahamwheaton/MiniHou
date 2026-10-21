@@ -116,10 +116,14 @@ pub fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool
             }
         }).response.on_hover_text("Groups detected on the input");
     });
-    let arrow = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
-        .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
-        .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)");
+    let arrow = pick_button(ui, active, enabled);
     (arrow.clicked(), arrow.hovered())
+}
+
+pub fn pick_button(ui: &mut egui::Ui, active: bool, enabled: bool) -> egui::Response {
+    ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
+        .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
+        .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)")
 }
 
 #[cfg(test)]

@@ -511,7 +511,20 @@ pub fn attribute_create_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions
                 ui.separator();
                 ui.horizontal(|ui|{ui.strong(format!("Attribute {}",i+1));if ui.button("Remove").clicked(){remove=Some(i);}});
                 let mut name=a["name"].as_str().unwrap_or("").to_owned();
-                ui.horizontal(|ui|{ui.label("Name");if ui.text_edit_singleline(&mut name).changed(){a["name"]=json!(name);}});
+                ui.horizontal(|ui|{
+                    ui.label("Name");
+                    if ui.text_edit_singleline(&mut name).changed(){a["name"]=json!(name);}
+                    // The attribute name stays a name; picking beside it fills the node's input group.
+                    if let Some(mode) = super::pick_domain_for("attribute_create", "group",
+                        param_meta("attribute_create", "group"), &json!({"attributes":[a.clone()]})) {
+                        let active = ui.ctx().data(|d| d.get_temp::<(String,String)>(egui::Id::new("param_pick_active")))
+                            .is_some_and(|(node,field)| node == id && field == "group");
+                        let arrow = super::pick::pick_button(ui, active, !locked);
+                        if arrow.clicked() {
+                            out.push(UiAction::PickParameter { node:id.to_owned(), name:"group".into(), mode, pairs:false });
+                        }
+                    }
+                });
                 for (key,label,options) in [("class","Class",&["points","vertices","primitives","detail"][..]),("type","Type",&["float","int","string","vector2","vector","color","vector4"][..])]{
                     let mut current=a[key].as_str().unwrap_or(options[0]).to_owned();
                     ui.horizontal(|ui|{ui.label(label);egui::ComboBox::from_id_salt(key).selected_text(&current).show_ui(ui,|ui|{for option in options{ui.selectable_value(&mut current,(*option).to_owned(),*option);}});});
@@ -539,6 +552,51 @@ pub fn attribute_create_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions
         if let Some(i)=remove{attrs.remove(i);}
     });
     if attrs!=before{redo_param(out,id,"attributes",json!(attrs),false);}
+}
+
+#[cfg(test)]
+mod attribute_create_pick_tests {
+    use super::*;
+    use crate::ui::testing::Fixture;
+    use eframe::egui::{Pos2, Rect, Vec2};
+
+    #[test]
+    fn name_row_arrow_picks_group_without_replacing_attribute_name() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"display":"attr1","nodes":{
+            "box1":{"type":"box"},"attr1":{"type":"attribute_create","inputs":{"geo":"box1"},
+                "params":{"attributes":[{"name":"my_attr","class":"primitives","type":"float","size":1,
+                    "default":[0,0,0,0],"value":[0,0,0,0]}]}}
+        }}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "attr1".into(); f.display = "attr1".into();
+        let ctx = egui::Context::default(); f.theme.apply(&ctx);
+        let mut click = None;
+        let mut actions = Actions::default();
+        for phase in 0..3 {
+            let events = match (phase, click) {
+                (1, Some(pos)) => vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton {
+                    pos, button:egui::PointerButton::Primary, pressed:true, modifiers:egui::Modifiers::NONE }],
+                (2, Some(pos)) => vec![egui::Event::PointerButton {
+                    pos, button:egui::PointerButton::Primary, pressed:false, modifiers:egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,600.))), events, ..Default::default() };
+            let output = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| {
+                attribute_create_panel(ui, &f.view(), &mut actions, "attr1", false);
+            }); });
+            if phase == 0 {
+                for shape in output.shapes { if let egui::Shape::Text(t) = shape.shape {
+                    if t.galley.text() == "↖" { click = Some(t.pos + t.galley.size() * 0.5); }
+                }}
+            }
+        }
+        assert!(click.is_some(), "purple arrow must be drawn beside Name");
+        assert!(actions.0.iter().any(|a| matches!(a, UiAction::PickParameter {node,name,mode,..}
+            if node == "attr1" && name == "group" && *mode == crate::ui::SelectionMode::Faces)));
+        assert!(!actions.0.iter().any(|a| matches!(a, UiAction::Edit { edit:Edit::Param {name,..},.. }
+            if name == "attributes")));
+    }
 }
 
 /// The most common Loop Cut adjustments stay visible above the full node parameters.
