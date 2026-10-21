@@ -21,6 +21,15 @@
         assert!(scope_doc(&doc,&state.subnet_path).is_none());
     }
     #[test]
+    fn entering_fresh_subnet_shows_connected_input_and_output() {
+        let mut doc = json!({"version": 1, "display": "sub", "nodes": {"sub": {"type": "subnet"}}});
+        crate::subnet_edit::initialize(&mut doc, "sub");
+        let inner = scope_doc(&doc, &["sub".into()]).unwrap();
+        assert_eq!(inner["nodes"]["input1"]["type"], "subnet_input");
+        assert_eq!(inner["nodes"]["output1"]["type"], "subnet_output");
+        assert_eq!(inner["nodes"]["output1"]["inputs"]["geo"], "input1");
+    }
+    #[test]
     fn network_inner_parameter_edit_preserves_root_nodes() {
         let doc=json!({"nodes":{"other":{"type":"box"},"group":{"type":"subnet","inner":{"nodes":{"inner":{"type":"box","params":{"size":[1,1,1]}}},"output":"inner"}}}});
         let action=UiAction::Edit {edit:Edit::Param {node:"inner".into(),name:"size".into(),value:json!([2,2,2])},continuous:false};
