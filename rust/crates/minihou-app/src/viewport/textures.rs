@@ -45,6 +45,20 @@ fn mip_chain(asset:&materials::ImageAsset,srgb:bool)->Vec<(u32,u32,Vec<u8>)> {
     levels
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn mip_levels_keep_alpha() {
+        let asset=materials::ImageAsset {width:2,height:2,rgba:vec![255,0,0,0, 0,255,0,64, 0,0,255,128, 255,255,255,255],hash:"test".into()};
+        for srgb in [false,true] {
+            let levels=mip_chain(&asset,srgb);
+            assert_eq!(levels[0].2,asset.rgba);
+            assert_eq!(levels[1].2[3],112);
+        }
+    }
+}
+
 impl Gpu {
     pub fn upload_textures(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,sc:&Scene,registry:&mut Registry) {
         self.tex_batches.clear(); self.texture_status.clear();
