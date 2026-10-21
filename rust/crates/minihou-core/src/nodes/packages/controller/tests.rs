@@ -31,3 +31,16 @@ fn controller_rejects_invalid_sections_and_values() {
     let value=json!({"nodes":{"driver":{"type":"controller","controller_sections":[{"name":"Shape","parameters":[{"name":"width","kind":"float","default":1.0}]}],"params":{"width":"bad"}}}});
     assert!(Graph::from_value(&value).is_err());
 }
+
+#[test]
+fn empty_added_section_and_existing_parameter_value_survive_roundtrip() {
+    let value = json!({"nodes":{"controller1":{"type":"controller",
+        "controller_sections":[
+            {"name":"Shape","parameters":[{"name":"width","kind":"float","default":1.0}]},
+            {"name":"Section 2","parameters":[]}],
+        "params":{"width":2.0}}},"display":"controller1"});
+    let saved = Graph::from_value(&value).unwrap().to_value();
+    assert_eq!(saved["nodes"]["controller1"]["controller_sections"], value["nodes"]["controller1"]["controller_sections"]);
+    assert_eq!(saved["nodes"]["controller1"]["params"], value["nodes"]["controller1"]["params"]);
+    assert_eq!(Graph::from_json(&saved.to_string()).unwrap().to_value(), saved);
+}
