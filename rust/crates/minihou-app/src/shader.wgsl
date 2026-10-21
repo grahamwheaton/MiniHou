@@ -291,7 +291,8 @@ fn grid_line(value:f32, spacing:f32) -> f32 {
     let units=value/spacing;
     let edge=abs(fract(units+0.5)-0.5);
     let width=max(fwidth(units),0.0001);
-    return 1.-smoothstep(0.,width*1.2,edge);
+    // Subpixel cells cannot form stable lines. Fade them before they alias.
+    return (1.-smoothstep(0.,width*1.2,edge))*(1.-smoothstep(0.25,0.5,width));
 }
 @fragment
 fn fs_infinite_floor(@builtin(position) pixel:vec4<f32>) -> FloorPixel {
@@ -310,11 +311,15 @@ fn fs_infinite_floor(@builtin(position) pixel:vec4<f32>) -> FloorPixel {
     let major=spacing*10.;
     let minor_line=max(grid_line(world.x,spacing),grid_line(world.y,spacing));
     let major_line=max(grid_line(world.x,major),grid_line(world.y,major));
+    // The next decade's minor grid is this decade's major grid. Crossfade
+    // their weights so zooming through a spacing change never pops the lines.
+    let decade=clamp(log2(max(u.floor.w*0.1/spacing,1.))/log2(10.),0.,1.);
+    let transition=smoothstep(0.2,0.85,decade);
     let x_axis=1.-smoothstep(0.,max(fwidth(world.y),spacing*0.025),abs(world.y));
     let y_axis=1.-smoothstep(0.,max(fwidth(world.x),spacing*0.025),abs(world.x));
     let dist=length((u.view*vec4(world,1.)).xyz);
     let fade=exp(-pow(dist/max(u.floor.w*5.,major*5.),2.));
-    let grid_alpha=select(0.,(minor_line*0.10+major_line*0.18)*fade,u.floor.y>0.);
+    let grid_alpha=select(0.,(minor_line*(1.-transition)+major_line*transition)*0.18*fade,u.floor.y>0.);
     let axes_alpha=select(0.,max(x_axis,y_axis)*0.75*fade,u.floor.z>0.);
     if (grid_alpha+axes_alpha<0.002) { discard; }
     let axis_color=select(vec3(0.7,0.16,0.12),vec3(0.22,0.65,0.18),y_axis>x_axis);

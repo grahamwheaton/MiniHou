@@ -2,6 +2,24 @@ use super::*;
 use super::display_render_tests::{adapter,render,changed};
 
 #[test]
+fn grid_spacing_transition_is_continuous_at_far_zoom() {
+    let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping grid render test"); return; };
+    let scene=Scene::new(&Geometry::points_only(Vec::new()).unwrap());
+    let gpu=Gpu::new(&device,&scene);
+    let overlay=Overlay {axes:false,geometry:crate::ui::Overlays {points:false,lines:false,faces:false,..Default::default()},..Default::default()};
+    let image_at=|distance| {
+        let mut camera=Camera::frame([0.;3],1.);
+        camera.set_dist(distance);
+        camera.set_clip_planes(0.01,10000.);
+        super::display_render_tests::render_selection_from_camera(&device,&queue,&gpu,&camera,Mode::SmoothShaded,overlay,false,crate::ui::SelectionMode::Object)
+    };
+    let before=image_at(99.99);
+    let after=image_at(100.01);
+    let change:usize=before.iter().zip(&after).map(|(a,b)|a.iter().zip(b).map(|(x,y)|x.abs_diff(*y) as usize).sum::<usize>()).sum();
+    assert!(change<3000,"grid popped at decade boundary: total channel change {change}");
+}
+
+#[test]
 fn point_mode_draws_box_inner_corner_where_three_faces_meet() {
     let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping box point render test"); return; };
     let p=vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.,

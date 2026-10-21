@@ -1,12 +1,7 @@
 use super::*;
 
-// Keep the shared shader outside the scoped viewport changes. At grazing angles a
-// pixel spans several grid cells; the old smoothstep made every cell look filled.
 fn viewport_shader() -> String {
-    let source = include_str!("../shader.wgsl");
-    let old = "return 1.-smoothstep(0.,width*1.2,edge);";
-    assert!(source.contains(old));
-    let mut shader = source.replace(old, "return (1.-smoothstep(0.,width*1.2,edge)) * (1.-smoothstep(0.25,0.5,width));");
+    let mut shader = include_str!("../shader.wgsl").to_owned();
     shader.push_str(include_str!("group_lines.wgsl"));
     shader
 }
@@ -16,7 +11,7 @@ fn viewport_shader() -> String {
 fn distant_grid_fades_when_a_pixel_covers_multiple_cells() {
     let shader = viewport_shader();
     assert!(shader.contains("smoothstep(0.25,0.5,width)"));
-    assert!(!shader.contains("return 1.-smoothstep(0.,width*1.2,edge);"));
+    assert!(shader.contains("minor_line*(1.-transition)+major_line*transition"));
 }
 
 impl Gpu {
