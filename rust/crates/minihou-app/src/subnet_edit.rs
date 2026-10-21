@@ -479,6 +479,18 @@ mod tests {
         assert_eq!(back["display"], v["display"]);
     }
     #[test]
+    fn ungroup_selected_subnet_restores_inner_nodes_and_external_wires() {
+        let original = sample();
+        let (grouped, subnet) = group(&original, &["xf".into(), "nrm".into()]).unwrap();
+        let (ungrouped, selected) = ungroup(&grouped, &subnet).unwrap();
+        assert_eq!(selected, vec!["nrm", "xf"]);
+        assert!(ungrouped["nodes"].get(&subnet).is_none());
+        assert_eq!(ungrouped["nodes"]["xf"]["inputs"]["geo"], "box1");
+        assert_eq!(ungrouped["nodes"]["nrm"]["inputs"]["geo"], "xf");
+        assert_eq!(ungrouped["nodes"]["out"]["inputs"]["geo"], "nrm");
+        assert_eq!(cook(&ungrouped), cook(&original));
+    }
+    #[test]
     fn group_moves_display_and_keeps_multiple_outputs() {
         let v = sample();
         let (g, _) = group(&v, &["nrm".into(), "out".into()]).unwrap();
