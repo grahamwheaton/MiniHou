@@ -3334,6 +3334,14 @@
    "max": 100000,
    "min": 0,
    "soft_max": 10
+  },
+  "use_flow": {
+   "default": false,
+   "doc": "Grow along the selection's direction (a line of edges keeps running the way it points) instead of in all directions; grow only, ignored when the selection has no clear direction",
+   "enabled_if": {
+    "mode": "grow"
+   },
+   "kind": "bool"
   }
  },
  "heightfield_erode": {
