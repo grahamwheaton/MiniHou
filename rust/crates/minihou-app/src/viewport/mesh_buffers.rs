@@ -18,6 +18,56 @@ pub(super) fn edge_world_of(sc: &Scene) -> f32 {
     (2.0 * sc.radius) / ((sc.edge.len().max(2) as f32) / 2.0).sqrt()
 }
 
+/// Keep only polygon edges with adjacent surface normals above the crease angle.
+/// Match endpoints by position because box faces may have separate point ids at
+/// the same corner. The ordinary wire buffer remains unfiltered for edit modes.
+pub(super) fn sharp_edges(sc: &Scene, threshold_degrees: f32) -> Vec<u32> {
+    type Key = ([i64; 3], [i64; 3]);
+    let tolerance = sc.radius.max(1e-3) * 1e-6;
+    let point = |id: u32| -> Option<[f32; 3]> {
+        let p = sc.p.get(id as usize * 3..id as usize * 3 + 3)?;
+        Some([p[0], p[1], p[2]])
+    };
+    let position_key = |p: [f32; 3]| -> [i64; 3] {
+        [0, 1, 2].map(|i| ((p[i] - sc.center[i]) / tolerance).round() as i64)
+    };
+    let edge_key = |a: u32, b: u32| -> Option<Key> {
+        let a = position_key(point(a)?);
+        let b = position_key(point(b)?);
+        (a != b).then_some(if a < b { (a, b) } else { (b, a) })
+    };
+    let candidates: HashSet<Key> = sc.edge.chunks_exact(2)
+        .filter_map(|edge| edge_key(edge[0], edge[1])).collect();
+    let mut faces: HashMap<Key, Vec<[f32; 3]>> = HashMap::new();
+    for tri in sc.tri.chunks_exact(3) {
+        let (Some(a), Some(b), Some(c)) = (point(tri[0]), point(tri[1]), point(tri[2])) else { continue };
+        let ab = [0, 1, 2].map(|i| b[i] - a[i]);
+        let ac = [0, 1, 2].map(|i| c[i] - a[i]);
+        let cross = [ab[1]*ac[2]-ab[2]*ac[1], ab[2]*ac[0]-ab[0]*ac[2], ab[0]*ac[1]-ab[1]*ac[0]];
+        let length = cross.iter().map(|x| x*x).sum::<f32>().sqrt();
+        if length <= 1e-12 { continue; }
+        let normal = cross.map(|x| x / length);
+        for (u, v) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
+            if let Some(key) = edge_key(u, v).filter(|key| candidates.contains(key)) {
+                faces.entry(key).or_default().push(normal);
+            }
+        }
+    }
+    let limit = threshold_degrees.to_radians().cos();
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    for edge in sc.edge.chunks_exact(2) {
+        let Some(key) = edge_key(edge[0], edge[1]) else { continue };
+        if !seen.insert(key) { continue; }
+        let Some(normals) = faces.get(&key) else { continue };
+        if normals.iter().enumerate().any(|(i,a)| normals[i+1..].iter()
+            .any(|b| a.iter().zip(b).map(|(x,y)| x*y).sum::<f32>() < limit)) {
+            result.extend_from_slice(edge);
+        }
+    }
+    result
+}
+
 /// Selected primitives first, followed by other objects. Vertex IDs never change.
 pub(super) struct Partition { pub(super) buffer: wgpu::Buffer, pub(super) selected: u32, pub(super) total: u32 }
 impl Partition {

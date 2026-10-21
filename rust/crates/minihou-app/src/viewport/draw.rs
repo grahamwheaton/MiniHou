@@ -123,6 +123,8 @@ impl Gpu {
         let (vp,vn,vc,tri,edge)=if let Some(b)=boxes { (&b.p,&b.n,&b.c,&b.tri,&b.edge) }
             else { (&self.vp,&self.vn,if use_cd { self.vcd.as_ref().unwrap() } else { &self.vc },&self.partition_tri,&self.partition_edge) };
         let chunked = boxes.is_none() && self.mesh_source.is_some();
+        let edge=if sketchup_clean { &self.sharp_edge } else { edge };
+        let wire_chunks=if sketchup_clean { &self.sharp_edge_chunks } else { &self.edge_chunks };
         let visibility=overlay.visibility;
         let mut enc = device.create_command_encoder(&Default::default());
         {
@@ -182,11 +184,11 @@ impl Gpu {
                 let visible=edge.visible(visibility);
                 if mode == Mode::HiddenLineGhost && !overlay.xray {
                     pass.set_pipeline(&self.pipe_wire_hidden);
-                    if chunked {draw_chunks(&mut pass,&self.edge_chunks,use_cd,visibility,ChunkRange::Visible);}
+                    if chunked {draw_chunks(&mut pass,wire_chunks,use_cd,visibility,ChunkRange::Visible);}
                     else {pass.draw_indexed(visible.clone(),0,0..1);}
                 }
                 pass.set_pipeline(if overlay.xray || matches!(mode,Mode::Wireframe | Mode::WireframeGhost | Mode::WireBoundingBox) { &self.pipe_wire_all } else { &self.pipe_wire });
-                if chunked {draw_chunks(&mut pass,&self.edge_chunks,use_cd,visibility,ChunkRange::Visible);}
+                if chunked {draw_chunks(&mut pass,wire_chunks,use_cd,visibility,ChunkRange::Visible);}
                 else {pass.draw_indexed(visible,0,0..1);}
             }
             // Ghosts depth-test against selected surfaces, never write depth, and never enter the outline mask.
@@ -198,7 +200,7 @@ impl Gpu {
                 }
                 pass.set_index_buffer(edge.buffer.slice(..),wgpu::IndexFormat::Uint32);
                 if overlay.geometry.lines && show_wire { pass.set_pipeline(&self.pipe_ghost_wire);
-                    if chunked {draw_chunks(&mut pass,&self.edge_chunks,use_cd,visibility,ChunkRange::Other);}
+                    if chunked {draw_chunks(&mut pass,wire_chunks,use_cd,visibility,ChunkRange::Other);}
                     else {pass.draw_indexed(edge.selected..edge.total,0,0..1);}
                 }
             }

@@ -110,8 +110,9 @@ impl Gpu {
             let ranges = self.object_mask_points.as_deref().unwrap_or(&[]);
             self.face_chunks = upload_chunks(device, source, &self.current_tri, 3, ranges, limit);
             self.edge_chunks = upload_chunks(device, source, &self.current_edge, 2, ranges, limit);
+            self.sharp_edge_chunks = upload_chunks(device, source, &self.sharp_edge_indices, 2, ranges, limit);
         } else {
-            self.face_chunks.clear(); self.edge_chunks.clear();
+            self.face_chunks.clear(); self.edge_chunks.clear(); self.sharp_edge_chunks.clear();
         }
     }
 
@@ -123,8 +124,10 @@ impl Gpu {
         self.tex_batches.clear(); self.texture_status.clear();
         self.elements=Elements::new(device,sc,&[],&self.element_points);
         self.current_tri=sc.tri.clone(); self.current_edge=sc.edge.clone();
+        self.sharp_edge_indices=sharp_edges(sc,SKETCHUP_CREASE_DEGREES);
         self.partition_tri=Partition::new(device,if oversized {&[]} else {&sc.tri},3,&[]);
         self.partition_edge=Partition::new(device,if oversized {&[]} else {&sc.edge},2,&[]);
+        self.sharp_edge=Partition::new(device,if oversized {&[]} else {&self.sharp_edge_indices},2,&[]);
         self.boxes=Some(Boxes::new(device,sc,&[],&[],&[0..(sc.p.len()/3) as u32])); self.object_ranges.clear(); self.object_ids.clear();
         self.object_mask = None; self.object_mask_n = 0; self.object_mask_points = None;
         let buf = |label, data: &[u8], usage| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -162,6 +165,7 @@ impl Gpu {
         self.partition_tri=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_tri},3,&ranges);
         for batch in &mut self.tex_batches {batch.repartition(device,&ranges);}
         self.partition_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_edge},2,&ranges);
+        self.sharp_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.sharp_edge_indices},2,&ranges);
         self.object_mask_points = Some(ranges.clone());
         self.rebuild_chunks(device);
         self.boxes=None;

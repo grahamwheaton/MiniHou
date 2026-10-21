@@ -190,6 +190,37 @@ fn sketchup_clean_matcap_uses_greyscale_faces_and_dark_edges_headless() {
 }
 
 #[test]
+fn sketchup_clean_matcap_hides_flat_wire_edges_headless() {
+    let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping SketchUp edge render test"); return; };
+    let p=vec![-1.,-1.,0., 0.,-1.,0., 0.,1.,0., -1.,1.,0.,
+        0.,-1.,0., 1.,-1.,0., 1.,1.,0., 0.,1.,0.];
+    let g=Geometry::from_arrays(p,vec![0,1,2,3,4,5,6,7],vec![0,4,8],Some(vec![true;2])).unwrap();
+    let scene=Scene::new(&g);
+    let gpu=Gpu::new(&device,&scene);
+    let with=Overlay {matcap:MatCap::SketchUpClean,geometry:crate::ui::Overlays {points:false,..Default::default()},..Default::default()};
+    let without=Overlay {geometry:crate::ui::Overlays {lines:false,..with.geometry},..with};
+    assert_eq!(render(&device,&queue,&gpu,Mode::MatCapShaded,with,false),
+        render(&device,&queue,&gpu,Mode::MatCapShaded,without,false),"flat seam or open boundary leaked into clean MatCap");
+    assert!(changed(&render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {wireframe:true,..with},false),
+        &render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {wireframe:true,..without},false))>10,"ordinary wireframe lost its edges");
+}
+
+#[test]
+fn sketchup_clean_matcap_keeps_sharp_edges_with_chunked_uploads_headless() {
+    let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping chunked SketchUp render test"); return; };
+    let scene=scene();
+    let regular=Gpu::new(&device,&scene);
+    let mut chunked=Gpu::new(&device,&scene);
+    chunked.limits.set_gpu_limits(48,48);
+    chunked.upload(&device,&scene);
+    assert!(chunked.mesh_source.is_some());
+    assert!(!chunked.sharp_edge_chunks.is_empty());
+    let overlay=Overlay {matcap:MatCap::SketchUpClean,geometry:crate::ui::Overlays {points:false,..Default::default()},..Default::default()};
+    assert_eq!(render(&device,&queue,&regular,Mode::MatCapShaded,overlay,false),
+        render(&device,&queue,&chunked,Mode::MatCapShaded,overlay,false));
+}
+
+#[test]
 fn textured_two_slots_factor_checker_and_diagnostic_modes_headless() {
     let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping texture render test");return;};
     use std::sync::Arc;

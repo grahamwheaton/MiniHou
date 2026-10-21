@@ -30,7 +30,9 @@ use uploads::{MeshSource, MeshChunk, upload_chunks};
 pub use camera_grid::Target;
 use camera_grid::{DEPTH, inverse_projection};
 use textures::TextureBatch;
-use mesh_buffers::{Boxes, Partition, edge_world_of, index_buffer, object_mask_indices, packed_cut};
+use mesh_buffers::{Boxes, Partition, edge_world_of, sharp_edges, index_buffer, object_mask_indices, packed_cut};
+
+const SKETCHUP_CREASE_DEGREES: f32 = 30.0;
 
 /// Renderer switches; stats and the orientation widget are painted by the UI.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -83,7 +85,8 @@ pub struct Gpu {
     elements:Elements, element_points:Vec<u32>, pipe_elements:wgpu::RenderPipeline, pipe_elements_ghost:wgpu::RenderPipeline,
     pipe_depth: wgpu::RenderPipeline, pipe_wire_all: wgpu::RenderPipeline,
     pipe_wire_hidden: wgpu::RenderPipeline, pipe_ghost: wgpu::RenderPipeline, pipe_ghost_wire: wgpu::RenderPipeline,
-    partition_tri: Partition, partition_edge: Partition, current_tri: Vec<u32>, current_edge: Vec<u32>,
+    partition_tri: Partition, partition_edge: Partition, sharp_edge: Partition,
+    current_tri: Vec<u32>, current_edge: Vec<u32>, sharp_edge_indices: Vec<u32>,
     boxes: Option<Boxes>, object_ranges: Vec<std::ops::Range<u32>>, object_ids: Vec<String>,
     matcap: wgpu::Texture, matcap_loaded: std::sync::atomic::AtomicU8,
     pipe_mask: wgpu::RenderPipeline, pipe_outline: wgpu::RenderPipeline, bgl_outline: wgpu::BindGroupLayout,
@@ -100,7 +103,7 @@ pub struct Gpu {
     vp: wgpu::Buffer, vn: wgpu::Buffer, vc: wgpu::Buffer, vcd: Option<wgpu::Buffer>, neutral_color: wgpu::Buffer,
     limits: minihou_core::limits::Limits,
     mesh_source: Option<MeshSource>,
-    face_chunks: Vec<MeshChunk>, edge_chunks: Vec<MeshChunk>, mask_chunks: Vec<MeshChunk>,
+    face_chunks: Vec<MeshChunk>, edge_chunks: Vec<MeshChunk>, sharp_edge_chunks: Vec<MeshChunk>, mask_chunks: Vec<MeshChunk>,
     ntri_idx: u32,
     object_mask: Option<wgpu::Buffer>, object_mask_n: u32,
     object_mask_points: Option<Vec<std::ops::Range<u32>>>,
@@ -136,6 +139,25 @@ fn cube(extra:bool) -> Geometry {
     #[test] fn object_mode_cube_points_all_hidden() {
         let g=cube(false);
         assert_eq!(kinds(&g),(vec![0,0],vec![8]));
+    }
+    #[test] fn sketchup_clean_keeps_only_edges_above_the_face_angle_threshold() {
+        let box_scene=Scene::new(&cube(false));
+        assert_eq!(sharp_edges(&box_scene,30.).len()/2,12,"all twelve box creases must remain");
+        let bend=|degrees:f32| {
+            let theta=degrees.to_radians();
+            let p=vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.,
+                1.,0.,0., 1.+theta.cos(),0.,theta.sin(),
+                1.+theta.cos(),1.,theta.sin(), 1.,1.,0.];
+            let g=Geometry::from_arrays(p,vec![0,1,2,3,4,5,6,7],vec![0,4,8],Some(vec![true;2])).unwrap();
+            Scene::new(&g)
+        };
+        assert!(sharp_edges(&bend(20.),30.).is_empty(),"smooth seam and open boundaries must be hidden");
+        let sharp=sharp_edges(&bend(45.),30.);
+        assert_eq!(sharp.len(),2,"only the shared crease should be drawn");
+        let scene=bend(45.);
+        let a=&scene.p[sharp[0] as usize*3..sharp[0] as usize*3+3];
+        let b=&scene.p[sharp[1] as usize*3..sharp[1] as usize*3+3];
+        assert_eq!(a[0],1.); assert_eq!(b[0],1.);
     }
     #[test] fn object_mode_shows_only_stray_point() {
         let g=cube(true);
