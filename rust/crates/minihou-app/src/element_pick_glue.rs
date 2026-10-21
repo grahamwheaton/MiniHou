@@ -53,7 +53,14 @@ pub(super) fn pick_displayed_wire(scene:&Scene, camera:CameraInfo, rect:egui::Re
         pick_displayed(scene,o,d,visibility,ranges,selected).map_or(f32::INFINITY,|hit|{
             let depth=hit.t*(0..3).map(|k|d[k]*camera.ray_forward[k]).sum::<f32>();
             let depth=if camera.ortho {depth.max(0.001)} else {depth};
-            depth*1.002+scene.radius*1e-4
+            // The ray samples the face at the cursor while a point marker is
+            // centred a few pixels away. Allow that local surface slope without
+            // making points on the far side of the object pickable.
+            let half_height=if camera.ortho {
+                camera.ray_up.iter().map(|v|v*v).sum::<f32>().sqrt()
+            } else { depth*0.4_f32.tan() };
+            let pixel_depth=2.0*half_height/rect.height().max(1.0);
+            depth*1.002+5.0*pixel_depth+scene.radius*1e-4
         })
     };
     picking::pick_wire_occluded(scene.positions(),scene.line_primitive_indices(),pointer,

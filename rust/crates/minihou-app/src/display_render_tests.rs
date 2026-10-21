@@ -29,9 +29,12 @@ pub(super) fn render(device:&wgpu::Device,queue:&wgpu::Queue,gpu:&Gpu,mode:Mode,
     render_selection(device,queue,gpu,mode,overlay,outline,crate::ui::SelectionMode::Object)
 }
 pub(super) fn render_selection(device:&wgpu::Device,queue:&wgpu::Queue,gpu:&Gpu,mode:Mode,overlay:Overlay,outline:bool,selection:crate::ui::SelectionMode)->Vec<[u8;4]> {
+    render_selection_from_camera(device,queue,gpu,&Camera::frame([0.;3],2.5),mode,overlay,outline,selection)
+}
+pub(super) fn render_selection_from_camera(device:&wgpu::Device,queue:&wgpu::Queue,gpu:&Gpu,camera:&Camera,mode:Mode,overlay:Overlay,outline:bool,selection:crate::ui::SelectionMode)->Vec<[u8;4]> {
     let size=[128,128];
     let (target,texture)=Target::new_headless(device,size);
-    gpu.draw_raw(device,queue,&target,&Camera::frame([0.;3],2.5),mode,overlay,selection,outline);
+    gpu.draw_raw(device,queue,&target,camera,mode,overlay,selection,outline);
     let buffer=device.create_buffer(&wgpu::BufferDescriptor {
         label:Some("display regression pixels"),size:128*128*4,usage:wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false,
     });

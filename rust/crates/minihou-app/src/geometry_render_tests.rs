@@ -2,6 +2,45 @@ use super::*;
 use super::display_render_tests::{adapter,render,changed};
 
 #[test]
+fn point_mode_draws_box_inner_corner_where_three_faces_meet() {
+    let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping box point render test"); return; };
+    let p=vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.,
+        0.,0.,1., 1.,0.,1., 1.,1.,1., 0.,1.,1.];
+    let v=vec![0,3,2,1, 4,5,6,7, 0,1,5,4, 2,3,7,6, 0,4,7,3, 1,2,6,5];
+    let box_geo=Geometry::from_arrays(p,v,vec![0,4,8,12,16,20,24],Some(vec![true;6])).unwrap();
+    let scene=Scene::new(&box_geo);
+    let mut gpu=Gpu::new(&device,&scene);
+    gpu.select_points(&device,&scene,&[6]);
+    let mut overlay=Overlay::default();
+    overlay.geometry.points=false;
+    overlay.geometry.point_size=0.5;
+    for dx in [0.,2.,4.,6.] { for dy in [0.,2.,4.,6.] {
+        let mut view=Camera::frame([1.;3],1.);
+        view.orbit_degrees(79.38,-63.9);
+        view.set_dist(1.2);
+        view.pan(dx,dy);
+        let image=super::display_render_tests::render_selection_from_camera(&device,&queue,&gpu,&view,Mode::SmoothShaded,overlay,false,crate::ui::SelectionMode::Points);
+        let mut inner=Vec::new();
+        for y in 58..=70 { for x in 58..=70 { inner.push(image[y*128+x]); } }
+        assert!(inner.iter().any(|p|p[0]>245 && (150..=170).contains(&p[1]) && p[2]<60),"inner corner point was hidden at {dx},{dy}");
+        if dx==0. && dy==0. {
+            let (projection,_)=view.matrices(1.);
+            let (ray_origin,ray_forward)=view.ray(0.,0.,1.);
+            let (_,right)=view.ray(1.,0.,1.);
+            let (_,up)=view.ray(0.,1.,1.);
+            let camera=crate::ui::CameraInfo {projection,ray_origin,ray_forward,
+                ray_right:[0,1,2].map(|i|right[i]-ray_forward[i]),
+                ray_up:[0,1,2].map(|i|up[i]-ray_forward[i]),..Default::default()};
+            let hit=crate::element_pick_glue::pick_displayed_wire(&scene,camera,
+                eframe::egui::Rect::from_min_size(eframe::egui::Pos2::ZERO,eframe::egui::vec2(128.,128.)),
+                eframe::egui::pos2(66.,66.),ObjectVisibility::ShowAll,&[],&Default::default(),crate::ui::SelectionMode::Points,false);
+            let picked=match hit {Some(crate::picking::WireHit::Point(id))=>Some(id),_=>None};
+            assert_eq!(picked,Some(6),"box inner corner could not be picked next to its three faces");
+        }
+    } }
+}
+
+#[test]
 fn element_indices_points_lines_mixed_and_proxy() {
     let p=Geometry::points_only(vec![0.;9]).unwrap();
     let s=Scene::new(&p); assert_eq!(s.point,[0,1,2]); assert!(s.line.is_empty() && s.tri.is_empty());

@@ -223,6 +223,16 @@ fn vs_element(@builtin(vertex_index) vertex:u32, @location(0) a:vec3<f32>, @loca
         clip=vec4(clip.xy+perpendicular*corner.y*select(u.element_size.w,1.,kind>=3u)/u.element_size.xy*clip.w,clip.zw);
         o.pos=clip;
     } else {
+        if (kind==2u) {
+            // At a recessed corner the neighbouring faces are closer at the square's
+            // edge pixels. Move the marker toward the eye by its screen footprint.
+            let view_point=u.view*vec4(a,1.);
+            let perspective=length(vec3(u.view_proj[0].w,u.view_proj[1].w,u.view_proj[2].w))>0.5;
+            let depth=select(u.floor.w,max(-view_point.z,0.001),perspective);
+            let lift=depth*0.845/u.element_size.y*max(4.,u.element_size.z+1.);
+            let toward_eye=vec3(u.view[0].z,u.view[1].z,u.view[2].z);
+            start=u.view_proj*vec4(a+toward_eye*lift,1.);
+        }
         if (u.element_flags.x==0u || (kind==2u && u.element_flags.z==0u) || start.z<0. || start.w<=0.) { return o; }
         o.pos=vec4(start.xy+corner*u.element_size.z/u.element_size.xy*start.w,start.zw);
     }
