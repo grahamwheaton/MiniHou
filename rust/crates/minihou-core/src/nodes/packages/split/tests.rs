@@ -34,6 +34,22 @@ fn split_box_face_group_and_invert() {
 }
 
 #[test]
+fn split_node_outputs_selected_and_remainder_geometry() {
+    let g = box_with_group();
+    let p = Params::resolve(NODE.params, serde_json::json!({"group":"pick"}).as_object()).unwrap();
+    let outputs = NODE.cook_outputs(&[vec![Arc::new(g.clone())]], &p).unwrap();
+    assert_eq!(NODE.outputs, &["geometry", "remainder"]);
+    assert_eq!(outputs.0.len(), 2);
+    assert_eq!((outputs[0].nprims(), outputs[1].nprims()), (1, 5));
+    assert_eq!(outputs[0].topology.vertex_point, vec![0, 3, 2, 1]);
+    assert_eq!(outputs[1].topology.vertex_point, g.topology.vertex_point[4..]);
+    assert_eq!(group::flags(&outputs[0].prim["group_pick"]), vec![true]);
+    assert_eq!(group::flags(&outputs[1].prim["group_pick"]), vec![false; 5]);
+    outputs[0].validate().unwrap();
+    outputs[1].validate().unwrap();
+}
+
+#[test]
 fn empty_group_returns_input_unchanged() {
     let g = box_with_group();
     for group_name in ["", "empty"] {

@@ -1,5 +1,5 @@
 id = "split"
 name = "Split"
 category = "Modify"
-description = "Split geometry by a group. The selected piece is output; a second output for the remaining piece is not yet supported by the node output model."
+description = "Split geometry by a group into selected and remaining pieces."
 keywords = "split group separate invert geometry"

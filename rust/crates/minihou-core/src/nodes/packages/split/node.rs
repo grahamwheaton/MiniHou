@@ -2,11 +2,11 @@
 use crate::{
     error::Result,
     geometry::{AttrData, Geometry},
-    nodes::{group, InputSpec, Inputs, NodeSpec},
+    nodes::{group, InputSpec, Inputs, NodeOutputs, NodeSpec},
     params::Params,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry", "remainder"], cook_multi: Some(cook_multi), cook_sidecar: None,
     name: "split",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("group": ""; "group_type": "primitives"; "invert_selection": false; "delete_unused_groups": false),
@@ -79,6 +79,12 @@ fn pieces(g: &Geometry, p: &Params) -> Result<(Geometry, Geometry)> {
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = NODE.one(inputs, 0)?;
     Ok(pieces(&g, p)?.0)
+}
+
+fn cook_multi(inputs: &Inputs, p: &Params) -> Result<NodeOutputs> {
+    let g = NODE.one(inputs, 0)?;
+    let (selected, remainder) = pieces(&g, p)?;
+    Ok(vec![selected, remainder].into())
 }
 
 #[cfg(test)]
