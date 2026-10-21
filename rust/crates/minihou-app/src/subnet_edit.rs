@@ -470,6 +470,19 @@ mod tests {
         assert_eq!(cook(&g), cook(&v));
     }
     #[test]
+    fn group_always_creates_an_input_and_output_even_without_external_wires() {
+        let v = json!({"display":"box1","nodes":{"box1":{"type":"box","pos":[32.0,64.0]}}});
+        let (grouped, id) = group(&v, &["box1".into()]).unwrap();
+        let subnet = &grouped["nodes"][&id];
+        assert_eq!(subnet["input_sockets"], json!([{"index":0,"name":"Input 1"}]));
+        assert_eq!(subnet["output_sockets"], json!([{"index":0,"name":"Output 1"}]));
+        assert_eq!(subnet["inner"]["nodes"]["input1"]["type"], "subnet_input");
+        assert_eq!(subnet["inner"]["nodes"]["output1"]["inputs"]["geo"], "box1");
+        assert_eq!(subnet["inner"]["output"], "output1");
+        assert_eq!(grouped["display"], id);
+        assert_eq!(cook(&grouped), cook(&v));
+    }
+    #[test]
     fn ungroup_restores_the_original() {
         let v = sample();
         let (g, _) = group(&v, &["xf".into(), "nrm".into()]).unwrap();
