@@ -12,6 +12,29 @@ struct CpuChunk {
     vertices: Vec<u32>, indices: Vec<u32>, selected: u32,
 }
 
+pub(super) fn capped_normal_vertices(float_count: usize, byte_limit: u64) -> usize {
+    (float_count / 3).min((byte_limit / 12) as usize) & !1
+}
+
+pub(super) fn chunked_scene(sc: &Scene, byte_limit: u64) -> bool {
+    [sc.p.len().saturating_mul(4), sc.n.len(), sc.cd.as_ref().map_or(0, Vec::len),
+        sc.tri.len(), sc.edge.len(), sc.nlp.len(), sc.nln.len(), sc.bbp.len()]
+        .into_iter().any(|n| (n as u64).saturating_mul(4) > byte_limit)
+}
+
+pub(super) fn neutral_color_len(sc: &Scene, oversized: bool, byte_limit: u64) -> usize {
+    let floats = if oversized { sc.nlp.len().max(24) }
+        else { sc.p.len().saturating_mul(4).max(sc.tri.len()).max(sc.nlp.len()).max(24) };
+    floats.min((byte_limit / 4) as usize)
+}
+
+pub(super) fn box_chunks(device: &wgpu::Device, sc: &Scene, byte_limit: u64) -> Vec<MeshChunk> {
+    if (sc.bbp.len() as u64) * 4 <= byte_limit { return Vec::new(); }
+    let source = MeshSource { p: sc.bbp.to_vec(), n: vec![0.; sc.bbp.len()],
+        colors: vec![0.72; sc.bbp.len()], cd: None };
+    upload_chunks(device, &source, &BOX_EDGES, 2, &[], byte_limit)
+}
+
 /// Partition complete primitives, duplicating shared vertices at a boundary.
 /// The selected portion precedes the remaining primitives in each GPU chunk.
 fn chunk_primitives(indices: &[u32], width: usize, selected: &[std::ops::Range<u32>],
@@ -99,6 +122,19 @@ fn primitive_chunks_preserve_selection_and_edge_pairs() {
     assert_eq!(rebuilt, edges);
 }
 
+#[cfg(test)]
+#[test]
+fn oversized_normal_lines_and_box_fit_lowered_limit() {
+    let limit = 48;
+    assert_eq!(capped_normal_vertices(60, limit), 4);
+    assert_eq!(capped_normal_vertices(6, limit), 2);
+    let boxes = chunk_primitives(&BOX_EDGES, 2, &[], 8, limit);
+    assert!(boxes.len() > 1);
+    assert!(boxes.iter().all(|c| c.vertices.len() * 12 <= limit as usize && c.indices.len() * 4 <= limit as usize));
+    let rebuilt: Vec<u32> = boxes.iter().flat_map(|c| c.indices.iter().map(|&i| c.vertices[i as usize])).collect();
+    assert_eq!(rebuilt, BOX_EDGES);
+}
+
 impl Gpu {
     fn chunk_limit(&self) -> u64 {
         self.limits.max_buffer_size.unwrap().min(self.limits.max_storage_buffer_binding_size.unwrap())
@@ -118,8 +154,7 @@ impl Gpu {
 
     pub fn upload(&mut self, device: &wgpu::Device, sc: &Scene) {
         let limit = self.chunk_limit();
-        let oversized = [sc.p.len().saturating_mul(4), sc.n.len(), sc.cd.as_ref().map_or(0, Vec::len), sc.tri.len(), sc.edge.len()]
-            .into_iter().any(|n| (n as u64)*4 > limit);
+        let oversized = chunked_scene(sc, limit);
         self.face_markers.invalidate();
         self.tex_batches.clear(); self.texture_status.clear();
         self.elements=Elements::new(device,sc,&[],&self.element_points);
@@ -138,16 +173,18 @@ impl Gpu {
         self.vn=buf("N",bytemuck::cast_slice(if oversized {&fallback[..]} else {&sc.n}),wgpu::BufferUsages::VERTEX);
         self.vc=buf("object colors",bytemuck::cast_slice(&vec![0.72f32;if oversized {3} else {sc.p.len().max(3)}]),wgpu::BufferUsages::VERTEX);
         self.vcd=sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(if oversized {&fallback[..]} else {c}),wgpu::BufferUsages::VERTEX));
-        self.neutral_color=buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;if oversized {24} else {(sc.p.len()*4).max(sc.tri.len()).max(24)}]),wgpu::BufferUsages::VERTEX);
+        self.neutral_color=buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;neutral_color_len(sc,oversized,limit)]),wgpu::BufferUsages::VERTEX);
         self.mesh_source=oversized.then(|| MeshSource {p:sc.p.clone(),n:sc.n.clone(),colors:vec![0.72;sc.p.len()],cd:sc.cd.clone()});
         self.mask_chunks.clear();
         self.rebuild_chunks(device);
         self.ntri_idx=sc.tri.len() as u32;
         self.edge_world=edge_world_of(sc);
-        self.nl_p=buf("nl_p",bytemuck::cast_slice(&sc.nlp),wgpu::BufferUsages::VERTEX);
-        self.nl_n=buf("nl_n",bytemuck::cast_slice(&sc.nln),wgpu::BufferUsages::VERTEX);
-        self.nl_count=(sc.nlp.len()/3) as u32; self.nl_selected=0;
-        self.bb_p=buf("bb_p",bytemuck::cast_slice(&sc.bbp),wgpu::BufferUsages::VERTEX);
+        let normal_floats=capped_normal_vertices(sc.nlp.len().min(sc.nln.len()),limit)*3;
+        self.nl_p=buf("nl_p",bytemuck::cast_slice(&sc.nlp[..normal_floats]),wgpu::BufferUsages::VERTEX);
+        self.nl_n=buf("nl_n",bytemuck::cast_slice(&sc.nln[..normal_floats]),wgpu::BufferUsages::VERTEX);
+        self.nl_count=(normal_floats/3) as u32; self.nl_selected=0;
+        self.bb_chunks=box_chunks(device,sc,limit);
+        self.bb_p=buf("bb_p",bytemuck::cast_slice(if self.bb_chunks.is_empty() {&sc.bbp[..]} else {&[0.;3][..]}),wgpu::BufferUsages::VERTEX);
     }
     /// Use full-detail selected-object triangles for a stable silhouette at every proxy/LOD level.
     pub fn select_objects(&mut self, device: &wgpu::Device, scene: &Scene, ranges: Vec<std::ops::Range<u32>>) {
@@ -180,7 +217,10 @@ impl Gpu {
             }
         }
         let buf=|label,data:&[f32]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label:Some(label),contents:if data.is_empty() { &[0u8;12] } else { bytemuck::cast_slice(data) },usage:wgpu::BufferUsages::VERTEX });
-        self.nl_p=buf("partitioned normal lines",&p); self.nl_n=buf("partitioned normal normals",&n);
+        let normal_floats=capped_normal_vertices(p.len().min(n.len()),self.chunk_limit())*3;
+        self.nl_selected=self.nl_selected.min((normal_floats/3) as u32);
+        self.nl_count=(normal_floats/3) as u32;
+        self.nl_p=buf("partitioned normal lines",&p[..normal_floats]); self.nl_n=buf("partitioned normal normals",&n[..normal_floats]);
     }
     /// Bounds use full-resolution object ownership, independently of the current proxy/LOD cut.
     pub fn set_object_ranges(&mut self, device: &wgpu::Device, scene: &Scene, ranges: Vec<std::ops::Range<u32>>) {

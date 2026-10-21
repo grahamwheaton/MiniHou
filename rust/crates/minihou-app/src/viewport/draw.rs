@@ -269,8 +269,12 @@ impl Gpu {
                     pass.set_index_buffer(b.edge.buffer.slice(..),wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(b.edge.visible(visibility),0,0..1);
                 } else {
-                    pass.set_vertex_buffer(0,self.bb_p.slice(..)); pass.set_vertex_buffer(1,self.bb_n.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
-                    pass.set_index_buffer(self.bb_i.slice(..),wgpu::IndexFormat::Uint32); pass.draw_indexed(0..24,0,0..1);
+                    if self.bb_chunks.is_empty() {
+                        pass.set_vertex_buffer(0,self.bb_p.slice(..)); pass.set_vertex_buffer(1,self.bb_n.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
+                        pass.set_index_buffer(self.bb_i.slice(..),wgpu::IndexFormat::Uint32); pass.draw_indexed(0..24,0,0..1);
+                    } else {
+                        draw_chunks(&mut pass,&self.bb_chunks,false,visibility,ChunkRange::All);
+                    }
                 }
             }
         }

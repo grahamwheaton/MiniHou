@@ -26,7 +26,7 @@ mod overlays;
 mod camera_grid;
 mod draw;
 mod uploads;
-use uploads::{MeshSource, MeshChunk, upload_chunks};
+use uploads::{MeshSource, MeshChunk, upload_chunks, box_chunks, capped_normal_vertices, chunked_scene, neutral_color_len};
 pub use camera_grid::Target;
 use camera_grid::{DEPTH, inverse_projection};
 use textures::TextureBatch;
@@ -126,7 +126,7 @@ pub struct Gpu {
     target_face:wgpu::Buffer,target_face_n:u32,target_line:wgpu::Buffer,target_line_n:u32,
     pipe_target_face:wgpu::RenderPipeline,pipe_target_line:wgpu::RenderPipeline,
     sel_face: wgpu::Buffer, sel_face_n: u32, sel_line: wgpu::Buffer, sel_line_n: u32, zeros: wgpu::Buffer,
-    nl_p: wgpu::Buffer, nl_n: wgpu::Buffer, nl_count: u32, nl_selected: u32, bb_p: wgpu::Buffer, bb_n: wgpu::Buffer, bb_i: wgpu::Buffer,
+    nl_p: wgpu::Buffer, nl_n: wgpu::Buffer, nl_count: u32, nl_selected: u32, bb_p: wgpu::Buffer, bb_n: wgpu::Buffer, bb_i: wgpu::Buffer, bb_chunks: Vec<MeshChunk>,
     bind: wgpu::BindGroup, ubuf: wgpu::Buffer,
     vp: wgpu::Buffer, vn: wgpu::Buffer, vc: wgpu::Buffer, vcd: Option<wgpu::Buffer>, neutral_color: wgpu::Buffer,
     limits: minihou_core::limits::Limits,

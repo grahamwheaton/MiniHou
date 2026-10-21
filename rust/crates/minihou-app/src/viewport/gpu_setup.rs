@@ -23,8 +23,7 @@ impl Gpu {
         let mut limits = minihou_core::limits::Limits::default();
         limits.set_gpu_limits(device_limits.max_buffer_size, device_limits.max_storage_buffer_binding_size as u64);
         let max_bytes = device_limits.max_buffer_size.min(device_limits.max_storage_buffer_binding_size as u64);
-        let oversized = [sc.p.len().saturating_mul(4), sc.n.len(), sc.cd.as_ref().map_or(0, Vec::len), sc.tri.len(), sc.edge.len()]
-            .into_iter().any(|n| (n as u64)*4 > max_bytes);
+        let oversized = chunked_scene(sc, max_bytes);
         let mesh_source = oversized.then(|| MeshSource { p: sc.p.clone(), n: sc.n.clone(), colors: vec![0.72; sc.p.len()], cd: sc.cd.clone() });
         let face_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sc.tri, 3, &[], max_bytes));
         let edge_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sc.edge, 2, &[], max_bytes));
@@ -261,11 +260,13 @@ impl Gpu {
         let sel_face = buf("sel_face", bytemuck::cast_slice(&[0f32; 3]), wgpu::BufferUsages::VERTEX);
         let sel_line = buf("sel_line", bytemuck::cast_slice(&[0f32; 3]), wgpu::BufferUsages::VERTEX);
         let zeros = buf("zeros", bytemuck::cast_slice(&vec![0f32; 3 * 6 * 4096]), wgpu::BufferUsages::VERTEX);
-        let nl_p = buf("nl_p", bytemuck::cast_slice(&sc.nlp), wgpu::BufferUsages::VERTEX);
-        let nl_n = buf("nl_n", bytemuck::cast_slice(&sc.nln), wgpu::BufferUsages::VERTEX);
-        let bb_p = buf("bb_p", bytemuck::cast_slice(&sc.bbp), wgpu::BufferUsages::VERTEX);
-        let bb_n = buf("bb_n", bytemuck::cast_slice(&[0f32; 24]), wgpu::BufferUsages::VERTEX);
-        let bb_i = buf("bb_i", bytemuck::cast_slice(&BOX_EDGES), wgpu::BufferUsages::INDEX);
+        let normal_floats = capped_normal_vertices(sc.nlp.len().min(sc.nln.len()), max_bytes) * 3;
+        let nl_p = buf("nl_p", bytemuck::cast_slice(&sc.nlp[..normal_floats]), wgpu::BufferUsages::VERTEX);
+        let nl_n = buf("nl_n", bytemuck::cast_slice(&sc.nln[..normal_floats]), wgpu::BufferUsages::VERTEX);
+        let bb_chunks = box_chunks(device, sc, max_bytes);
+        let bb_p = buf("bb_p", bytemuck::cast_slice(if bb_chunks.is_empty() { &sc.bbp[..] } else { &[0.;3][..] }), wgpu::BufferUsages::VERTEX);
+        let bb_n = buf("bb_n", bytemuck::cast_slice(if bb_chunks.is_empty() { &[0f32; 24][..] } else { &[0f32; 3][..] }), wgpu::BufferUsages::VERTEX);
+        let bb_i = buf("bb_i", bytemuck::cast_slice(if bb_chunks.is_empty() { &BOX_EDGES[..] } else { &[0u32][..] }), wgpu::BufferUsages::INDEX);
         let sharp_edge_indices=sharp_edges(sc,SKETCHUP_CREASE_DEGREES);
         let sharp_edge_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sharp_edge_indices, 2, &[], max_bytes));
 
@@ -299,8 +300,9 @@ impl Gpu {
             zeros,
             nl_p,
             nl_n,
-            nl_count: (sc.nlp.len() / 3) as u32, nl_selected:0,
+            nl_count: (normal_floats / 3) as u32, nl_selected:0,
             bb_p,
+            bb_chunks,
             bb_n,
             bb_i,
             bind,
@@ -309,7 +311,7 @@ impl Gpu {
             vn,
             vc:buf("object colors",bytemuck::cast_slice(&vec![0.72f32;if oversized {3} else {sc.p.len().max(3)}]),wgpu::BufferUsages::VERTEX),
             vcd:sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(if oversized { &fallback[..] } else { c }),wgpu::BufferUsages::VERTEX)),
-            neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;if oversized {24} else {(sc.p.len()*4).max(sc.tri.len()).max(24)}]),wgpu::BufferUsages::VERTEX),
+            neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;neutral_color_len(sc,oversized,max_bytes)]),wgpu::BufferUsages::VERTEX),
             limits,
             mesh_source, face_chunks, edge_chunks, sharp_edge_chunks, mask_chunks:Vec::new(),
             object_mask: None, object_mask_n: 0, object_mask_points: None,
