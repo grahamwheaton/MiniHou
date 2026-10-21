@@ -647,21 +647,22 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         *face = expanded;
         vertexweights[fi] = attrs;
     }
+    let protected_by = |seg: &Segment, positions: &[[f64; 3]], a: usize, b: usize| {
+        let q = [seg.project(positions[a]), seg.project(positions[b])];
+        if q.iter().any(|q| q[3] <= EPS) {
+            return false;
+        }
+        let xy = q.map(|q| [q[0] / q[3], q[1] / q[3]]);
+        let d = sub2(seg.b, seg.a);
+        let den = dot2(d, d);
+        den >= EPS
+            && xy.iter().all(|&p| {
+                cross2(d, sub2(p, seg.a)).abs() < 1e-7
+                    && (-EPS..=1. + EPS).contains(&(dot2(sub2(p, seg.a), d) / den))
+            })
+    };
     let protected_in = |positions: &[[f64; 3]], a: usize, b: usize| {
-        segments.iter().any(|seg| {
-            let q = [seg.project(positions[a]), seg.project(positions[b])];
-            if q.iter().any(|q| q[3] <= EPS) {
-                return false;
-            }
-            let xy = q.map(|q| [q[0] / q[3], q[1] / q[3]]);
-            let d = sub2(seg.b, seg.a);
-            let den = dot2(d, d);
-            den >= EPS
-                && xy.iter().all(|&p| {
-                    cross2(d, sub2(p, seg.a)).abs() < 1e-7
-                        && (-EPS..=1. + EPS).contains(&(dot2(sub2(p, seg.a), d) / den))
-                })
-        })
+        segments.iter().any(|seg| protected_by(seg, positions, a, b))
     };
     let protected = |a: usize, b: usize| protected_in(&positions, a, b);
     loop {
@@ -736,8 +737,8 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             break;
         }
     }
-    // Triangulation diagonals are an artefact: a crossing on a diagonal that is not an original
-    // edge, sitting collinear between its face neighbours, is not a vertex the user asked for.
+    // A collinear crossing on a triangulation diagonal is an artefact unless a cut ends there.
+    // Two incident edges belonging to the same cut still form one continuous straight cut.
     {
         let original_edges: BTreeSet<(usize, usize)> = topo::edges(&g.topology, g.npoints)
             .points.chunks_exact(2).map(|p| pair(p[0] as usize, p[1] as usize)).collect();
@@ -749,7 +750,19 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 let (prev, cur, next) = (face[(j + face.len() - 1) % face.len()], face[j], face[(j + 1) % face.len()]);
                 let (u, v) = (sub(positions[cur], positions[prev]), sub(positions[next], positions[cur]));
                 let collinear = len(cross(u, v)) <= 1e-9 * len(u).max(1e-30) * len(v).max(1e-30) && dot(u, v) > 0.;
-                keep.push(!(on_diagonal(cur) && collinear));
+                let drop = on_diagonal(cur) && collinear && {
+                    let cut_endpoint = segments.iter().any(|seg| {
+                        let q = seg.project(positions[cur]);
+                        q[3] > EPS && [seg.a, seg.b].iter().any(|&end| {
+                            len2(sub2([q[0] / q[3], q[1] / q[3]], end)) < 1e-7
+                        })
+                    });
+                    !cut_endpoint || segments.iter().any(|seg| {
+                        protected_by(seg, &positions, prev, cur)
+                            && protected_by(seg, &positions, cur, next)
+                    })
+                };
+                keep.push(!drop);
             }
             if keep.iter().filter(|k| **k).count() < 3 { continue; }
             let mut j = 0;
