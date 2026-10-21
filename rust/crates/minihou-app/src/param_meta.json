@@ -8895,7 +8895,8 @@
   "seeds": {
    "default": "",
    "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   }
  },
  "select_path": {
@@ -8954,7 +8955,8 @@
   "waypoints": {
    "default": "",
    "doc": "Ordered elements to route through: ids (edges also p<a>-<b>) keep their order; group names add members in element order",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_param": "domain"
   }
  },
  "select_ring": {
@@ -8995,7 +8997,8 @@
   "seeds": {
    "default": "",
    "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   }
  },
  "select_sharp_edges": {

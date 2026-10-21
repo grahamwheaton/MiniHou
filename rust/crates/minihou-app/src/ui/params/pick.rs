@@ -192,6 +192,16 @@ mod tests {
     }
 
     #[test]
+    fn path_loop_and_ring_group_fields_use_the_purple_picker() {
+        assert_eq!(pick_domain_for("select_path", "waypoints", param_meta("select_path", "waypoints"), &json!({"domain":"points"})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain_for("select_path", "waypoints", param_meta("select_path", "waypoints"), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
+        assert_eq!(pick_domain_for("select_path", "waypoints", param_meta("select_path", "waypoints"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
+        for node in ["select_loop", "select_ring"] {
+            assert_eq!(pick_domain_for(node, "seeds", param_meta(node, "seeds"), &json!({"domain":"primitives"})), Some(SelectionMode::Edges));
+        }
+    }
+
+    #[test]
     fn arrow_ink_is_purple() {
         assert_eq!(PICK_PURPLE, Color32::from_rgb(184, 82, 245));
     }
