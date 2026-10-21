@@ -11,9 +11,22 @@ fn activates(press: Pos2, pointer: Pos2, movement: bool) -> bool {
 fn movement_key(key: Key) -> bool {
     matches!(key, Key::W | Key::A | Key::S | Key::D | Key::E | Key::Q | Key::Space)
 }
-/// A click that completed a modal operation belongs to that operation through release.
-pub fn selection_click_available(confirming: bool) -> bool {
-    !confirming
+const MODAL_CLICK: &str = "modal_confirm_click";
+
+/// Claim the press while a modal owns it, even if the modal finishes in this frame.
+pub fn claim_modal_click(ctx: &egui::Context, modal_was_active: bool) {
+    if modal_was_active && ctx.input(|i| i.pointer.primary_pressed()) {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(MODAL_CLICK), true));
+    }
+}
+/// A modal's confirming click belongs to the operation through release.
+pub fn selection_click_available(ctx: &egui::Context) -> bool {
+    !ctx.data(|d| d.get_temp::<bool>(egui::Id::new(MODAL_CLICK))).unwrap_or(false)
+}
+pub fn release_modal_click(ctx: &egui::Context) {
+    if ctx.input(|i| i.pointer.primary_released()) {
+        ctx.data_mut(|d| d.remove::<bool>(egui::Id::new(MODAL_CLICK)));
+    }
 }
 pub fn fly(ctx: &egui::Context, rect: Rect, camera: &mut Camera, enabled: bool) -> bool {
     let id = egui::Id::new("viewport_fly");
@@ -59,9 +72,40 @@ pub fn fly(ctx: &egui::Context, rect: Rect, camera: &mut Camera, enabled: bool) 
 
 #[cfg(test)] mod tests {
     use super::*;
-    #[test] fn modal_confirmation_consumes_the_selection_click() {
-        assert!(!selection_click_available(true));
-        assert!(selection_click_available(false));
+    #[test] fn ordinary_click_remains_available_for_selection() {
+        let ctx = egui::Context::default();
+        let pos = egui::pos2(100., 100.);
+        let _ = ctx.run(egui::RawInput { events: vec![egui::Event::PointerButton {
+            pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE,
+        }], ..Default::default() }, |ctx| {
+            claim_modal_click(ctx, false);
+            assert!(selection_click_available(ctx));
+        });
+    }
+    #[test] fn extrude_confirm_click_keeps_selection_through_release() {
+        use crate::ui::modal_model::{Kind, State};
+        let ctx = egui::Context::default();
+        let pos = egui::pos2(100., 100.);
+        let mut modal = Some(State::new(Kind::Extrude, pos, 1.));
+        let mut selected_face = 3;
+        let button = |pressed| egui::Event::PointerButton {
+            pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
+        };
+        let _ = ctx.run(egui::RawInput { events: vec![egui::Event::PointerMoved(pos), button(true)], ..Default::default() }, |ctx| {
+            let modal_frame = modal.is_some();
+            assert!(modal_frame);
+            modal.take(); // update_model_modal confirms the extrude on this press.
+            claim_modal_click(ctx, modal_frame);
+            if selection_click_available(ctx) { selected_face = 8; }
+            release_modal_click(ctx);
+        });
+        assert_eq!(selected_face, 3);
+        let _ = ctx.run(egui::RawInput { events: vec![button(false)], ..Default::default() }, |ctx| {
+            if selection_click_available(ctx) { selected_face = 8; }
+            release_modal_click(ctx);
+        });
+        assert_eq!(selected_face, 3);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| assert!(selection_click_available(ctx)));
     }
     #[test] fn rmb_click_waits_for_drag_or_movement() {
         let start = egui::pos2(10., 10.);
