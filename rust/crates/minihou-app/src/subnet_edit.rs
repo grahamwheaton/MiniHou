@@ -204,6 +204,75 @@ pub fn add_output(value: &Value, id: &str, target: &str, port: &str) -> Option<V
     crate::graph_edit::connect_output(&next, id, index as usize, target, Some(port))
 }
 
+/// Add an output beside the selected boundary. The new boundary starts with
+/// that boundary's stream and can then be rewired independently inside the subnet.
+pub fn add_output_socket(value: &Value, id: &str, boundary: &str) -> Option<Value> {
+    let mut next = value.clone();
+    let sub = next["nodes"].get_mut(id).filter(|node| node["type"] == "subnet")?;
+    ensure_sockets(sub)?;
+    let index = sub["output_sockets"].as_array()?.iter().filter_map(|socket| socket["index"].as_u64()).max().map_or(0, |i| i + 1);
+    let inner = sub["inner"]["nodes"].as_object_mut()?;
+    let selected = inner.get(boundary)?;
+    let source = match selected["type"].as_str()? {
+        "subnet_input" | "input" => json!(boundary),
+        "subnet_output" | "output" => selected["inputs"].get("geo")?.clone(),
+        _ => return None,
+    };
+    let name = fresh(inner, "output");
+    inner.insert(name, json!({"type":"subnet_output","port_index":index,
+        "inputs":{"geo":source},"pos":[220.0,index as f64 * 96.0]}));
+    sub["output_sockets"].as_array_mut()?.push(json!({"index":index,"name":format!("Output {}",index+1)}));
+    Some(next)
+}
+
+/// Turn the parameter exposure from an inner editor into an input on its
+/// enclosing subnet. Keep the exposure in the inner graph so the editor can
+/// show and undo the toggle when that subnet is entered again.
+pub fn expose_parameters(value: &Value, id: &str, entries: Vec<Value>) -> Option<Value> {
+    let mut next = value.clone();
+    let sub = next["nodes"].get_mut(id).filter(|node| node["type"] == "subnet")?;
+    let inner = sub["inner"]["nodes"].as_object()?;
+    let mut additions = Vec::new();
+    for entry in &entries {
+        let target = entry["node"].as_str()?;
+        let param = entry["param"].as_str()?;
+        let node = inner.get(target)?;
+        let spec = minihou_core::nodes::get(node["type"].as_str()?)?.params.iter()
+            .find(|spec| spec.name == param && spec.supported)?;
+        let default = node["params"].get(param).cloned().unwrap_or_else(|| (spec.default)());
+        additions.push((target.to_owned(), param.to_owned(), default));
+    }
+    let old = sub["inner"]["exposed"].as_array().cloned().unwrap_or_default();
+    let removed: Vec<(String, String)> = old.iter().filter(|entry| !entries.iter().any(|e| e["node"] == entry["node"] && e["param"] == entry["param"]))
+        .filter_map(|entry| Some((entry["node"].as_str()?.to_owned(), entry["param"].as_str()?.to_owned()))).collect();
+    let mut removed_names = Vec::new();
+    if let Some(promoted) = sub["promoted_params"].as_array_mut() {
+        promoted.retain(|entry| {
+            let remove = removed.iter().any(|(node, param)| entry["node"] == *node && entry["param"] == *param);
+            if remove { if let Some(name) = entry["name"].as_str() { removed_names.push(name.to_owned()); } }
+            !remove
+        });
+    }
+    for name in removed_names {
+        sub["params"].as_object_mut().map(|params| params.remove(&name));
+        sub["channels"].as_object_mut().map(|channels| channels.remove(&name));
+    }
+    for (entry, (target, param, default)) in entries.iter().zip(additions) {
+        if old.iter().any(|e| e["node"] == *target && e["param"] == *param) { continue; }
+        let base = entry["name"].as_str()?.to_owned();
+        let mut name = base.clone();
+        let mut suffix = 2;
+        while minihou_core::nodes::subnet_public_params(sub).iter().any(|e| e["name"] == name) {
+            name = format!("{base}_{suffix}"); suffix += 1;
+        }
+        if !sub["promoted_params"].is_array() { sub["promoted_params"] = json!([]); }
+        sub["promoted_params"].as_array_mut()?.push(json!({"name":name,"node":target,"param":param,"default":default}));
+        sub["params"][&name] = default;
+    }
+    sub["inner"]["exposed"] = Value::Array(entries);
+    Some(next)
+}
+
 pub fn group(value: &Value, ids: &[String]) -> Option<(Value, String)> {
     let nodes = value.get("nodes")?.as_object()?;
     let sel: BTreeSet<&str> = ids.iter().map(String::as_str).collect();

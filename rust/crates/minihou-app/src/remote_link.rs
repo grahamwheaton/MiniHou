@@ -37,9 +37,10 @@ pub fn link_interface(doc: &Value) -> Value {
         let Some(param) = entry["param"].as_str() else { continue };
         let Some(name) = entry["name"].as_str() else { continue };
         let Some(typ) = doc["nodes"][node]["type"].as_str() else { continue };
-        let Some(spec) = minihou_core::nodes::get(typ).and_then(|s| s.params.iter().find(|p| p.name == param)) else { continue };
-        if !spec.supported { continue; }
-        let default = (spec.default)();
+        let spec = minihou_core::nodes::get(typ).and_then(|s| s.params.iter().find(|p| p.name == param && p.supported));
+        let promoted = (typ == "subnet").then(|| minihou_core::nodes::subnet_public_params(&doc["nodes"][node])
+            .into_iter().find(|p| p["name"] == param)).flatten();
+        let Some(default) = spec.map(|spec| (spec.default)()).or_else(|| promoted.map(|p| p["default"].clone())) else { continue };
         let meta = param_meta(typ, param);
         let kind = meta.map_or_else(|| param_kind(&default), |m| metadata_kind(m, &default));
         let kind = match kind { ParamKind::Bool => "bool", ParamKind::Integer => "int", ParamKind::Float => "float", ParamKind::Vec3 => "vec3", _ => continue };
@@ -163,9 +164,11 @@ pub fn link_param_edit(doc: &Value, message: &Value) -> Result<Edit> {
     let value = snap_float32(message.get("value").ok_or("missing value")?);
     let typ = doc["nodes"][node]["type"].as_str().ok_or("no such node")?;
     let spec = minihou_core::nodes::get(typ).ok_or("unsupported node")?
-        .params.iter().find(|p| p.name == param).ok_or("unknown parameter")?;
-    if !spec.supported { return Err("parameter is not supported by the Rust backend".into()); }
-    let default = (spec.default)();
+        .params.iter().find(|p| p.name == param && p.supported);
+    let promoted = (typ == "subnet").then(|| minihou_core::nodes::subnet_public_params(&doc["nodes"][node])
+        .into_iter().find(|p| p["name"] == param)).flatten();
+    let default = spec.map(|spec| (spec.default)()).or_else(|| promoted.map(|p| p["default"].clone()))
+        .ok_or("unknown or unsupported parameter")?;
     let meta = param_meta(typ, param);
     let kind = meta.map_or_else(|| param_kind(&default), |m| metadata_kind(m, &default));
     let valid = match kind {
@@ -196,6 +199,22 @@ pub fn link_param_edit(doc: &Value, message: &Value) -> Result<Edit> {
 mod link_tests {
     use super::*;
     use crate::{Document, History};
+
+    #[test]
+    fn root_subnet_input_is_blender_visible_but_inner_exposure_is_not() {
+        let graph=json!({"display":"sub","exposed":[{"name":"Offset","node":"sub","param":"move_translate"}],
+            "nodes":{"sub":{"type":"subnet","promoted_params":[{"name":"move_translate","node":"move","param":"translate","default":[0,0,0]}],
+                "inner":{"exposed":[{"name":"move_translate","node":"move","param":"translate"}],
+                    "nodes":{"point":{"type":"point"},"move":{"type":"transform","inputs":{"geo":"point"}}},"output":"move"}}}});
+        let params=link_interface(&graph)["params"].as_array().unwrap().clone();
+        assert_eq!(params.len(),1);
+        assert_eq!((params[0]["name"].as_str(),params[0]["kind"].as_str()),(Some("Offset"),Some("vec3")));
+        let edit=link_param_edit(&graph,&json!({"name":"Offset","value":[2,3,4]})).unwrap();
+        let mut doc=Document::parse(graph.to_string()).unwrap();
+        doc.edit(&edit).unwrap();
+        assert_eq!(doc.value()["nodes"]["sub"]["params"]["move_translate"],json!([2,3,4]));
+        assert_eq!(doc.session().unwrap().cook(None).unwrap().p(),&[2.0,3.0,4.0]);
+    }
 
     #[test]
     fn network_linked_parameter_edits_follow_both_directions_and_undo_together() {

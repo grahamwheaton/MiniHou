@@ -80,6 +80,8 @@ pub enum UiAction {
     ToggleDisplay(String),
     /// A document edit (parameter, mute/bypass, display, whole-graph replace). `continuous` is true while a drag is in progress.
     Edit { edit: Edit, continuous: bool },
+    /// A subnet boundary parameter-panel command; resolved against the current subnet scope.
+    AddSubnetOutput(String),
     /// A timeline cook without changing the document or undo history.
     Time(Edit),
     /// A shelf tool: add a node of this type (after `after`, wired to it, when given).

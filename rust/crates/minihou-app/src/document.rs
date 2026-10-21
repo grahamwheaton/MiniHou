@@ -152,7 +152,10 @@ impl Document {
             Edit::Param { node, name, value } => {
                 let typ = self.value["nodes"][node]["type"].as_str().ok_or("no such node")?.to_owned();
                 let spec = minihou_core::nodes::get(&typ).ok_or("unsupported node")?;
-                if !spec.params.iter().any(|p| p.name == name) && !(typ == "controller" && minihou_core::controller::parameter(&self.value["nodes"][node], name).is_some()) { return Err("unknown parameter".into()); }
+                if !spec.params.iter().any(|p| p.name == name)
+                    && !(typ == "controller" && minihou_core::controller::parameter(&self.value["nodes"][node], name).is_some())
+                    && !(typ == "subnet" && minihou_core::nodes::subnet_public_params(&self.value["nodes"][node]).iter().any(|p| p["name"] == *name))
+                { return Err("unknown parameter".into()); }
                 self.set(&["nodes", node, "params", name], value.clone());
                 if let Some(group) = self.value["nodes"][node]["linked_params_group"].as_str().map(str::to_owned) {
                     let peers: Vec<String> = self.value["nodes"].as_object().into_iter().flatten()

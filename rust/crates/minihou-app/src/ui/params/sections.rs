@@ -434,6 +434,27 @@ pub fn promoted_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &s
         let Some(name)=entry["name"].as_str() else {continue};
         let default=entry.get("default").cloned().unwrap_or(json!(0.0));
         let old=subnet["params"].get(name).unwrap_or(&default);
+        if let Some(values)=old.as_array().filter(|values| values.len()==3 && values.iter().all(Value::is_number)) {
+            let mut numbers: Vec<f64>=values.iter().map(|value| value.as_f64().unwrap()).collect();
+            let changed=ui.horizontal(|ui| {
+                ui.label(entry["label"].as_str().unwrap_or(name));
+                let mut changed=false;
+                for number in &mut numbers { changed |= ui.add(egui::DragValue::new(number).speed(0.01)).changed(); }
+                changed
+            }).inner;
+            if changed {
+                let mut next=v.doc.clone(); next["nodes"][id]["params"][name]=json!(numbers);
+                out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:true});
+            }
+            continue;
+        }
+        if let Some(mut checked)=old.as_bool() {
+            if ui.checkbox(&mut checked,entry["label"].as_str().unwrap_or(name)).changed() {
+                let mut next=v.doc.clone(); next["nodes"][id]["params"][name]=json!(checked);
+                out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:false});
+            }
+            continue;
+        }
         let Some(mut number)=old.as_f64() else {continue};
         let min=entry["min"].as_f64().unwrap_or(0.0);
         let max=entry["max"].as_f64().unwrap_or(10.0).max(min+f64::EPSILON);

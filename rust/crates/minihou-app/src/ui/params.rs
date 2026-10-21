@@ -49,6 +49,17 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
         return;
     };
     let typ = &node.node_type;
+    if matches!(typ.as_str(), "subnet_input" | "subnet_output" | "input" | "output")
+        && v.doc["nodes"][id]["port_index"].is_number() {
+        ui.heading(if matches!(typ.as_str(), "subnet_input" | "input") { "Subnet Input" } else { "Subnet Output" });
+        ui.menu_button("Parameter options", |ui| {
+            if ui.button("Add output").clicked() {
+                out.push(UiAction::AddSubnetOutput(id.to_owned()));
+                ui.close();
+            }
+        });
+        return;
+    }
     if typ == "subnet" {
         promoted_panel(ui, v, out, id);
         return;

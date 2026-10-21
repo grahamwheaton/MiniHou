@@ -659,6 +659,8 @@ impl App {
                     | UiAction::BlenderDetect | UiAction::BlenderRestartLink) => self.blender_action(action, ctx),
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
+                // The scoped parameter panel converts this command to Edit::Replace.
+                UiAction::AddSubnetOutput(_) => {}
             }
         }
         if self.selected != prev_selected {
