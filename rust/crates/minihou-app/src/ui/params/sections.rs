@@ -300,8 +300,8 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
     if changed {
         let mut next=v.doc.clone();next["nodes"][id]["controller_sections"]=json!(sections);
         let kept:std::collections::HashSet<String>=minihou_core::controller::parameters(&next["nodes"][id]).iter().filter_map(|e|e["name"].as_str().map(str::to_owned)).collect();
-        if let Some(values)=next["nodes"][id]["params"].as_object_mut() {values.retain(|name,_|kept.contains(name));}
-        if let Some(channels)=next["nodes"][id]["channels"].as_object_mut() {channels.retain(|name,_|kept.contains(name.split('.').next().unwrap_or("")));}
+        if let Some(values)=next["nodes"][id].get_mut("params").and_then(Value::as_object_mut) {values.retain(|name,_|kept.contains(name));}
+        if let Some(channels)=next["nodes"][id].get_mut("channels").and_then(Value::as_object_mut) {channels.retain(|name,_|kept.contains(name.split('.').next().unwrap_or("")));}
         if minihou_core::controller::validate(&next["nodes"][id]).is_ok() {
             out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:false});
         }
@@ -331,6 +331,49 @@ mod controller_panel_tests {
         assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "width")));
         assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "Shape")));
         assert!(out.0.is_empty());
+    }
+
+    #[test]
+    fn add_section_click_emits_persisted_controller_section() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"nodes":{"controller1":{"type":"controller"}},"display":"controller1"}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "controller1".into();
+        f.display = "controller1".into();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let mut click = None;
+        let mut actions = Actions::default();
+        for phase in 0..3 {
+            let events = match (phase, click) {
+                (1, Some(pos)) => vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+                (2, Some(pos)) => vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800., 600.))), events, ..Default::default() };
+            let output = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| super::super::show(ui, &f.view(), &mut actions));
+            });
+            if phase == 0 {
+                click = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "Add section" => Some(t.pos + t.galley.size() * 0.5),
+                    _ => None,
+                });
+            }
+        }
+        assert!(click.is_some(), "Add section button must be drawn");
+        let next = actions.0.into_iter().find_map(|action| match action {
+            UiAction::Edit { edit: Edit::Replace(next), .. } => Some(next),
+            _ => None,
+        }).expect("Add section click must emit a document edit");
+        assert_eq!(next["nodes"]["controller1"]["controller_sections"], json!([{"name":"Section 1","parameters":[]}]));
+        assert!(next["nodes"]["controller1"].get("channels").is_none());
+        f.doc = minihou_app::Document::parse(next.to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        let rendered = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| super::super::show(ui, &f.view(), &mut Actions::default()));
+        });
+        assert!(rendered.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "Section 1")));
     }
 }
 
