@@ -37,8 +37,13 @@ impl App {
         if self.editor_state.selection == ui::SelectionMode::Object && self.active_object().is_none() { return; }
         let Some(active)=self.active_object().map(str::to_owned) else {return;};
         let offset=active_range(&active,&self.display_ranges).map(|r|r.start).unwrap_or(0);
-        let group = group_text(&self.selected_points().iter().map(|p|p-offset).collect::<Vec<_>>());
-        if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
+        let duplicate_branch = self.transform_target.as_ref().is_some_and(|id|
+            self.editor.doc.value()["nodes"][id]["inputs"]["geo"].as_str()
+                .is_some_and(|input| self.editor.doc.value()["nodes"][input]["type"] == "split"));
+        let group = if duplicate_branch { String::new() } else {
+            group_text(&self.selected_points().iter().map(|p|p-offset).collect::<Vec<_>>())
+        };
+        if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() && !duplicate_branch {
             self.file_status = "Select points, edges, or faces to transform".into();
             return;
         }

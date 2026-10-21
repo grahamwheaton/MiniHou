@@ -106,7 +106,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Ctrl+D | Duplicate nodes | Network |
 | Shift+D | Duplicate nodes | Network |
 | Alt+D | Duplicate linked parameters | Network |
-| Shift+D | Duplicate objects and move | Viewport |
+| Shift+D | Duplicate selection and move | Viewport |
 | Alt+D | Duplicate objects and move | Viewport |
 | Ctrl+G | Group nodes | Network |
 | Ctrl+U | Ungroup subnet | Network |
@@ -172,6 +172,8 @@ In edit mode, E starts PolyExtrude on selected faces, edges, or points. Faces pr
 Alt+M (or the shelf's Mirror button) starts the Mirror tool (Houdini's Mirror tool state plus a HardOps-style axis gizmo; details in `src/ui/mirror_tool.rs`). Six cubes surround the selected object (+X/-X red, +Y/-Y green, +Z/-Z blue). Clicking a cube adds a `mirror` node after the selected node (before the output) that keeps that side (Cut) and mirrors it across the bounds centre; Shift+click mirrors about the world origin. The negative cube sets Reverse. A second axis chains another mirror node; clicking the other cube of an axis already mirrored flips its side, clicking the same cube again removes that node. The plane of the active node is drawn with an origin dot (drag: move the plane in the view), an arrow on the kept side (drag: slide along it; Shift finer) and a ring (drag: rotate the direction; Shift snaps to 15 degrees). F then drag draws the plane (direction along the drawn line, through the start point; F then click on a face uses its normal). G toggles the input wireframe, H the plane. The Parameters panel edits the same node live. Enter or a click on empty viewport confirms the whole session as one undo step; Esc or RMB restores the graph exactly. In edit mode with faces selected the node uses Mirror Selected on those faces. Selecting an existing mirror node and pressing Alt+M edits it.
 
 In point, edge, or face mode, Ctrl+G over the viewport inserts Group Create from the selected elements, and X or Delete inserts Blast from them. The node uses the selection's domain and is placed after the selected displayed stream. Edge groups use the selected edges, not their endpoints. V toggles the scale cage during a modal scale; C starts circle selection.
+
+Shift+D duplicates selected points, edges, or faces through editable Split, Transform, and Merge nodes, then starts the move interaction. In Object mode it duplicates the displayed object graph. Alt+D keeps its Object-only behavior.
 
 <!-- modal:start -->
 | Input | During modal transform |
