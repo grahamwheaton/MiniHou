@@ -584,6 +584,22 @@ pub fn show_with_snap(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions
             }
         }
     }
+    #[test] fn perspective_ring_sweep_matches_its_screen_direction() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(600., 400.));
+        let camera = CameraInfo {
+            projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,1.],[0.,0.,0.,0.]],
+            ray_forward: [0.,0.,1.], ..Default::default()
+        };
+        let origin = [0.3,0.4,3.];
+        let frame = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        for axis in 0..3 {
+            let ring = ring_points(camera,rect,origin,frame,axis);
+            let center = project(camera,rect,origin).unwrap();
+            let radius = [42.,54.,66.][axis];
+            assert!(ring.iter().all(|p| (p.0.distance(center)-radius).abs()<0.01));
+            assert!((axis_sweep(camera,rect,origin,frame,axis,ring[0].0,ring[24].0)-90.).abs()<0.01);
+        }
+    }
     #[test] fn move_drag_shows_units() {
         let mut f = crate::ui::testing::Fixture::new();
         f.camera.projection = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]];
