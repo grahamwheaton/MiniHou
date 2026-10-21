@@ -60,17 +60,36 @@ fn projected_basis(camera: CameraInfo, rect: Rect, origin: [f32; 3], axis: [f32;
 fn gizmo_span(camera: CameraInfo, rect: Rect, origin: [f32;3], frame: [[f32;3];3]) -> f32 {
     82. / frame.into_iter().map(|a| projected_basis(camera,rect,origin,a).length()).fold(1e-6, f32::max)
 }
-fn ring_points(camera: CameraInfo, rect: Rect, origin: [f32; 3], frame: [[f32; 3]; 3], axis: usize, _span: f32) -> Vec<(Pos2, bool)> {
+fn ring_basis(camera: CameraInfo, rect: Rect, origin: [f32; 3], frame: [[f32; 3]; 3], axis: usize) -> (Vec2, Vec2) {
+    let a = frame[(axis + 1) % 3];
+    let b = frame[(axis + 2) % 3];
+    let projected_a = projected_basis(camera, rect, origin, a);
+    let projected_b = projected_basis(camera, rect, origin, b);
+    // The world plane can project to a line. Use its visible direction to orient
+    // a screen-facing ring, and a perpendicular direction for the collapsed one.
+    let first = if projected_a.length_sq() > 1e-4 { projected_a.normalized() }
+        else if projected_b.length_sq() > 1e-4 { -projected_b.rot90().normalized() }
+        else { vec2(1., 0.) };
+    let determinant = projected_a.x * projected_b.y - projected_a.y * projected_b.x;
+    let winding = if determinant.abs() > 1e-3 { determinant.signum() }
+        else { let facing = dot(frame[axis], camera.ray_forward); if facing.abs() > 1e-4 { facing.signum() } else { 1. } };
+    (first, first.rot90() * winding)
+}
+fn ring_points(camera: CameraInfo, rect: Rect, origin: [f32; 3], frame: [[f32; 3]; 3], axis: usize) -> Vec<(Pos2, bool)> {
     let a = frame[(axis + 1) % 3];
     let b = frame[(axis + 2) % 3];
     let center = project(camera, rect, origin).unwrap_or(rect.center());
-    let radius = gizmo_span(camera,rect,origin,frame) * 62./82.;
+    // Separate the three screen-facing rings so each remains independently hittable.
+    let radius = [42., 54., 66.][axis];
+    let (screen_a, screen_b) = ring_basis(camera, rect, origin, frame, axis);
     (0..=96).map(|i| {
         let theta = i as f32 * std::f32::consts::TAU / 96.;
-        let offset = add(mul(a, radius * theta.cos()), mul(b, radius * theta.sin()));
-        (center + projected_basis(camera,rect,origin,offset), dot(offset, camera.ray_forward) <= 0.)
+        let offset = add(mul(a, theta.cos()), mul(b, theta.sin()));
+        (center + (screen_a * theta.cos() + screen_b * theta.sin()) * radius,
+            dot(offset, camera.ray_forward) <= 0.)
     }).collect()
 }
+fn ring_handle(ring: &[(Pos2, bool)]) -> Pos2 { ring[0].0 }
 fn ring_hit(rings: &[Vec<(Pos2, bool)>; 3], pointer: Pos2) -> Option<usize> {
     rings.iter().enumerate().filter_map(|(axis, ring)| {
         let distance = ring.windows(2).map(|pair| screen_segment_distance(pointer, pair[0].0, pair[1].0)).fold(f32::INFINITY, f32::min);
@@ -79,10 +98,8 @@ fn ring_hit(rings: &[Vec<(Pos2, bool)>; 3], pointer: Pos2) -> Option<usize> {
 }
 fn axis_sweep(camera: CameraInfo, rect: Rect, origin: [f32;3], frame: [[f32;3];3], axis: usize, previous: Pos2, current: Pos2) -> f32 {
     let center=project(camera,rect,origin).unwrap_or(rect.center());
-    let a=projected_basis(camera,rect,origin,frame[(axis+1)%3]);
-    let b=projected_basis(camera,rect,origin,frame[(axis+2)%3]);
-    if (a.x*b.y-a.y*b.x).abs()<1e-3 { return swept_degrees(previous,current,center)*dot(frame[axis],camera.ray_forward).signum(); }
-    let point=|p| { let (x,y)=plane_delta(p-center,a,b,1.); pos2(x,y) };
+    let (a,b)=ring_basis(camera,rect,origin,frame,axis);
+    let point=|p: Pos2| { let delta=p-center; pos2(delta.dot(a),delta.dot(b)) };
     swept_degrees(point(previous),point(current),Pos2::ZERO)
 }
 
@@ -154,7 +171,7 @@ pub fn hit(rect: Rect, v: &View, pointer: Pos2) -> bool {
     let Some(center) = project(v.camera, rect, origin) else { return false; };
     let frame = axis_frame(v);
     if v.editor.tool == Tool::Rotate {
-        let rings = [0, 1, 2].map(|axis| ring_points(v.camera, rect, origin, frame, axis, v.bounds.1.max(0.1) * 0.4));
+        let rings = [0, 1, 2].map(|axis| ring_points(v.camera, rect, origin, frame, axis));
         return ring_hit(&rings, pointer).is_some() || (pointer-center).length() <= 80.;
     }
     for axis in 0..3 {
@@ -250,7 +267,7 @@ pub fn show_with_snap(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions
     let mut plane_drag: Option<PlaneDrag> = ui.ctx().data_mut(|d| d.get_temp(plane_id));
     let colors = [Color32::from_rgb(242,75,91), Color32::from_rgb(132,204,30), Color32::from_rgb(73,144,255)];
     let frame = axis_frame(v);
-    let rings = [0, 1, 2].map(|axis| ring_points(v.camera, rect, origin, frame, axis, v.bounds.1.max(0.1) * 0.4));
+    let rings = [0, 1, 2].map(|axis| ring_points(v.camera, rect, origin, frame, axis));
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let free_id = egui::Id::new("transform_free_drag");
     let mut free_drag: Option<FreeDrag> = ui.ctx().data_mut(|d|d.get_temp(free_id));
@@ -277,7 +294,7 @@ pub fn show_with_snap(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions
     }
     for axis in 0..3 {
         let dir = screen_axis(rect,v,center,frame,axis);
-        let tip = center + dir;
+        let tip = if tool == Tool::Rotate { ring_handle(&rings[axis]) } else { center + dir };
         let over = if tool == Tool::Rotate { hovered_ring == Some(axis) } else { hovered_axis == Some(axis) };
         let hover = over || drag.as_ref().is_some_and(|d| d.axis == axis);
         let color = if hover { colors[axis].lerp_to_gamma(Color32::WHITE,0.45) } else { colors[axis] };
@@ -525,17 +542,47 @@ pub fn show_with_snap(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions
         let total: f32 = p.windows(2).map(|w| swept_degrees(w[0], w[1], c)).sum();
         assert!((total - 360.).abs() < 1e-4);
     }
-    #[test] fn rotate_rings_project_three_axis_planes_and_dim_the_back() {
+    #[test] fn rotate_rings_face_camera_and_dim_the_back() {
         let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],
             ray_forward: normal([0.3, 0.5, 0.8]), ..Default::default() };
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(400., 400.));
         let frame = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
-        let rings = [0,1,2].map(|axis| ring_points(camera, rect, [0.;3], frame, axis, 0.4));
+        let rings = [0,1,2].map(|axis| ring_points(camera, rect, [0.;3], frame, axis));
         assert!(rings.iter().all(|r| r.len() == 97 && r.iter().any(|p| p.1) && r.iter().any(|p| !p.1)));
-        let height = |ring: &Vec<(Pos2,bool)>| ring.iter().map(|p| p.0.y).fold(f32::NEG_INFINITY, f32::max)
-            - ring.iter().map(|p| p.0.y).fold(f32::INFINITY, f32::min);
-        assert!(height(&rings[0]) > 20. && height(&rings[1]) < 1. && height(&rings[2]) > 20.);
+        assert_eq!(rings[0][0].0.distance(rect.center()).round(), 42.);
+        assert_eq!(rings[1][0].0.distance(rect.center()).round(), 54.);
+        assert_eq!(rings[2][0].0.distance(rect.center()).round(), 66.);
         assert_eq!(ring_hit(&rings, rings[2][12].0), Some(2));
+    }
+    #[test] fn rotation_rings_and_handles_stay_round_at_camera_angles() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(400., 400.));
+        let frame = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        for forward in [[0.,0.,1.], [1.,0.,0.], [0.,1.,0.], [1.,0.0001,0.], [1.,1.,1.]] {
+            let forward = normal(forward);
+            let reference = if forward[1].abs() > 0.9 { [0.,0.,1.] } else { [0.,1.,0.] };
+            let cross = |a: [f32; 3], b: [f32; 3]| [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+            let right = normal(cross(reference, forward));
+            let up = cross(forward, right);
+            let camera = CameraInfo {
+                projection: [[right[0],up[0],forward[0],0.], [right[1],up[1],forward[1],0.],
+                    [right[2],up[2],forward[2],0.], [0.,0.,0.,1.]],
+                ray_forward: forward, ..Default::default()
+            };
+            let rings = [0,1,2].map(|axis| ring_points(camera,rect,[0.;3],frame,axis));
+            for (axis, ring) in rings.iter().enumerate() {
+                let x = ring.iter().map(|p|p.0.x).fold(f32::NEG_INFINITY,f32::max)
+                    - ring.iter().map(|p|p.0.x).fold(f32::INFINITY,f32::min);
+                let y = ring.iter().map(|p|p.0.y).fold(f32::NEG_INFINITY,f32::max)
+                    - ring.iter().map(|p|p.0.y).fold(f32::INFINITY,f32::min);
+                assert!(x.min(y)/x.max(y) > 0.95, "axis={axis} forward={forward:?} bounds={x}x{y}");
+                let handle = ring_handle(ring);
+                assert!((handle.distance(rect.center()) - [42.,54.,66.][axis]).abs() < 0.01);
+                let distance = ring.windows(2).map(|pair|screen_segment_distance(handle,pair[0].0,pair[1].0))
+                    .fold(f32::INFINITY,f32::min);
+                assert!(distance < 0.01, "axis={axis} forward={forward:?} distance={distance}");
+                assert_eq!(ring_hit(&rings,handle),Some(axis));
+            }
+        }
     }
     #[test] fn move_drag_shows_units() {
         let mut f = crate::ui::testing::Fixture::new();
