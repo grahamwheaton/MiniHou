@@ -1,0 +1,13 @@
+{
+  "label": {
+    "default": "",
+    "doc": "A note for yourself; the geometry passes through untouched",
+    "kind": "str"
+  },
+  "size": {
+    "default": 1.0,
+    "doc": "Size of the viewport crosshair in world units",
+    "kind": "float",
+    "min": 0.0
+  }
+}

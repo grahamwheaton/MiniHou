@@ -306,7 +306,6 @@ pub fn registry() -> &'static [NodeSpec] {
         NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: Some(lod_bake_sidecar), name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
         #[cfg(test)]
         NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: Some(test_sidecar), name: "test_sidecar", inputs: &[], params: &[], cook: empty_subnet_input },
-        NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
         delaunay::DELAUNAY,
         surface::BRIDGE,
         surface::REVOLVE,

@@ -34,6 +34,34 @@ use mesh_buffers::{Boxes, Partition, edge_world_of, sharp_edges, index_buffer, o
 
 const SKETCHUP_CREASE_DEGREES: f32 = 30.0;
 
+/// The Null's three world-space axes, centred on its origin.
+pub fn null_crosshair(size: f32) -> [[[f32; 3]; 2]; 3] {
+    let radius = size.max(0.0);
+    std::array::from_fn(|axis| {
+        let mut a = [0.0; 3];
+        let mut b = [0.0; 3];
+        a[axis] = -radius;
+        b[axis] = radius;
+        [a, b]
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn null_crosshair_scales_all_three_axes() {
+    let small = null_crosshair(1.0);
+    let large = null_crosshair(2.0);
+    for axis in 0..3 {
+        assert_eq!(small[axis][0][axis], -1.0);
+        assert_eq!(large[axis][1][axis], 2.0);
+        for endpoint in 0..2 {
+            for other in 0..3 {
+                if axis != other { assert_eq!(large[axis][endpoint][other], 0.0); }
+            }
+        }
+    }
+}
+
 /// Renderer switches; stats and the orientation widget are painted by the UI.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Overlay { pub grid: bool, pub axes: bool, pub geometry: crate::ui::Overlays, pub light_background: bool, pub normals: bool, pub bounds: bool, pub xray: bool, pub wireframe: bool, pub visibility: ObjectVisibility, pub matcap: MatCap, pub matcap_flat: bool, pub object_color: ObjectColor, pub textures: bool }

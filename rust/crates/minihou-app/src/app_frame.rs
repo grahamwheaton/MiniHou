@@ -375,6 +375,18 @@ impl eframe::App for App {
                     }
                 }
 
+                let displayed_node = &v.doc["nodes"][&self.display];
+                if !self.object_hidden && displayed_node["type"] == "null" {
+                    let size = displayed_node["params"]["size"].as_f64().unwrap_or(1.0).clamp(0.0, 10_000.0) as f32;
+                    let color = if self.selected_set.contains(&self.display) { egui::Color32::from_rgb(255, 166, 56) }
+                        else { egui::Color32::from_rgb(220, 225, 235) };
+                    for [a, b] in viewport::null_crosshair(size) {
+                        if let (Some(start), Some(end)) = (ui::transform_gizmo::project(v.camera, rect, a), ui::transform_gizmo::project(v.camera, rect, b)) {
+                            ui.painter().line_segment([start, end], egui::Stroke::new(2.0, color));
+                        }
+                    }
+                }
+
 
                 // Elements in edit modes 1/2/3 (Item 4)
                 if !self.object_hidden && !self.mode.bounds() {
