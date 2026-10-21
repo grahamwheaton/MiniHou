@@ -80,6 +80,17 @@ impl Modal {
         if self.constraint != Constraint::Free { self.constraint = Constraint::Free; }
         else { self.mmb_start = Some(pos); }
     }
+    pub fn after_cage_apply(&self, pivot: [f32; 3]) -> Self {
+        let (center, size) = cage_target(self.bounds, pivot, self.last);
+        let bounds = ([0,1,2].map(|i| center[i] - size[i] * 0.5),
+            [0,1,2].map(|i| center[i] + size[i] * 0.5));
+        let mut next = Self::new(Kind::Scale, self.pointer, center, bounds, self.snap_to,
+            self.proportional, self.radius);
+        next.cage = true;
+        next.rotation = self.rotation;
+        next.units = self.units;
+        next
+    }
     pub fn status(&self, snap: bool) -> String {
         let title = match self.kind { Kind::Move => "Move", Kind::Rotate => "Rotate", Kind::Scale => "Scale" };
         let numbers = if self.kind == Kind::Move {
@@ -319,6 +330,19 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         assert_eq!(modal.cage_handle,None);
         assert_eq!(modal.constraint,Constraint::Free);
     }
+    #[test] fn applied_cage_is_ready_for_another_adjustment() {
+        let mut modal=Modal::new(Kind::Scale,pos2(10.,10.),[1.;3],([0.;3],[2.;3]),SnapTo::Increment,false,1.);
+        modal.cage=true;
+        modal.cage_handle=Some(CageHandle::Face(0,true));
+        modal.pointer=pos2(30.,10.);
+        modal.last=[1.5,1.,1.];
+        let next=modal.after_cage_apply([0.,1.,1.]);
+        assert!(next.cage);
+        assert_eq!(next.cage_handle,None);
+        assert_eq!(next.last,[1.;3]);
+        assert_eq!(next.bounds,([0.,0.,0.],[3.,2.,2.]));
+        assert_eq!(next.start,modal.pointer);
+    }
     #[test] fn double_g_in_edge_mode_starts_edge_slide() {
         use crate::ui::SelectionMode as M;
         assert!(double_g_slides(Kind::Move,M::Edges));
@@ -478,6 +502,10 @@ impl App {
             let op=modal.step(values);
             self.transform_node_at(op,Some(pivot),Some(orientation));
         }
-        if confirm { self.finish_modal(modal); } else { self.modal=Some(modal); ctx.request_repaint(); }
+        if confirm {
+            let next_cage = modal.cage.then(|| modal.after_cage_apply(pivot));
+            self.finish_modal(modal);
+            if let Some(next_cage) = next_cage { self.modal=Some(next_cage); ctx.request_repaint(); }
+        } else { self.modal=Some(modal); ctx.request_repaint(); }
     }
 }
