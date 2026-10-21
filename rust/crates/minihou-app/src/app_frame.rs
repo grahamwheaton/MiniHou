@@ -92,9 +92,7 @@ impl eframe::App for App {
         }
         let mirror_frame = self.mirror.is_some();
         if mirror_frame { self.update_mirror(ctx); }
-        if (modal_frame || model_modal_frame) && self.modal.is_none() && self.model_modal.is_none() && ctx.input(|i| i.pointer.primary_pressed()) {
-            ctx.data_mut(|d| d.insert_temp(egui::Id::new("modal_confirm_click"), true));
-        }
+        viewport_input::claim_modal_click(ctx, modal_frame || model_modal_frame);
         if (ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx))
             && ctx.input(|i| i.pointer.secondary_pressed() || i.key_pressed(egui::Key::Escape)) {
             self.cancel_transform();
@@ -465,9 +463,8 @@ impl eframe::App for App {
                 }
                 // the release of the click that confirmed a loop cut must not re-select under the cursor
                 let swallow_click=ctx.data(|d|d.get_temp::<bool>(egui::Id::new("mesh_cut_swallow_click"))).unwrap_or(false);
-                let confirming_modal=ctx.data(|d|d.get_temp::<bool>(egui::Id::new("modal_confirm_click"))).unwrap_or(false);
                 if swallow_click && !ctx.input(|i|i.pointer.primary_down()) { ctx.data_mut(|d|d.remove::<bool>(egui::Id::new("mesh_cut_swallow_click"))); }
-                if !swallow_click && viewport_input::selection_click_available(confirming_modal) && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect,&v,p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
+                if !swallow_click && viewport_input::selection_click_available(ctx) && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect,&v,p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
                     && self.param_pick.as_ref().is_none_or(|pick| pick.ready && pick_source_ready(&self.display, &self.display_ranges, &pick.source)) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
@@ -658,9 +655,7 @@ impl eframe::App for App {
             if let Err(e) = self.prefs.save() { self.file_status = format!("Could not save preferences: {e}"); }
         }
         if fly_frame { ctx.set_cursor_icon(egui::CursorIcon::None); }
-        if ctx.input(|i| i.pointer.primary_released()) {
-            ctx.data_mut(|d| d.remove::<bool>(egui::Id::new("modal_confirm_click")));
-        }
+        viewport_input::release_modal_click(ctx);
         if self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.finish_history(); }
         self.apply(ctx, out.0);
         if (self.modal.is_none() && self.model_modal.is_none()) && !ctx.input(|i| i.pointer.primary_down()) { self.finish_transform(); }
