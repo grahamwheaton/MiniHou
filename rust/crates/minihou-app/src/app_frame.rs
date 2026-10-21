@@ -513,6 +513,7 @@ impl eframe::App for App {
                     });
                 }
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
+                ui.scope_builder(egui::UiBuilder::new().layer_id(ui::viewport_ui::scene_layer_id()).max_rect(rect), |ui| {
                 if tool_hover {
                     ui.painter().rect_stroke(rect.shrink(3.), 4., egui::Stroke::new(2_f32, v.theme.accent), egui::StrokeKind::Inside);
                     if let Some(tool) = egui::DragAndDrop::payload::<ui::ToolDrag>(ctx) {
@@ -578,6 +579,7 @@ impl eframe::App for App {
                     ui::selection_region::paint(ui, rect, &v);
                     coplanar_tool::show(ui,rect,&mut self.coplanar,v.units,&mut out);
                 }
+                });
             });
         }
         usd_export::show(self, ctx);
