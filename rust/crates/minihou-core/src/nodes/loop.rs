@@ -12,7 +12,7 @@ fn begin(_: &Inputs, _: &Params) -> Result<Geometry> { Err(Error::new("Loop Begi
 fn end(_: &Inputs, _: &Params) -> Result<Geometry> { Err(Error::new("Loop End requires graph evaluation (it is not a standalone body node)")) }
 
 pub(crate) type Budget = Rc<Cell<usize>>;
-pub(crate) fn budget() -> Budget { Rc::new(Cell::new(10000)) }
+pub(crate) fn budget() -> Budget { Rc::new(Cell::new(crate::limits::Limits::default().loop_iterations)) }
 
 #[derive(Default)]
 pub(crate) struct Plan { scopes: HashMap<String, Vec<String>> }
@@ -160,6 +160,9 @@ impl Region<'_> {
 #[cfg(test)] mod tests {
     use super::*;
     use serde_json::json;
+    #[test] fn default_iteration_budget_matches_previous_value() {
+        assert_eq!(budget().get(), 10_000);
+    }
     #[test]
     fn loop_body_reads_second_output() {
         let graph=Graph::from_value(&json!({"display":"end","nodes":{

@@ -1,5 +1,5 @@
-//! Shared performance budgets. Runtime code keeps its existing constants until the
-//! later Project Cheetah steps connect these values to their consumers.
+//! Shared performance budgets. Project Cheetah routes cache, image, Python bridge,
+//! and loop defaults through this type; later steps will connect the remaining consumers.
 
 /// Budgets and the hardware measurements used to derive them.
 #[derive(Clone, Debug, PartialEq, Eq)]

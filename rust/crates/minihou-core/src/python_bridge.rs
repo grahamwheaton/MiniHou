@@ -30,8 +30,6 @@ pub const DISABLED_MESSAGE: &str = "Python execution is disabled; enable it in P
 pub const CONFIRM_MESSAGE: &str = "Python snippet waiting for confirmation: choose Run or Skip in the banner";
 pub const SKIPPED_MESSAGE: &str = "Python snippet skipped for this session (edit the code or restart to be asked again)";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-pub const DEFAULT_MAX_OUTPUT: u64 = 2 << 30;
-const STDERR_CAP: usize = 64 * 1024;
 const MESSAGE_CAP: usize = 4000;
 
 /// What a gate says about one snippet. Pure: see [`decide`].
@@ -89,7 +87,7 @@ impl Default for PythonGate { fn default() -> Self { Self::denied() } }
 impl PythonGate {
     pub fn denied() -> Self {
         Self { allowed: AtomicBool::new(false), timeout_ms: AtomicU64::new(DEFAULT_TIMEOUT.as_millis() as u64),
-            max_output: AtomicU64::new(DEFAULT_MAX_OUTPUT), approved: Default::default(), skipped: Default::default(),
+            max_output: AtomicU64::new(crate::limits::Limits::default().python_output_bytes), approved: Default::default(), skipped: Default::default(),
             pending: Default::default(), runtime: Mutex::new(None) }
     }
     pub fn set_allowed(&self, on: bool) { self.allowed.store(on, Ordering::SeqCst); }
@@ -223,11 +221,12 @@ struct Outcome { status_ok: bool, code: Option<i32>, stderr: String, timed_out: 
 
 fn capped_reader(mut r: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
     let (tx, rx) = mpsc::channel();
+    let stderr_cap = crate::limits::Limits::default().python_stderr_bytes;
     std::thread::spawn(move || {
         let (mut keep, mut buf) = (Vec::new(), [0u8; 8192]);
         while let Ok(n) = r.read(&mut buf) {
             if n == 0 { break; }
-            let room = STDERR_CAP.saturating_sub(keep.len());
+            let room = stderr_cap.saturating_sub(keep.len());
             keep.extend_from_slice(&buf[..n.min(room)]);
         }
         let _ = tx.send(keep);
