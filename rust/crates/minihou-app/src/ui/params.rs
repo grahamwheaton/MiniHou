@@ -13,6 +13,7 @@ pub use sections::*;
 pub mod output_groups;
 pub use output_groups::{is_output_group_field, output_group_label, output_group_toggle, target_field, TARGET_TEAL};
 pub mod pick;
+mod group_fuzzy;
 pub use pick::{domain_edit_mode, is_input_group_field, pick_domain, pick_domain_for, pick_field, PICK_PURPLE, SELECT_ORANGE};
 pub mod widgets;
 pub use widgets::{boxed, color_widget, drag_number, file_widget, number_field, ramp_widget, render_vector_fields, widget, widget_styled, widget_with_units};
