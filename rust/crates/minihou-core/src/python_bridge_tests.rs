@@ -1,6 +1,13 @@
 use super::*;
 use crate::session::Session;
 
+#[test]
+fn default_output_and_stderr_caps_match_previous_values() {
+    assert_eq!(PythonGate::denied().max_output_bytes(), 2 << 30);
+    let captured = capped_reader(std::io::Cursor::new(vec![b'x'; 65 * 1024]));
+    assert_eq!(captured.recv().unwrap().len(), 64 * 1024);
+}
+
 fn sample() -> Geometry {
     let mut g = Geometry::from_arrays(vec![0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., f32::NAN], vec![0, 1, 2, 3, 0, 1], vec![0, 4, 6], Some(vec![true, false])).unwrap();
     g.vertex.insert("uv".into(), Arc::new(Attr::f32(2, vec![0., 0., 1., 0., 1., 1., 0., 1., f32::INFINITY, -0., 0.5, 0.25])));

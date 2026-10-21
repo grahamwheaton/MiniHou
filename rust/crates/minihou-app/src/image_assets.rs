@@ -2,16 +2,15 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use minihou_core::limits::Limits;
 use crate::materials::{Descriptor, Registry};
 
 pub const CHUNK: usize = 1024 * 1024;
-pub const MAX_IN_FLIGHT: usize = 512 * 1024 * 1024;
-pub const MAX_DECODED: usize = 256 * 1024 * 1024;
-pub const MAX_PIXELS: u64 = 16_000_000;
 
 struct Transfer { hash:String, total:usize, bytes:Vec<u8>, ranges:BTreeMap<usize,usize> }
 #[derive(Default)]
 pub struct Service {
+    limits: Limits,
     transfers:HashMap<String,Transfer>,
     retained:HashMap<String,Vec<u8>>,
     order:VecDeque<String>,
@@ -33,9 +32,9 @@ impl Service {
     }
     pub fn begin(&mut self,id:&str,hash:&str,total:usize)->Result<(),String> {
         if !hash.starts_with("sha256:") || hash.len()!=71 || !hash[7..].bytes().all(|b|b.is_ascii_hexdigit()) {return Err("invalid image hash".into());}
-        if total==0 || total>MAX_DECODED {return Err("image payload exceeds limit".into());}
+        if total==0 || total>self.limits.image_decoded_bytes as usize {return Err("image payload exceeds limit".into());}
         let in_flight:usize=self.transfers.values().map(|t|t.total).sum();
-        if in_flight.checked_add(total).is_none_or(|n|n>MAX_IN_FLIGHT) {return Err("image transfer budget exceeded".into());}
+        if in_flight.checked_add(total).is_none_or(|n|n>self.limits.image_in_flight_bytes as usize) {return Err("image transfer budget exceeded".into());}
         if self.transfers.contains_key(id) {return Err("duplicate transfer ID".into());}
         self.transfers.insert(id.into(),Transfer {hash:hash.into(),total,bytes:vec![0;total],ranges:BTreeMap::new()}); Ok(())
     }
@@ -55,13 +54,13 @@ impl Service {
         let format=image::guess_format(&t.bytes).map_err(|e|e.to_string())?;
         if !matches!(format,image::ImageFormat::Png|image::ImageFormat::Jpeg) {return Err("only PNG/JPEG assets are supported".into());}
         let (w,h)=image::ImageReader::with_format(std::io::Cursor::new(&t.bytes),format).into_dimensions().map_err(|e|e.to_string())?;
-        if w==0 || h==0 || u64::from(w)*u64::from(h)>MAX_PIXELS || u64::from(w)*u64::from(h)*4>MAX_DECODED as u64 {return Err("decoded image exceeds limit".into());}
+        if w==0 || h==0 || u64::from(w)*u64::from(h)>self.limits.image_max_pixels || u64::from(w)*u64::from(h)*4>self.limits.image_decoded_bytes {return Err("decoded image exceeds limit".into());}
         let decoded=image::load_from_memory_with_format(&t.bytes,format).map_err(|e|e.to_string())?;
         if matches!(decoded,image::DynamicImage::ImageLuma16(_)|image::DynamicImage::ImageLumaA16(_)|image::DynamicImage::ImageRgb16(_)|image::DynamicImage::ImageRgba16(_)|image::DynamicImage::ImageRgb32F(_)|image::DynamicImage::ImageRgba32F(_)) {return Err("high precision image unsupported".into());}
         if !self.retained.contains_key(&hash) {self.order.push_back(hash.clone());}
         self.retained.insert(hash.clone(),t.bytes);
         let mut bytes:usize=self.retained.values().map(Vec::len).sum();
-        while bytes>MAX_IN_FLIGHT {if let Some(old)=self.order.pop_front(){if let Some(value)=self.retained.remove(&old){bytes-=value.len();}}else{break;}}
+        while bytes>self.limits.image_in_flight_bytes as usize {if let Some(old)=self.order.pop_front(){if let Some(value)=self.retained.remove(&old){bytes-=value.len();}}else{break;}}
         Ok(hash)
     }
     pub fn cancel(&mut self,id:&str) {self.transfers.remove(id);}
@@ -84,6 +83,12 @@ impl Service {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn default_image_budgets_match_previous_values() {
+        let service = Service::default();
+        assert_eq!(service.limits.image_in_flight_bytes, 512 * 1024 * 1024);
+        assert_eq!(service.limits.image_decoded_bytes, 256 * 1024 * 1024);
+        assert_eq!(service.limits.image_max_pixels, 16_000_000);
+    }
     #[test] fn coverage_hash_and_revision() {
         let mut s=Service::default();
         let mut data=Vec::new();image::DynamicImage::new_rgba8(2,2).write_to(&mut std::io::Cursor::new(&mut data),image::ImageFormat::Png).unwrap();
@@ -95,7 +100,7 @@ impl Service {
         assert!(!s.manifest("object:C",1,serde_json::json!({"descriptors":{}})));
         s.begin("b",&hash,6).unwrap();s.chunk("b",0,b"xxxxxx").unwrap();assert!(s.end("b").is_err());
         s.begin("c",&hash,6).unwrap();s.chunk("c",0,b"ab").unwrap();assert!(s.end("c").is_err());
-        assert!(s.begin("too-big",&hash,MAX_DECODED+1).is_err());
+        assert!(s.begin("too-big",&hash,s.limits.image_decoded_bytes as usize+1).is_err());
         s.begin("range",&hash,6).unwrap();
         assert!(s.chunk("range",usize::MAX,b"x").is_err());
         assert!(s.chunk("range",5,b"xx").is_err());

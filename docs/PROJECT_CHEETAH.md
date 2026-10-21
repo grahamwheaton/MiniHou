@@ -42,5 +42,9 @@ Replace hard-coded limits with defaults that adapt to the machine's RAM, CPU thr
 ## Status
 Step 1 implemented in `minihou-core::limits::Limits`. It records RAM and Rayon
 capacity, stores supplied GPU buffer limits, and holds the existing budgets as
-defaults. RAM-derived budgets have the existing defaults as floors. Runtime
-callers still use their original values; steps 2–5 remain planned.
+defaults. RAM-derived budgets have the existing defaults as floors.
+
+Step 2 routes the cook cache version and frame budgets, image transfer budgets,
+Python bridge output and stderr caps, and loop iteration budget through
+`Limits::default()`. Their runtime values remain unchanged. Hardware-adaptive
+runtime sizing and steps 3–5 remain planned.
