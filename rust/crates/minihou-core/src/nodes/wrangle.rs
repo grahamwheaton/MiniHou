@@ -405,27 +405,20 @@ fn mask(g: &Geometry, d: Domain, pattern: &str) -> Result<Vec<bool>> {
         } else {
             None
         };
-        let group = if range.is_none() {
+        let (group, vertex_group) = if range.is_none() {
             let key = format!("group_{name}");
-            let table = if let Domain::Vertex = d {
-                &g.prim
-            } else {
-                d.table(g).unwrap_or(&g.prim)
-            };
-            Some(
-                table
-                    .get(&key)
+            (Some(
+                d.table(g).unwrap_or(&g.prim).get(&key)
+                    .or_else(|| if let Domain::Vertex = d { g.prim.get(&key) } else { None })
                     .ok_or_else(|| Error::new(format!("no group {name:?}")))?,
-            )
+            ), matches!(d, Domain::Vertex) && g.vertex.contains_key(&key))
         } else {
-            None
+            (None, false)
         };
         for (i, dst) in out.iter_mut().enumerate() {
-            let r = if let Domain::Vertex = d {
+            let r = if matches!(d, Domain::Vertex) && !vertex_group && group.is_some() {
                 prim_of_vertex(g, i)
-            } else {
-                i
-            };
+            } else { i };
             let hit = if let Some((a, b)) = range {
                 (a..=b).contains(&i)
             } else {
@@ -708,5 +701,13 @@ mod tests {
         let out = cook(g, "primitives", "f@average = @weight; i@is_closed = @closed", "").unwrap();
         assert_eq!(out.prim["average"].as_f32().unwrap(), &[2., 2.5, 0., 2.5]);
         assert_eq!(out.prim["is_closed"].as_i32().unwrap(), &[1, 1, 1, 0]);
+    }
+
+    #[test]
+    fn vertex_group_takes_precedence_over_same_named_primitive_group() {
+        let mut g = fixture();
+        g.vertex.insert("group_first".into(), Arc::new(Attr::i32(1, vec![0, 1, 0, 0, 1])));
+        let out = cook(g, "vertices", "i@hit = 1", "first").unwrap();
+        assert_eq!(out.vertex["hit"].as_i32().unwrap(), &[0, 1, 0, 0, 1]);
     }
 }
