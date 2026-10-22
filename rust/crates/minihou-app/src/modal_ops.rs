@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) fn modal_object_points(positions: &[f32], ranges: &[(String, std::ops::Range<u32>)],
+    selected_set: &std::collections::BTreeSet<String>, active: Option<&str>) -> Vec<[f32; 3]> {
+    ranges.iter().filter(|(id, _)| selected_set.contains(id) || Some(id.as_str()) == active)
+        .flat_map(|(_, range)| range.clone())
+        .filter_map(|id| positions.get(id as usize * 3..id as usize * 3 + 3).map(|p| [p[0], p[1], p[2]]))
+        .collect()
+}
+
 impl App {
     pub(super) fn start_modal(&mut self, ctx: &egui::Context, kind: ModalKind) {
         if self.modal.is_some() || self.display.is_empty() || self.scene.is_none() { return; }
@@ -11,8 +19,7 @@ impl App {
         let scene = self.scene.as_ref().unwrap(); let positions = scene.positions();
         let ids = self.selected_points();
         let points: Vec<[f32;3]> = if self.editor_state.selection == ui::SelectionMode::Object {
-            self.display_ranges.iter().filter(|(id, _)| self.selected_set.contains(id))
-                .flat_map(|(_, range)| range.clone()).filter_map(|id| positions.get(id as usize*3..id as usize*3+3).map(|p|[p[0],p[1],p[2]])).collect()
+            modal_object_points(positions, &self.display_ranges, &self.selected_set, self.active_object())
         } else if ids.is_empty() { positions.as_chunks::<3>().0.to_vec() }
             else { ids.into_iter().filter_map(|id| positions.get(id as usize*3..id as usize*3+3).map(|p|[p[0],p[1],p[2]])).collect() };
         if points.is_empty() { return; }

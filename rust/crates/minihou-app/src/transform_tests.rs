@@ -2,6 +2,82 @@ use super::*;
 use minihou_core::preview;
 use std::time::Instant;
 
+#[test]
+fn outputless_stream_end_allows_g_and_gizmo_with_upstream_selection() {
+    let value = json!({"version":1,"display":"transform_a","nodes":{
+        "box":{"type":"box"},
+        "transform_a":{"type":"transform","inputs":{"geo":"box"}}
+    }});
+    let doc = Document::parse(value.to_string()).unwrap();
+    let mut session = doc.session().unwrap();
+    let mut target = "transform_a".to_owned();
+    let response = minihou_app::cook_batch(&mut session, &mut target,
+        vec![CookRequest { revision: 1, edit: Edit::Replace(value.clone()) }], Scene::new);
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let ranges = &response.display_ranges;
+    assert!(active_range("transform_a", ranges).is_some(), "stream end missing from cooked display ranges: {ranges:?}");
+    let active = resolve_active_displayed_node(&value, "transform_a", ranges, response.output_range_count, false);
+    assert_eq!(active, Some("transform_a"), "G and gizmo must reach the shared transform entry point");
+    let scene = response.prepared.unwrap();
+    let selected_set = std::collections::BTreeSet::from(["box".to_owned()]);
+    let active = resolve_active_displayed_node(&value, "box", ranges, response.output_range_count, false).unwrap();
+    assert_eq!(active, "transform_a");
+    assert!(!modal_ops::modal_object_points(scene.positions(), ranges, &selected_set, Some(active)).is_empty(),
+        "G must find the box geometry through the displayed stream end");
+    let mut object_value = value.clone();
+    let object_target = ensure_transform_target(&mut object_value, active, true, None).unwrap();
+    assert_eq!(object_target, "transform_a");
+    object_value["nodes"][&object_target]["params"]["translate"] = json!([1., 0., 0.]);
+    let moved = Document::parse(object_value.to_string()).unwrap().session().unwrap()
+        .cook(Some("transform_a")).unwrap();
+    assert!((moved.p()[0] - scene.positions()[0] - 1.).abs() < 1e-4,
+        "gizmo actions must move the displayed stream end");
+    let range = active_range(active, ranges).unwrap();
+    let selection = picking::Selection { mode: ui::SelectionMode::Points,
+        points: vec![range.start], ..Default::default() };
+    let selected = selection_in_range(&selection, &scene, range);
+    assert_eq!(selected_point_ids(&selected, ui::SelectionMode::Points, scene.triangle_indices()), vec![range.start]);
+    let mut point_value = value.clone();
+    let point_target = ensure_transform_target(&mut point_value, active, false, None).unwrap();
+    assert_eq!(point_value["nodes"][&point_target]["inputs"]["geo"], "transform_a");
+
+    use egui::{pos2, Event, PointerButton, RawInput, Rect};
+    let graph = Graph::from_value(&value).unwrap();
+    let editor = EditorState { tool: ui::Tool::Move, ..Default::default() };
+    let cooking = CookState::default();
+    let theme = Theme::dark();
+    let blender = BlenderStatus::default();
+    let flags = HashMap::new();
+    let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]], ..Default::default() };
+    let origin = object_origin(&value, active);
+    let view = View { graph: &graph, doc: &value, path: std::path::Path::new("no_output.json"), dirty: false,
+        can_undo: false, can_redo: false, selected: "box", selected_set: &selected_set, display: "transform_a", cooking: &cooking,
+        file_status: "", mode: Mode::Shaded, theme: &theme, editor: &editor, camera,
+        bounds: ([0.; 3], 1.), selection_center: Some(origin), normal_frame: [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]],
+        geo: None, blender: &blender, flags: &flags, units: crate::units::UnitSettings::default(), repeat_label: None };
+    let ctx = egui::Context::default();
+    let frame = |events| {
+        let mut actions = Actions::default();
+        let mut rect = Rect::NOTHING;
+        let _ = ctx.run(RawInput { events, ..Default::default() }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+                ui::transform_gizmo::show(ui, rect, &view, &mut actions);
+            });
+        });
+        (actions.0, rect)
+    };
+    let (_, rect) = frame(Vec::new());
+    let center = ui::transform_gizmo::project(camera, rect, origin).unwrap();
+    let tip = pos2(center.x + 58., center.y);
+    assert!(ui::transform_gizmo::hit(rect, &view, tip));
+    frame(vec![Event::PointerMoved(tip), Event::PointerButton { pos: tip,
+        button: PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+    let (actions, _) = frame(vec![Event::PointerMoved(tip + egui::vec2(40., 0.))]);
+    assert!(actions.iter().any(|action| matches!(action, UiAction::TransformNode { op: TransformOp::Move(v) } if v[0] > 0.)),
+        "the gizmo must emit a move for the same outputless selection");
+}
+
 fn cooked(worker: &CookWorker<Scene>, state: &mut CookState) -> ([f32; 3], [f32; 3], Vec<f32>) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
