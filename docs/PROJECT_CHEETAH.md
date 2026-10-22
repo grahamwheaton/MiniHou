@@ -56,3 +56,10 @@ colour buffers. The draw loop renders every chunk, including selection depth,
 wire, ghost and outline passes. Point/curve instances and textured vertices
 also use bounded uploads. A live viewport check with a mesh beyond the device
 limit is still needed; unit tests cover the CPU partitioning rules.
+
+Step 4 adds copy memory, loop iterations, solver steps and substeps, and viewport
+normal-line density to the Performance preferences tab. Their defaults match
+the current `Limits` values, and the values save and load with other preferences.
+The copy limit uses the existing preference key and the app's preference path.
+The other runtime consumers still use their existing budgets; live preferences
+UI behavior remains unverified.

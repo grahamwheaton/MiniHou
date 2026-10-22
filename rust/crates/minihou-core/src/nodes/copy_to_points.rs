@@ -7,7 +7,8 @@ const TRANSFORM:&[&str]=&["P","N","pscale","orient","up","rot","scale"];
 /// Graph parameters cannot alter the allocation limit.
 pub(crate) fn copy_limit_bytes()->u64{
     let path=std::env::var_os("MINIHOU_PREFERENCES_FILE").filter(|v|!v.is_empty()).map(std::path::PathBuf::from).or_else(||{
-        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from).or_else(||
+        std::env::var_os("APPDATA").filter(|v|!v.is_empty()).map(std::path::PathBuf::from).or_else(||
+        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)).or_else(||
             std::env::var_os("USERPROFILE").or_else(||std::env::var_os("HOME")).map(|p|std::path::PathBuf::from(p).join(".config")))
             .map(|p|p.join("MiniHou").join("preferences.json"))
     });
@@ -15,7 +16,8 @@ pub(crate) fn copy_limit_bytes()->u64{
     limit_from_preferences(value.as_ref())
 }
 fn limit_from_preferences(v:Option<&serde_json::Value>)->u64{
-    v.and_then(|v|v.get("copy_memory_limit_mib")).and_then(|v|v.as_u64()).filter(|n|(16..=16384).contains(n)).unwrap_or(256)*1024*1024
+    v.and_then(|v|v.get("copy_memory_limit_mib")).and_then(|v|v.as_u64()).filter(|n|(16..=16384).contains(n))
+        .map_or_else(|| crate::limits::Limits::default().copy_memory_bytes, |n| n*1024*1024)
 }
 pub const COPY_TO_POINTS:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"copy_to_points",inputs:&[
     InputSpec{name:"source",multi:false,optional:false},InputSpec{name:"points",multi:false,optional:false}],
