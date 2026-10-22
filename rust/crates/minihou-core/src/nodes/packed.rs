@@ -370,6 +370,124 @@ pub fn display_geometry(g: &Geometry) -> Result<std::borrow::Cow<'_, Geometry>> 
     Ok(std::borrow::Cow::Owned(unpack(g, None, true)?))
 }
 
+/// Point and fan-triangle counts after recursive unpacking. `None` means overflow,
+/// invalid source identity, or a cycle; callers must not attempt full expansion.
+pub fn estimated_display_counts(g: &Geometry) -> Option<(usize, usize)> {
+    fn count(g: &Geometry, path: &mut Vec<*const Geometry>, cache: &mut std::collections::HashMap<*const Geometry, (usize, usize)>) -> Option<(usize, usize)> {
+        let key = g as *const Geometry;
+        if path.contains(&key) || path.len() >= 32 { return None; }
+        if let Some(&result) = cache.get(&key) { return Some(result); }
+        path.push(key);
+        let result = (|| {
+            let mut points = g.npoints;
+            let mut triangles = 0usize;
+            for prim in 0..g.nprims() {
+                if g.topology.is_closed(prim) {
+                    let n = usize::try_from(g.topology.prim_offsets[prim+1].checked_sub(g.topology.prim_offsets[prim])?).ok()?;
+                    triangles = triangles.checked_add(n.saturating_sub(2))?;
+                }
+            }
+            if let Some(ids) = g.point.get(SOURCE).and_then(|a| a.as_i32()) {
+                for (i, &id) in ids.iter().enumerate() {
+                    if id <= 0 { continue; }
+                    let source = g.packed.get(source_of(g, i)?)?;
+                    points = points.checked_sub(1)?;
+                    let (p, t) = count(source, path, cache)?;
+                    points = points.checked_add(p)?;
+                    triangles = triangles.checked_add(t)?;
+                }
+            }
+            Some((points, triangles))
+        })();
+        path.pop();
+        if let Some(result) = result { cache.insert(key, result); }
+        result
+    }
+    count(g, &mut Vec::new(), &mut std::collections::HashMap::new())
+}
+
+/// Viewport-only geometry: ordinary geometry plus an axis-aligned transformed
+/// source bounds box for each packed instance. The cooked source is untouched.
+pub fn bounds_proxy_geometry(g: &Geometry) -> Result<Geometry> {
+    if instance_count(g) == 0 { return Ok(g.clone()); }
+    let keep: Vec<bool> = (0..g.npoints).map(|i| source_of(g, i).is_none()).collect();
+    let mut rest = drop_points(g, &keep);
+    strip_if_unpacked(&mut rest);
+    let faces = [[0,2,3,1], [4,5,7,6], [0,1,5,4], [2,6,7,3], [0,4,6,2], [1,3,7,5]];
+    let mut p = Vec::new();
+    let mut vertices = Vec::new();
+    let mut offsets = vec![0i32];
+    let mut colors = Vec::new();
+    let mut bounds_cache = std::collections::HashMap::new();
+    let cd = g.point.get("Cd").and_then(|a| a.as_f32().filter(|_| a.width == 3));
+    for i in 0..g.npoints {
+        if source_of(g, i).is_none() { continue; }
+        let Some((lo, hi)) = proxy_instance_bounds(g, i, &mut bounds_cache) else { continue; };
+        let base = i32::try_from(p.len() / 3).map_err(|_| Error::new("too many viewport proxy points"))?;
+        for corner in 0..8 {
+            p.extend((0..3).map(|axis| if (corner >> axis) & 1 == 1 { hi[axis] } else { lo[axis] }));
+            if let Some(c) = cd { colors.extend_from_slice(&c[i*3..i*3+3]); }
+        }
+        for face in faces {
+            for corner in face { vertices.push(base + corner); }
+            offsets.push(i32::try_from(vertices.len()).map_err(|_| Error::new("too many viewport proxy vertices"))?);
+        }
+    }
+    if p.is_empty() { return Ok(rest); }
+    let mut boxes = Geometry::from_arrays(p, vertices, offsets, None)?;
+    if cd.is_some() { boxes.point.insert("Cd".into(), Arc::new(Attr::f32(3, colors))); }
+    boxes.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![-1; boxes.nprims()])));
+    let mut out = if rest.npoints > 0 || rest.nprims() > 0 { merge_all(vec![rest, boxes])? } else { boxes };
+    out.detail = g.detail.clone();
+    Ok(out)
+}
+
+fn proxy_instance_bounds(g: &Geometry, i: usize,
+    cache: &mut std::collections::HashMap<*const Geometry, Option<([f32; 3], [f32; 3])>>,
+) -> Option<([f32; 3], [f32; 3])> {
+    fn bounds(g: &Geometry, path: &mut Vec<*const Geometry>,
+        cache: &mut std::collections::HashMap<*const Geometry, Option<([f32; 3], [f32; 3])>>,
+    ) -> Option<([f32; 3], [f32; 3])> {
+        let key = g as *const Geometry;
+        if path.contains(&key) || path.len() >= 32 { return None; }
+        if let Some(&result) = cache.get(&key) { return result; }
+        path.push(key);
+        let mut lo = [f32::INFINITY; 3];
+        let mut hi = [f32::NEG_INFINITY; 3];
+        let mut any = false;
+        for i in 0..g.npoints {
+            let b = if source_of(g, i).is_some() { transformed_bounds(g, i, path, cache) }
+                else { let q = &g.p()[i*3..i*3+3]; Some(([q[0],q[1],q[2]], [q[0],q[1],q[2]])) };
+            if let Some((a, b)) = b {
+                any = true;
+                for axis in 0..3 { lo[axis] = lo[axis].min(a[axis]); hi[axis] = hi[axis].max(b[axis]); }
+            }
+        }
+        path.pop();
+        let result = any.then_some((lo, hi));
+        cache.insert(key, result);
+        result
+    }
+    fn transformed_bounds(g: &Geometry, i: usize, path: &mut Vec<*const Geometry>,
+        cache: &mut std::collections::HashMap<*const Geometry, Option<([f32; 3], [f32; 3])>>,
+    ) -> Option<([f32; 3], [f32; 3])> {
+        let (lo, hi) = bounds(&g.packed[source_of(g, i)?], path, cache)?;
+        let (m, t) = (xform(g, i), translate(g, i));
+        let mut a = [f32::INFINITY; 3];
+        let mut b = [f32::NEG_INFINITY; 3];
+        for corner in 0..8 {
+            let q = std::array::from_fn(|axis| if (corner >> axis) & 1 == 1 { hi[axis] as f64 } else { lo[axis] as f64 });
+            let w = math::apply(&m, q);
+            for axis in 0..3 {
+                a[axis] = a[axis].min((w[axis] + t[axis]) as f32);
+                b[axis] = b[axis].max((w[axis] + t[axis]) as f32);
+            }
+        }
+        Some((a, b))
+    }
+    transformed_bounds(g, i, &mut Vec::new(), cache)
+}
+
 /// Bytes held by the attribute arrays and topology of `g` itself (sources counted once, by pointer).
 pub fn memory_bytes(g: &Geometry) -> usize {
     fn own(g: &Geometry) -> usize {

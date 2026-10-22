@@ -134,3 +134,32 @@ fn display_geometry_places_instances_and_leaves_plain_geometry_borrowed() {
     assert_eq!((shown.npoints, shown.nprims(), instance_count(&shown)), (16, 12, 0));
     assert_eq!(crate::preview::bounds(shown.p()), ([0.0; 3], [5.0, 1.0, 1.0]));
 }
+
+#[test]
+fn estimated_display_counts_include_nested_sources_and_detect_overflow() {
+    let mut source = Arc::new(cube([0.0; 3]));
+    let two = instance_geometry(&[source.clone()], &[0, 0], vec![0.; 6], &[IDENTITY; 2], AttrTable::new()).unwrap();
+    assert_eq!(estimated_display_counts(&two), Some((16, 24)));
+    source = Arc::new(two);
+    for _ in 0..7 {
+        let inst = instance_geometry(&[source.clone()], &vec![0; 1000], vec![0.; 3000], &vec![IDENTITY; 1000], AttrTable::new()).unwrap();
+        source = Arc::new(inst);
+    }
+    assert_eq!(estimated_display_counts(&source), None);
+}
+
+#[test]
+fn bounds_proxy_keeps_ordinary_geometry_and_nested_transforms() {
+    let inner = instance_geometry(&[Arc::new(cube([0.0; 3]))], &[0], vec![3., 0., 0.], &[IDENTITY], AttrTable::new()).unwrap();
+    let outer = instance_geometry(&[Arc::new(inner)], &[0], vec![10., 0., 0.], &[IDENTITY], AttrTable::new()).unwrap();
+    let mixed = merge_all(vec![cube([0.0; 3]), outer]).unwrap();
+    let shown = bounds_proxy_geometry(&mixed).unwrap();
+    assert_eq!((shown.npoints, shown.nprims(), instance_count(&shown)), (16, 12, 0));
+    assert_eq!(crate::preview::bounds(shown.p()), ([0.; 3], [14., 1., 1.]));
+    assert_eq!((mixed.npoints, mixed.nprims(), instance_count(&mixed)), (9, 6, 1));
+    assert_eq!(shown.prim["material_index"].as_i32().unwrap()[6..], [-1; 6]);
+    let scaled = instance_geometry(&[Arc::new(cube([0.0; 3]))], &[0], vec![10.,0.,0.],
+        &[[[-2.,0.,0.], [0.,3.,0.], [0.,0.,1.]]], AttrTable::new()).unwrap();
+    let proxy = bounds_proxy_geometry(&scaled).unwrap();
+    assert_eq!(crate::preview::bounds(proxy.p()), ([8.,0.,0.], [10.,3.,1.]));
+}

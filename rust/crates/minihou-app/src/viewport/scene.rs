@@ -3,6 +3,20 @@ use std::time::Instant;
 
 /// Longest overlay normal list kept: more points than this are thinned evenly.
 const NORMAL_LINES: usize = 60_000;
+/// Keep CPU expansion below the measured 120k-triangle / 80k-point scene's
+/// roughly one-second scene-plus-upload cost; see finding3-measure.md.
+const MAX_EXPANDED_VIEWPORT_POINTS: usize = 50_000;
+const MAX_EXPANDED_VIEWPORT_TRIANGLES: usize = 50_000;
+
+fn viewport_geometry(g: &Geometry) -> Option<(std::borrow::Cow<'_, Geometry>, bool)> {
+    use minihou_core::nodes::packed;
+    if packed::instance_count(g) == 0 { return None; }
+    let fallback = packed::estimated_display_counts(g).is_none_or(|(points, triangles)|
+        points > MAX_EXPANDED_VIEWPORT_POINTS || triangles > MAX_EXPANDED_VIEWPORT_TRIANGLES);
+    let shown = if fallback { packed::bounds_proxy_geometry(g).map(std::borrow::Cow::Owned) }
+        else { packed::display_geometry(g) };
+    shown.ok().map(|shown| (shown, fallback))
+}
 impl Scene {
     /// Add a selected node's preview after the displayed outputs, preserving their point ids.
     pub fn append_selected(&mut self, other: &Scene) -> std::ops::Range<u32> {
@@ -55,16 +69,16 @@ impl Scene {
         let timing = std::env::var_os("MINIHOU_VIEWPORT_TIMING").is_some();
         // Packed primitives / native instances: drawn at their transforms, CPU-batched into this scene's one buffer.
         let instances = minihou_core::nodes::packed::instance_count(g);
-        let shown = if instances > 0 { minihou_core::nodes::packed::display_geometry(g).ok() } else { None };
+        let shown = viewport_geometry(g);
         let display_ms = started.elapsed().as_secs_f64() * 1000.0;
-        let display = shown.as_deref().unwrap_or(g);
+        let display = shown.as_ref().map_or(g, |(shown, _)| shown.as_ref());
         let source_triangles = if timing && instances > 0 {
             g.packed.iter().map(|s| minihou_core::preview::triangulate_geometry(s).prim.len()).sum::<usize>()
         } else { 0 };
         let scene = Self::from_display_geometry(display, timing);
         if timing {
-            eprintln!("viewport Scene::new: instances={instances} source_triangles={source_triangles} expanded_points={} expanded_triangles={} display_geometry_ms={display_ms:.3} total_ms={:.3}",
-                scene.p.len()/3, scene.tri.len()/3, started.elapsed().as_secs_f64()*1000.0);
+            eprintln!("viewport Scene::new: instances={instances} source_triangles={source_triangles} viewport_points={} viewport_triangles={} bounds_fallback={} display_geometry_ms={display_ms:.3} total_ms={:.3}",
+                scene.p.len()/3, scene.tri.len()/3, shown.as_ref().is_some_and(|(_, fallback)| *fallback), started.elapsed().as_secs_f64()*1000.0);
         }
         scene
     }
@@ -164,17 +178,30 @@ fn packed_cube_viewport_measure() {
         vec![0,4,8,12,16,20,24], Some(vec![true;6])).unwrap());
     let graph = minihou_core::Graph::from_json(include_str!("../test_data/textured_cube.minihou")).unwrap();
     let textured = graph.cook(Some("output1")).unwrap();
+    let mut split = (*textured).clone();
+    split.prim.insert("material_index".into(), Arc::new(minihou_core::geometry::Attr::i32(1, vec![0,1,0,1,0,1])));
+    split.detail.insert("material_bindings".into(), serde_json::json!({"slots":["SampleChecker","alternate"]}));
+    let split = Arc::new(split);
     let instance = wgpu::Instance::default();
     let gpu = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()
         .and_then(|adapter| pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok());
     let mut system = sysinfo::System::new();
     let pid = sysinfo::Pid::from_u32(std::process::id());
-    for (label, source) in [("plain_cube", cube), ("textured_cube", textured)] {
+    for (label, source) in [("plain_cube", cube), ("textured_cube", textured), ("material_split_cube", split)] {
     for count in [1, 1_000, 10_000] {
         let positions = (0..count).flat_map(|i| [i as f32 * 2.0, 0., 0.]).collect();
         let packed = instance_geometry(&[source.clone()], &vec![0;count], positions,
             &vec![minihou_core::math::IDENTITY;count], Default::default()).unwrap();
-        let scene = Scene::new(&packed);
+        let scene = if label == "material_split_cube" {
+            // Preserve a full-expansion baseline even after the viewport budget is enabled.
+            let started = Instant::now();
+            let expanded = minihou_core::nodes::packed::display_geometry(&packed).unwrap();
+            let display_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let scene = Scene::from_display_geometry(&expanded, true);
+            eprintln!("viewport baseline material_split_cube: copies={count} display_geometry_ms={display_ms:.3} total_scene_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0);
+            scene
+        } else { Scene::new(&packed) };
         system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
         let rss_mb = system.process(pid).map_or(0., |process| process.memory() as f64 / 1_048_576.);
         eprintln!("packed asset={label} count={count} cooked_points={} source_points={} source_triangles={} scene_points={} scene_triangles={} rss_after_scene_mib={rss_mb:.1}",
@@ -188,6 +215,45 @@ fn packed_cube_viewport_measure() {
         }
     }
     }
+}
+
+#[test]
+fn packed_below_budget_matches_full_expansion() {
+    use minihou_core::nodes::packed::{display_geometry, instance_geometry};
+    let source = std::sync::Arc::new(Geometry::from_arrays(
+        vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2], vec![0,3], Some(vec![true])).unwrap());
+    let packed = instance_geometry(&[source], &[0,0], vec![0.,0.,0., 2.,0.,0.],
+        &[minihou_core::math::IDENTITY;2], Default::default()).unwrap();
+    let (display, fallback) = viewport_geometry(&packed).unwrap();
+    assert!(!fallback);
+    let full = display_geometry(&packed).unwrap();
+    assert_eq!(display.p(), full.p());
+    assert_eq!(display.topology.vertex_point, full.topology.vertex_point);
+    let actual = Scene::new(&packed);
+    let expected = Scene::new(&full);
+    assert_eq!(actual.p, expected.p);
+    assert_eq!(actual.n, expected.n);
+    assert_eq!(actual.tri, expected.tri);
+    assert_eq!(actual.edge, expected.edge);
+    assert_eq!(actual.textured.len(), expected.textured.len());
+}
+
+#[test]
+fn packed_above_budget_uses_bounds_without_changing_cooked_geometry() {
+    use minihou_core::nodes::packed::{estimated_display_counts, instance_geometry, instance_count};
+    let source = std::sync::Arc::new(Geometry::from_arrays(
+        vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2].repeat(1000),
+        (0..=1000).map(|i| i*3).collect(), Some(vec![true;1000])).unwrap());
+    let packed = instance_geometry(&[source.clone()], &vec![0;100], vec![0.;300],
+        &vec![minihou_core::math::IDENTITY;100], Default::default()).unwrap();
+    assert_eq!(estimated_display_counts(&packed), Some((300, 100_000)));
+    let (display, fallback) = viewport_geometry(&packed).unwrap();
+    assert!(fallback);
+    assert_eq!((display.npoints, display.nprims()), (800, 600));
+    assert_eq!(Scene::new(&packed).triangles(), 1200);
+    assert_eq!((packed.npoints, packed.nprims(), instance_count(&packed)), (100, 0, 100));
+    assert!(std::sync::Arc::ptr_eq(&packed.packed[0], &source));
+    assert_eq!((source.npoints, source.nprims()), (3, 1000));
 }
 /// Standalone points and non-surface primitive segments survive every proxy cut.
 pub(super) fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
