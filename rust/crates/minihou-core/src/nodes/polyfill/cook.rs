@@ -84,6 +84,23 @@ pub(crate) fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         }
 
         let loop_coords: Vec<[f64; 3]> = pts.iter().map(|&i| pos[i]).collect();
+        let perimeter: f64 = (0..n).map(|i| dist(loop_coords[i], loop_coords[(i + 1) % n])).sum();
+        let mut area = [0.0; 3];
+        for i in 1..n - 1 {
+            let a = sub(loop_coords[i], loop_coords[0]);
+            let b = sub(loop_coords[i + 1], loop_coords[0]);
+            area = add(area, [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]);
+        }
+        if perimeter < 1e-12
+            || (0..n).any(|i| dist(loop_coords[i], loop_coords[(i + 1) % n]) <= perimeter * 1e-12)
+            || len(area) <= perimeter * perimeter * 1e-12
+        {
+            return Err(Error::new("degenerate boundary loop cannot be filled"));
+        }
         let norm = newell_normal(&loop_coords);
 
         let mut center = [0.0; 3];

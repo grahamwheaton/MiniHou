@@ -339,6 +339,16 @@ mod tests {
     }
 
     #[test]
+    fn collinear_boundary_does_not_create_a_zero_area_cap() {
+        let g = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 2., 0., 0.],
+            vec![0, 1, 2], vec![0, 3], None,
+        ).unwrap();
+        let err = cook(g, json!({"mode": "single_polygon"})).unwrap_err();
+        assert!(err.0.contains("degenerate boundary loop"), "{err}");
+    }
+
+    #[test]
     fn test_fill_group_param_backward_compat() {
         let g = cube_missing_face();
         let out = cook(g, json!({"fill_group": "my_cap"})).unwrap();
