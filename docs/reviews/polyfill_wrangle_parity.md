@@ -26,3 +26,21 @@ The linked SideFX pages describe Houdini 22.0. Exact parameter defaults, output 
 - PolyFill rejects touching/non-manifold boundary junctions instead of silently dropping an edge.
 - Rust wrangle reads `@opinput#_name` at the current element number, returning zero for missing corresponding elements and an error for a disconnected port.
 - Rust wrangle creates an untyped scalar `@name` as a float attribute.
+
+## Round 2 status
+
+Local fixes and coverage:
+
+- PolyFill's single-polygon and four-sided quad caps now copy source corner attributes. New cap UVs remain subject to the neutral material/UV policy in `mesh_common::append`; Houdini's seam and interpolation values are unverified.
+- PolyFill ignores open curves when finding polygon boundaries, including curves sharing a mesh edge, and preserves those curves in the output. A curve-only input remains unchanged.
+- PolyFill reports a degenerate boundary loop instead of adding a zero-area cap. Exact Houdini behavior for degenerate input is unverified.
+- PolyFill rejects unknown fill modes instead of silently choosing quadrilaterals.
+- Wrangle now prefers a vertex group for vertex run-over when a primitive group has the same name; the primitive-group fallback remains for existing graphs.
+- Wrangle tests cover averages on mixed triangle/quad sizes, an empty primitive, and `@closed` on an open curve. The existing average code passed; this is coverage, not a parity claim.
+
+Remaining gaps requiring a Houdini cook or broader implementation:
+
+- Quadrilaterals still use a center fan for many even boundaries. The documented U/L-shape search, exact patch topology, winding, and corner selection need matching Houdini output before replacing the algorithm.
+- Point and corner interpolation, UV seams, primitive/group append, normal recomputation, and unique-point values on new faces need Houdini comparisons. Round 2 only fixed missing source corners on simple caps.
+- Coincident points, zero-length edges, non-manifold boundaries, concave near-degenerate triangles, and mixed triangle/quad surroundings need further fixtures and Houdini output. Degenerate boundary loops now fail explicitly in MiniHou.
+- Attribute Wrangle's missing controls and VEX language features remain as listed above. Cross-domain and cross-input behavior, missing attributes, non-finite results, and malformed geometry need more fixture coverage and Houdini comparison.
