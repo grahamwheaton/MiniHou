@@ -4,7 +4,7 @@ use serde_json::{json,Value};
 use crate::{Geometry, Attr, Error, Result, params::Params};
 use super::{Inputs,NodeSpec,blender_input::{ExternalInput,ExternalInputs,numbers}};
 pub const BLENDER_IMAGE: NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"blender_image",inputs:&[],params:crate::params!("image":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:waiting};
-pub const IMAGE_FILE: NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"image_file",inputs:&[],params:crate::params!("file":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:image_file};
+pub const IMAGE_FILE: NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"image_file",inputs:&[],params:crate::params!("file":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"mode":"plane";"height":"luminance";"height_scale":1.),cook:image_file};
 pub const IMAGE_OUT: NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"image_out",inputs:super::GEO,params:crate::params!("image":"MiniHou";"mode":"lattice";"source":"Cd";"width":512;"height":512;"normalize":false;"encoding":"linear";"file":"",unsupported),cook:image_out};
 fn waiting(_: &Inputs,p: &Params)->Result<Geometry>{blender_image(p,&ExternalInputs::new())}
 pub fn srgb_to_linear(x:f32)->f32{if x<=0.04045{x/12.92}else{((x+0.055)/1.055).powf(2.4)}}
@@ -106,7 +106,8 @@ pub fn image_file(_: &Inputs, p: &Params) -> Result<Geometry> {
     if w.checked_mul(h).is_none_or(|n| n > 16_000_000) {
         return Err(Error::new("image exceeds 16,000,000 pixels; lower max_size"));
     }
-    grid_from_pixels(&pix, w, h, p, &file_name)
+    let mode = p.e("mode", &["plane", "height_map"])?;
+    grid_from_pixels(&pix, w, h, p, &file_name, mode == "height_map")
 }
 /// The image a `blender_image` node reads; waiting conditions are `Error::waiting`.
 pub fn resolve_image<'a>(p:&Params,store:&'a ExternalInputs)->Result<&'a ExternalInput>{
@@ -136,22 +137,22 @@ pub fn blender_image(p:&Params,store:&ExternalInputs)->Result<Geometry>{
     for y in 0..h{for x in 0..w{for dy in 0..factor{for dx in 0..factor{for c in 0..4{
         let v=pixels[((y*factor+dy)*width+x*factor+dx)*4+c];pix[(y*w+x)*4+c]+=if linear&&c<3{srgb_to_linear(v)}else{v};
     }}}for c in 0..4{pix[(y*w+x)*4+c]/=(factor*factor) as f32;}}}
-    grid_from_pixels(&pix,w,h,p,&name)
+    grid_from_pixels(&pix,w,h,p,&name,true)
 }
-fn grid_from_pixels(pix:&[f32],w:usize,h:usize,p:&Params,name:&str)->Result<Geometry>{
+fn grid_from_pixels(pix:&[f32],w:usize,h:usize,p:&Params,name:&str,displace:bool)->Result<Geometry>{
     let size=p.f("size")? as f32;let sy=(p.f("size")?*h as f64/w as f64) as f32;let center=p.v3("center")?;
     let height=p.e("height",&["none","luminance","red","green","blue","alpha"])?;let hs=p.f("height_scale")? as f32;
     let mut positions=Vec::with_capacity(w*h*3);let mut uv=Vec::with_capacity(w*h*2);let mut cd=Vec::with_capacity(w*h*3);let mut heights=Vec::new();
     for y in 0..h{for x in 0..w{
         let u=(x as f64/(w-1) as f64) as f32;let v=(y as f64/(h-1) as f64) as f32;let rgba=&pix[(y*w+x)*4..(y*w+x+1)*4];
         let hv=match height.as_str(){"red"=>rgba[0],"green"=>rgba[1],"blue"=>rgba[2],"alpha"=>rgba[3],"luminance"=>rgba[0]*0.2126+rgba[1]*0.7152+rgba[2]*0.0722,_=>0.};
-        positions.extend([(u-0.5)*size+center[0] as f32,(v-0.5)*sy+center[1] as f32,center[2] as f32+hv*hs]);uv.extend([u,v]);cd.extend_from_slice(&rgba[..3]);heights.push(hv);
+        positions.extend([(u-0.5)*size+center[0] as f32,(v-0.5)*sy+center[1] as f32,center[2] as f32+if displace {hv*hs} else {0.}]);uv.extend([u,v]);cd.extend_from_slice(&rgba[..3]);heights.push(hv);
     }}
     let mut vp=Vec::new();for y in 0..h-1{for x in 0..w-1{let b=(y*w+x) as i32;vp.extend([b,b+1,b+w as i32+1,b+w as i32]);}}
     let offsets=(0..=vp.len()/4).map(|i|(i*4) as i32).collect();let mut g=Geometry::from_arrays(positions,vp,offsets,None)?;
     g.point.insert("Cd".into(),Arc::new(Attr::f32(3,cd)));g.point.insert("uv".into(),Arc::new(Attr::f32(2,uv)));
     if pix.chunks_exact(4).any(|c|(c[3]-1.).abs()>1e-8+1e-5){g.point.insert("Alpha".into(),Arc::new(Attr::f32(1,pix.chunks_exact(4).map(|c|c[3]).collect())));}
-    if height!="none"{g.point.insert("height".into(),Arc::new(Attr::f32(1,heights)));}
+    if displace && height!="none"{g.point.insert("height".into(),Arc::new(Attr::f32(1,heights)));}
     g.detail.insert("grid_columns".into(),json!(w));g.detail.insert("grid_rows".into(),json!(h));if !name.is_empty(){g.detail.insert("image".into(),json!(name));}Ok(g)
 }
 fn image_out(inputs:&Inputs,p:&Params)->Result<Geometry>{let g=inputs[0].first().ok_or_else(||Error::new("input 'geo' is not connected"))?;pixels(g,p)?;p.e("encoding",&["linear","srgb","data"])?;Ok((**g).clone())}
@@ -201,6 +202,31 @@ pub fn pixels(g:&Geometry,p:&Params)->Result<(usize,usize,Vec<f32>)>{
         let p_missing=Params::resolve(IMAGE_FILE.params,json!({"file":"does_not_exist_xyz.png"}).as_object()).unwrap();
         assert!(image_file(&[],&p_missing).unwrap_err().0.contains("no such file:"));
     }
+    #[test]fn image_file_plane_and_height_map_modes(){
+        let file=concat!(env!("CARGO_MANIFEST_DIR"),"/tests/fixtures/image_file_test.png");
+        let flat=Params::resolve(IMAGE_FILE.params,json!({"file":file,"center":[0.,0.,3.],"height":"red","height_scale":2.}).as_object()).unwrap();
+        let plane=image_file(&[],&flat).unwrap();
+        assert_eq!(plane.npoints,12);
+        assert_eq!(plane.nprims(),6);
+        assert!(plane.p().chunks_exact(3).all(|point|point[2]==3.));
+        assert_eq!(plane.point["uv"].rows(),plane.npoints);
+        let uv=numbers(&plane.point["uv"]);
+        assert_eq!(&uv[..2],&[0.,0.]);
+        assert_eq!(&uv[uv.len()-2..],&[1.,1.]);
+        assert_eq!(plane.point["Cd"].rows(),plane.npoints);
+        assert!(!plane.point.contains_key("height"));
+
+        let raised=Params::resolve(IMAGE_FILE.params,json!({"file":file,"center":[0.,0.,3.],"mode":"height_map","height":"red","height_scale":2.}).as_object()).unwrap();
+        let terrain=image_file(&[],&raised).unwrap();
+        assert_eq!(terrain.npoints,plane.npoints);
+        assert_eq!(numbers(&terrain.point["uv"]),uv);
+        assert_eq!(numbers(&terrain.point["Cd"]),numbers(&plane.point["Cd"]));
+        assert_eq!(terrain.point["height"].rows(),terrain.npoints);
+        assert!(terrain.p().chunks_exact(3).zip(plane.p().chunks_exact(3)).any(|(a,b)|a[2]!=b[2]));
+        for (point,height) in terrain.p().chunks_exact(3).zip(numbers(&terrain.point["height"])) {
+            assert!((point[2] as f64-(3.+height*2.)).abs()<1e-5);
+        }
+    }
     #[test]fn test_image_file_golden_comparison(){
         let manifest_dir=env!("CARGO_MANIFEST_DIR");
         let golden_path=std::path::Path::new(manifest_dir).join("tests/fixtures/image_file_golden.json");
@@ -214,6 +240,7 @@ pub fn pixels(g:&Geometry,p:&Params)->Result<(usize,usize,Vec<f32>)>{
             "colorspace":"auto",
             "size":10.0,
             "center":[1.0,2.0,3.0],
+            "mode":"height_map",
             "height":"red",
             "height_scale":2.0
         }).as_object()).unwrap();
@@ -256,6 +283,7 @@ pub fn pixels(g:&Geometry,p:&Params)->Result<(usize,usize,Vec<f32>)>{
             "colorspace":"stored",
             "size":5.0,
             "center":[0.0,0.0,0.0],
+            "mode":"height_map",
             "height":"luminance",
             "height_scale":1.5
         }).as_object()).unwrap();

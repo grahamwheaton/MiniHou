@@ -66,10 +66,11 @@ def blender_image(image, max_size, colorspace, size, center, height, height_scal
                                                "(masks, heights)"),
     Float("size", 10.0, min=0.0001, soft_max=100.0, doc="Width of the grid in world units (the height follows the image's aspect)"),
     Vec3("center", (0.0, 0.0, 0.0)),
-    Enum("height", HEIGHT, doc="Lift the points by this channel (a height map): z = value * height_scale; also stored as `height`"),
+    Enum("mode", ["plane", "height_map"], doc="plane: flat image grid with UV and Cd; height_map: displace the grid in Z using the selected height channel"),
+    Enum("height", ["luminance", "red", "green", "blue", "alpha", "none"], doc="Height-map channel; z = value * height_scale and the value is stored as `height`"),
     Float("height_scale", 1.0, soft_min=-10.0, soft_max=10.0),
 ])
-def image_file(file, max_size, colorspace, size, center, height, height_scale):
+def image_file(file, max_size, colorspace, size, center, mode, height, height_scale):
     """A PNG file as a pixel grid, like `blender_image` but from disk: the way to bring in height maps and masks that came from Houdini or
     any paint program."""
     if not str(file).strip():
@@ -81,7 +82,8 @@ def image_file(file, max_size, colorspace, size, center, height, height_scale):
         pix = images.read_png(path, srgb=(colorspace == "auto"))
     except (ValueError, OSError) as e:
         raise ValueError(f"cannot read {os.path.basename(path)}: {e}") from None
-    return images.grid_from_pixels(images.downsample(pix, int(max_size)), size, tuple(center), height, height_scale, os.path.basename(path))
+    channel = height if mode == "height_map" else "none"
+    return images.grid_from_pixels(images.downsample(pix, int(max_size)), size, tuple(center), channel, height_scale, os.path.basename(path))
 
 
 @node("image_out", inputs=["geo"], category="output", params=[
