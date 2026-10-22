@@ -176,7 +176,7 @@ pub(crate) fn make(
             vertex_point: vp,
             prim_offsets: offsets,
             closed,
-        }),
+        ..Default::default()}),
         point,
         vertex,
         prim,

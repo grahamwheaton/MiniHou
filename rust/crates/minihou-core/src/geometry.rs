@@ -9,7 +9,7 @@
 //! Indices are `i32`, as in Python and Blender: [`MAX_ELEMENTS`] is the limit and building past it is an error.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use rayon::prelude::*;
 use serde_json::{Map, Value};
@@ -81,16 +81,31 @@ impl Attr {
 
 pub type AttrTable = BTreeMap<String, Arc<Attr>>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Topology {
     pub vertex_point: Vec<i32>,
     pub prim_offsets: Vec<i32>,
     pub closed: Option<Vec<bool>>,
+    #[doc(hidden)]
+    pub cached_edges: OnceLock<Vec<(i32, i32)>>,
+}
+
+impl Clone for Topology {
+    fn clone(&self) -> Self {
+        Self { vertex_point: self.vertex_point.clone(), prim_offsets: self.prim_offsets.clone(),
+            closed: self.closed.clone(), cached_edges: OnceLock::new() }
+    }
+}
+
+impl PartialEq for Topology {
+    fn eq(&self, other: &Self) -> bool {
+        self.vertex_point == other.vertex_point && self.prim_offsets == other.prim_offsets && self.closed == other.closed
+    }
 }
 
 impl Default for Topology {
     fn default() -> Self {
-        Topology { vertex_point: Vec::new(), prim_offsets: vec![0], closed: None }
+        Topology { vertex_point: Vec::new(), prim_offsets: vec![0], closed: None, cached_edges: OnceLock::new() }
     }
 }
 
@@ -106,11 +121,24 @@ impl Topology {
     /// Unique undirected pairs from primitive loops, ordered by (lower point, higher point).
     /// Open curves omit their closing segment, matching [`crate::topo::edges`].
     pub fn nedges(&self) -> usize {
-        self.edge_pairs().len()
+        self.cached_edge_pairs().len()
     }
 
     /// The stable edge-domain row order, independent of a source mesh's edge order.
     pub fn edge_pairs(&self) -> Vec<(i32, i32)> {
+        self.cached_edge_pairs().to_vec()
+    }
+
+    fn cached_edge_pairs(&self) -> &[(i32, i32)] {
+        self.cached_edges.get_or_init(|| self.build_edge_pairs())
+    }
+
+    /// Call before changing topology fields on an exclusively owned topology.
+    pub fn clear_edge_cache(&mut self) {
+        self.cached_edges = OnceLock::new();
+    }
+
+    fn build_edge_pairs(&self) -> Vec<(i32, i32)> {
         let mut pairs = Vec::new();
         for prim in 0..self.nprims() {
             let start = self.prim_offsets[prim] as usize;
@@ -195,7 +223,7 @@ impl Geometry {
         if npoints > MAX_ELEMENTS || vertex_point.len() > MAX_ELEMENTS {
             return Err(Error::new(format!("more than {MAX_ELEMENTS} elements")));
         }
-        let topology = Topology { vertex_point, prim_offsets, closed };
+        let topology = Topology { vertex_point, prim_offsets, closed, ..Default::default() };
         topology.validate(npoints)?;
         let mut g = Geometry { npoints, topology: Arc::new(topology), ..Default::default() };
         g.point.insert("P".into(), Arc::new(Attr::f32(3, p)));
@@ -260,11 +288,18 @@ impl Geometry {
             }
         }
         for (domain, table, n) in [("point", &self.point, self.npoints), ("vertex", &self.vertex, self.nvertices()),
-                                   ("edge", &self.edge, self.nedges()),
                                    ("prim", &self.prim, self.nprims())] {
             for (name, a) in table {
                 if a.rows() != n {
                     return Err(Error::new(format!("{domain} attribute {name:?} has {} rows, expected {n}", a.rows())));
+                }
+            }
+        }
+        if !self.edge.is_empty() {
+            let n = self.nedges();
+            for (name, a) in &self.edge {
+                if a.rows() != n {
+                    return Err(Error::new(format!("edge attribute {name:?} has {} rows, expected {n}", a.rows())));
                 }
             }
         }
@@ -295,10 +330,12 @@ mod tests {
         let mut g = quad();
         assert!(g.edge.is_empty());
         g.validate().unwrap();
+        assert!(g.topology.cached_edges.get().is_none());
         assert!(std::ptr::eq(g.table("edge"), &g.edge));
 
         g.edge.insert("crease".into(), Arc::new(Attr::f32(1, vec![0.0; 4])));
         g.validate().unwrap();
+        assert_eq!(g.topology.cached_edges.get().unwrap().len(), 4);
 
         g.edge.insert("crease".into(), Arc::new(Attr::f32(1, vec![0.0; 3])));
         let err = g.validate().unwrap_err();
@@ -311,11 +348,14 @@ mod tests {
         let cube = cube();
         assert_eq!(quad.topology.nedges(), 4);
         assert_eq!(cube.topology.nedges(), 12);
+        let cached = cube.topology.cached_edges.get().unwrap();
+        assert_eq!(cached.len(), 12);
         let expected = crate::topo::edges(&cube.topology, cube.npoints).points;
         assert_eq!(expected.len() / 2, cube.nedges());
         for _ in 0..3 {
             assert_eq!(crate::topo::edges(&cube.topology, cube.npoints).points, expected);
             assert_eq!(cube.topology.nedges(), 12);
+            assert!(std::ptr::eq(cached, cube.topology.cached_edges.get().unwrap()));
         }
     }
 }

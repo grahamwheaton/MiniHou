@@ -40,7 +40,7 @@ fn convert_line(inputs:&Inputs,p:&Params)->Result<Geometry> {
     let (paths,cl)=if p.b("join")? {chains(g.npoints,&edges)} else {(edges.iter().map(|e|e.to_vec()).collect(),vec![false;edges.len()])};
     let mut out=(*g).clone();let mut vp=Vec::new();let mut offs=vec![0];
     for path in paths {vp.extend(path);offs.push(vp.len() as i32);}
-    out.topology=Arc::new(Topology{vertex_point:vp,prim_offsets:offs,closed:Some(cl)});out.vertex.clear();out.prim.clear();Ok(out)
+    out.topology=Arc::new(Topology{vertex_point:vp,prim_offsets:offs,closed:Some(cl), ..Default::default()});out.vertex.clear();out.prim.clear();Ok(out)
 }
 pub const POLYPATH:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"polypath",inputs:GEO,params:&[],cook:polypath};
 fn polypath(inputs:&Inputs,_:&Params)->Result<Geometry> {

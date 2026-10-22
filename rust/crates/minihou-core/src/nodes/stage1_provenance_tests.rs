@@ -98,7 +98,7 @@ fn source_less_cap_is_neutral_with_invalid_uvs() {
     let first_corner = g.nvertices();
     let mut vp = g.topology.vertex_point.clone();
     vp.extend([0,3,2,1]);
-    g.topology = Arc::new(crate::geometry::Topology {vertex_point:vp,prim_offsets:vec![0,4,8],closed:None});
+    g.topology = Arc::new(crate::geometry::Topology {vertex_point:vp,prim_offsets:vec![0,4,8],closed:None, ..Default::default()});
     for attr in g.vertex.values_mut() {
         let mut v = attr.as_f32().unwrap().to_vec();
         v.extend(vec![0.; attr.width * 4]);

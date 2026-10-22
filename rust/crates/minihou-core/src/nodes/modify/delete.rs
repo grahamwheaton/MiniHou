@@ -191,7 +191,7 @@ pub(in crate::nodes) fn keep_points(geo: &Geometry, keep: &[bool]) -> Result<Geo
             vertex_point: new_vp,
             prim_offsets: new_offs,
             closed: new_closed,
-        }),
+        ..Default::default()}),
         point: slice_table_mask(&geo.point, keep),
         vertex: slice_table_mask(&geo.vertex, &vkeep),
         prim: slice_table_indices(&geo.prim, &src_prim),
