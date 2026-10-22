@@ -116,7 +116,10 @@ impl Modal {
             } else { self.last.iter().copied().find(|v| *v != 0. && *v != 1.).unwrap_or(self.last[0]) },
                 if self.kind == Kind::Rotate { "°" } else { "×" }) };
         format!("{title}  {}  {numbers}  (Snap: {}){}{}", self.constraint.label(),
-            if snap { self.snap_to.label() } else { "Off".into() }, if self.proportional { "  Proportional" } else { "" },
+            if snap && self.kind==Kind::Rotate && self.base_stage!=BaseStage::Off {
+                "15° (Shift: 5°)".into()
+            } else if snap { self.snap_to.label() } else { "Off".into() },
+            if self.proportional { "  Proportional" } else { "" },
             if self.base_stage != BaseStage::Off { match self.base_stage {
                 BaseStage::Base => "  Base snap: pick base", BaseStage::Target => "  Base snap: pick target",
                 BaseStage::SourceDirection => "  Base snap: pick source edge direction",
