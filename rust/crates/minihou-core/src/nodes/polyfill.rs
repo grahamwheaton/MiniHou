@@ -125,7 +125,7 @@ fn get_mode(p: &Params) -> String {
                 3 => "single_polygon".to_string(),
                 4 => "quadrilateral_fan".to_string(),
                 5 => "quadrilateral_grid".to_string(),
-                _ => "quadrilaterals".to_string(),
+                _ => format!("invalid mode {i}"),
             };
         }
     }
@@ -266,6 +266,21 @@ mod tests {
     }
 
     #[test]
+    fn touching_boundaries_report_ambiguity_instead_of_dropping_a_loop() {
+        // Two triangles meet only at point 0, leaving two possible boundary
+        // successors there. Reordering primitives must not change the result.
+        let positions = vec![
+            0., 0., 0., 1., 0., 0., 0., 1., 0.,
+            -1., 0., 0., 0., -1., 0.,
+        ];
+        for faces in [vec![0, 1, 2, 0, 3, 4], vec![0, 3, 4, 0, 1, 2]] {
+            let g = Geometry::from_arrays(positions.clone(), faces, vec![0, 3, 6], None).unwrap();
+            let err = cook(g, json!({"mode": "single_polygon"})).unwrap_err();
+            assert!(err.0.contains("boundary touches itself at point 0"), "{err}");
+        }
+    }
+
+    #[test]
     fn test_existing_graphs_still_cook() {
         let g = cube_missing_face();
         let out = cook(g, json!({})).unwrap();
@@ -274,6 +289,71 @@ mod tests {
         assert_eq!(out.prim["material_index"].as_i32().unwrap()[cap], 0);
         let start = out.topology.prim_offsets[cap] as usize * 2;
         assert!(out.vertex["uv"].as_f32().unwrap()[start..].iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn single_polygon_and_quad_caps_copy_boundary_corner_attributes() {
+        let mut g = cube_missing_face();
+        g.vertex.insert("corner_id".into(), Arc::new(Attr::i32(1, (0..20).collect())));
+        for mode in ["single_polygon", "quadrilaterals"] {
+            let out = cook(g.clone(), json!({"mode": mode, "edge_loop": 0.0})).unwrap();
+            assert_eq!(out.nprims(), 6);
+            let cap_start = out.topology.prim_offsets[5] as usize;
+            let mut ids = out.vertex["corner_id"].as_i32().unwrap()[cap_start..].to_vec();
+            ids.sort_unstable();
+            assert_eq!(ids, [6, 10, 14, 18]);
+        }
+    }
+
+    #[test]
+    fn open_curve_sharing_a_mesh_edge_does_not_hide_the_hole() {
+        let mut g = cube_missing_face();
+        let mut topology = (*g.topology).clone();
+        topology.vertex_point.extend([4, 5]);
+        topology.prim_offsets.push(topology.vertex_point.len() as i32);
+        topology.closed = Some(vec![true, true, true, true, true, false]);
+        g.topology = Arc::new(topology);
+        g.vertex.insert("uv".into(), Arc::new(Attr::f32(2,
+            (0..5).flat_map(|_| [0., 0., 1., 0., 1., 1., 0., 1.])
+                .chain([0., 0., 1., 0.]).collect())));
+        g.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![1; 6])));
+        g.validate().unwrap();
+
+        let out = cook(g, json!({"mode": "single_polygon", "edge_loop": 0.0})).unwrap();
+        assert_eq!(out.nprims(), 7);
+        assert_eq!(&out.topology.vertex_point[20..22], &[4, 5]);
+        assert_eq!(out.topology.closed.as_ref().unwrap(), &[true, true, true, true, true, false, true]);
+    }
+
+    #[test]
+    fn curve_without_polygons_has_no_fill_boundary() {
+        let g = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 1., 1., 0.],
+            vec![0, 1, 2], vec![0, 3], Some(vec![false]),
+        ).unwrap();
+        let out = cook(g.clone(), json!({})).unwrap();
+        assert_eq!(out.nprims(), 1);
+        assert_eq!(out.npoints, g.npoints);
+        assert_eq!(out.topology.vertex_point, g.topology.vertex_point);
+        assert_eq!(out.topology.closed, g.topology.closed);
+    }
+
+    #[test]
+    fn collinear_boundary_does_not_create_a_zero_area_cap() {
+        let g = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 2., 0., 0.],
+            vec![0, 1, 2], vec![0, 3], None,
+        ).unwrap();
+        let err = cook(g, json!({"mode": "single_polygon"})).unwrap_err();
+        assert!(err.0.contains("degenerate boundary loop"), "{err}");
+    }
+
+    #[test]
+    fn invalid_fill_mode_is_reported() {
+        for mode in [json!("unknown"), json!(99)] {
+            let err = cook(cube_missing_face(), json!({"mode": mode})).unwrap_err();
+            assert!(err.0.contains("invalid PolyFill mode"), "{err}");
+        }
     }
 
     #[test]

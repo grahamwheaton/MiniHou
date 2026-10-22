@@ -113,6 +113,14 @@ class MirrorClipFillTests(unittest.TestCase):
     def test_polyfill_on_a_closed_mesh_does_nothing(self):
         self.assertEqual(chain(("polyfill", {}), src=BOX).nprims, 6)
 
+    def test_polyfill_cap_inherits_boundary_corner_ids(self):
+        from minihou.nodes.model import polyfill
+        g = Geometry.from_arrays(np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], np.float32),
+                                 [0, 1, 2, 3], [0, 4])
+        g.vertex['corner_id'] = np.array([10, 11, 12, 13], np.int32)
+        out = polyfill(g, '')
+        np.testing.assert_array_equal(out.vertex['corner_id'][4:], [10, 13, 12, 11])
+
 
 class ExtrudeTests(unittest.TestCase):
     def test_connected_extrude_with_back_is_a_closed_outward_box(self):

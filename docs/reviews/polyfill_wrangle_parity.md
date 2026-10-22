@@ -1,0 +1,46 @@
+# PolyFill and Attribute Wrangle parity review
+
+Reviewed 2026-10-22 against the [Houdini PolyFill](https://www.sidefx.com/docs/houdini/nodes/sop/polyfill.html) and [Attribute Wrangle](https://www.sidefx.com/docs/houdini/nodes/sop/attribwrangle.html) documentation, the Rust nodes, and the matching Python nodes. This is a code and documentation comparison, not a Houdini cook comparison.
+
+## PolyFill
+
+- **Parameters:** Rust exposes boundary group, six named fill modes, auto-complete, reverse patches, unique points, point normal update, edge loop, smooth, corner offset, custom corners, deform/offset/tangent controls, and output groups. Python exposes only `fill_group` and a single polygon fill. Rust has aliases and defaults that are not established as Houdini equivalents. An unrecognized Rust fill mode currently falls through to quadrilaterals instead of reporting an invalid choice.
+- **Algorithm:** Rust quadrilaterals use a center fan for many even boundaries, rather than Houdini's documented U/L-shape search. Its grid layout and smoothing are local approximations. Triangle mode has an ear-clipping fallback that may create slivers on concave or near-degenerate boundaries. Attribute interpolation and custom-corner behavior have not been compared with Houdini.
+- **Attributes:** Python pads new primitive and vertex attributes with zero. Rust's append path can interpolate new point and corner attributes and writes patch groups, but the interpolation, normal update, UV seams, group append, and unique-point behavior need Houdini comparison. Rust's single polygon path supplies no source corners, so corner attributes are not interpolated there.
+- **Edges:** Closed mesh holes and mixed triangle/quad surroundings need tests of winding, patch shape, and attribute propagation. Open curves do not form polygon holes in the Rust boundary-edge walk; partial boundary selection only produces a patch when auto-complete finds a closed continuation. Coincident points, zero-length edges, degenerate faces, and multiple boundary edges meeting at one point remain edge cases.
+- **Reliability:** Before this review's fix, `extract_loops` stored only one outgoing boundary edge per point. At a touching or non-manifold boundary, later edges could overwrite earlier ones, silently omitting a hole or making the result depend on primitive order. Rust now reports the ambiguity explicitly, as Python does. This is one concrete failure mode behind the open reliability report; other causes remain possible.
+
+## Attribute Wrangle
+
+- **Parameters:** Rust has snippet, run-over (points, primitives, vertices, detail), and group. Python has snippet, run-over (the first three), and group. Houdini also documents group type, Numbers mode/count/job size, attribute creation filters, prototype enforcement, variable-name policy, manual attribute/group bindings, evaluation node path, export control, normal update after displacement, cross-input match attribute, in-place computation, output selection group, and precision controls. None of those controls is implemented in these Rust/Python nodes.
+- **Language:** Rust evaluates a small assignment/expression subset. Python supports a broader AST-checked expression language with locals, comparisons, conditionals, and more functions. Neither is a VEX interpreter; Houdini geometry mutation functions, loops, arrays, strings, and general VEX code are outside the implemented subset.
+- **Attributes:** Rust can read point, primitive, vertex, and numeric detail values with some cross-domain promotion; it writes the chosen domain. Python also promotes and writes groups as integer attributes. Rust now creates an untyped scalar `@name` as a float and reads same-index `@opinput1_` through `@opinput3_` attributes, with zero padding for short inputs. Python additionally implements nearest-point reads. Rust's vertex group filter selects a primitive group, not a vertex group. Normal recomputation after `@P` displacement is absent.
+- **Edges:** The code needs explicit coverage for missing and short extra inputs, absent attributes, mixed polygon sizes during primitive averages, zero-length primitives, open curves (`@closed`), and non-finite expression results. Existing Rust tests cover basic domain reads and assignments, but do not establish Houdini parity.
+
+## Verification boundary
+
+The linked SideFX pages describe Houdini 22.0. Exact parameter defaults, output topology, group and attribute values, winding, UV interpolation, and behavior on malformed geometry still require a licensed Houdini run with matching fixtures. Local Rust and Python tests only establish MiniHou behavior.
+
+## Fixes made from this review
+
+- PolyFill rejects touching/non-manifold boundary junctions instead of silently dropping an edge.
+- Rust wrangle reads `@opinput#_name` at the current element number, returning zero for missing corresponding elements and an error for a disconnected port.
+- Rust wrangle creates an untyped scalar `@name` as a float attribute.
+
+## Round 2 status
+
+Local fixes and coverage:
+
+- Rust PolyFill's single-polygon and four-sided quad caps now copy source corner attributes. Python's single-polygon cap now copies boundary corner attributes too. New cap UVs retain their neutral policies; Houdini's seam and interpolation values are unverified.
+- PolyFill ignores open curves when finding polygon boundaries, including curves sharing a mesh edge, and preserves those curves in the output. A curve-only input remains unchanged.
+- PolyFill reports a degenerate boundary loop instead of adding a zero-area cap. Exact Houdini behavior for degenerate input is unverified.
+- PolyFill rejects unknown fill modes instead of silently choosing quadrilaterals.
+- Wrangle now prefers a vertex group for vertex run-over when a primitive group has the same name; the primitive-group fallback remains for existing graphs.
+- Wrangle tests cover averages on mixed triangle/quad sizes, an empty primitive, and `@closed` on an open curve. The existing average code passed; this is coverage, not a parity claim.
+
+Remaining gaps requiring a Houdini cook or broader implementation:
+
+- Quadrilaterals still use a center fan for many even boundaries. The documented U/L-shape search, exact patch topology, winding, and corner selection need matching Houdini output before replacing the algorithm.
+- Point and corner interpolation, UV seams, primitive/group append, normal recomputation, and unique-point values on new faces need Houdini comparisons. Round 2 only fixed missing source corners on simple caps.
+- Coincident points, zero-length edges, non-manifold boundaries, concave near-degenerate triangles, and mixed triangle/quad surroundings need further fixtures and Houdini output. Degenerate boundary loops now fail explicitly in MiniHou.
+- Attribute Wrangle's missing controls and VEX language features remain as listed above. Cross-domain and cross-input behavior, missing attributes, non-finite results, and malformed geometry need more fixture coverage and Houdini comparison.

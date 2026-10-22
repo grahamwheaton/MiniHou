@@ -6,13 +6,27 @@ pub(super) struct BoundaryLoop {
     pub(super) is_open: bool,
 }
 
+// Curves may share points or even edges with a mesh. Count only polygon
+// half-edges when deciding whether a polygon edge borders a hole.
+fn polygon_edge_counts(g: &Geometry, e: &topo::Edges) -> Vec<usize> {
+    let (prim, _, _) = model::corners(g);
+    let mut counts = vec![0; e.len()];
+    for (v, &p) in prim.iter().enumerate() {
+        if g.topology.is_closed(p) && e.of_vertex[v] >= 0 {
+            counts[e.of_vertex[v] as usize] += 1;
+        }
+    }
+    counts
+}
+
 pub(super) fn get_boundary_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>> {
     let e = topo::edges(&g.topology, g.npoints);
+    let counts = polygon_edge_counts(g, &e);
     let mut mask = vec![false; e.len()];
     let pattern = pattern.trim();
     if pattern.is_empty() {
         for i in 0..e.len() {
-            if e.count[i] == 1 {
+            if counts[i] == 1 {
                 mask[i] = true;
             }
         }
@@ -22,7 +36,7 @@ pub(super) fn get_boundary_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>
     if let Ok(em) = edge_tools::edge_mask(g, pattern) {
         let mut any = false;
         for i in 0..e.len() {
-            if e.count[i] == 1 && em[i] {
+            if counts[i] == 1 && em[i] {
                 mask[i] = true;
                 any = true;
             }
@@ -35,7 +49,7 @@ pub(super) fn get_boundary_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>
     if let Ok(pm) = groups::point_mask(g, pattern) {
         let mut any = false;
         for i in 0..e.len() {
-            if e.count[i] == 1 {
+            if counts[i] == 1 {
                 let p0 = e.points[2 * i] as usize;
                 let p1 = e.points[2 * i + 1] as usize;
                 if pm[p0] && pm[p1] {
@@ -61,7 +75,7 @@ pub(super) fn get_boundary_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>
             };
             if in_group {
                 let edge_id = e.of_vertex[v];
-                if edge_id >= 0 && e.count[edge_id as usize] == 1 {
+                if edge_id >= 0 && counts[edge_id as usize] == 1 {
                     mask[edge_id as usize] = true;
                     any = true;
                 }
@@ -77,7 +91,8 @@ pub(super) fn get_boundary_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>
 
 pub(super) fn extract_loops(g: &Geometry, boundary_mask: &[bool], auto_complete: bool) -> Result<Vec<BoundaryLoop>> {
     let e = topo::edges(&g.topology, g.npoints);
-    let (_, nx, _) = model::corners(g);
+    let counts = polygon_edge_counts(g, &e);
+    let (prim, nx, _) = model::corners(g);
     let vp = &g.topology.vertex_point;
 
     let mut succ: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
@@ -87,10 +102,16 @@ pub(super) fn extract_loops(g: &Geometry, boundary_mask: &[bool], auto_complete:
 
     for v in 0..g.nvertices() {
         let edge_id = e.of_vertex[v];
-        if edge_id >= 0 && e.count[edge_id as usize] == 1 {
+        if g.topology.is_closed(prim[v]) && edge_id >= 0 && counts[edge_id as usize] == 1 {
             let a = vp[v] as usize;
             let b = vp[nx[v]] as usize;
-            all_succ.insert(b, (a, v));
+            // A boundary walk has no unambiguous successor at a junction. Do not
+            // silently replace an earlier edge and lose a hole.
+            if all_succ.insert(b, (a, v)).is_some() {
+                return Err(Error::new(format!(
+                    "boundary touches itself at point {b}; cannot choose a fill loop"
+                )));
+            }
 
             if boundary_mask[edge_id as usize] {
                 succ.insert(b, (a, v));
