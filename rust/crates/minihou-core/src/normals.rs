@@ -84,11 +84,11 @@ pub fn point_prims(vp: &[i32], offs: &[i32], npoints: usize) -> (Vec<u32>, Vec<u
         });
     }
     // runs of points own contiguous parts of `prims`: put each bucket in primitive order
-    const RUN: usize = 1 << 14;
-    let mut runs = Vec::with_capacity(npoints / RUN + 1);
+    let run = crate::limits::rayon_chunk_size(npoints);
+    let mut runs = Vec::with_capacity(npoints / run + 1);
     let mut rest: &mut [u32] = &mut prims;
-    for first in (0..npoints).step_by(RUN) {
-        let last = (first + RUN).min(npoints);
+    for first in (0..npoints).step_by(run) {
+        let last = (first + run).min(npoints);
         let (a, r) = rest.split_at_mut((start[last] - start[first]) as usize);
         runs.push((first, last, a));
         rest = r;

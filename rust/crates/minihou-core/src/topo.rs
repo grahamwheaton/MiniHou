@@ -4,9 +4,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rayon::prelude::*;
 
-/// Points (or primitives) handled together by one parallel task.
-const RUN: usize = 1 << 14;
-
 use crate::geometry::Topology;
 
 /// Unique undirected edges, numbered exactly as `topo.edges` numbers them: sorted by (lower point, higher point).
@@ -36,29 +33,31 @@ pub fn edges(topo: &Topology, npoints: usize) -> Edges {
     edges_raw(&topo.vertex_point, &topo.prim_offsets, topo.closed.as_deref(), npoints)
 }
 
-/// Half-edges bucketed by their lower point and sorted inside each bucket: `(start, sorted (higher point, vertex), RUN-sized runs of
+/// Half-edges bucketed by their lower point and sorted inside each bucket: `(start, sorted (higher point, vertex), run-sized runs of
 /// buckets with their number of distinct edges)`.
 fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> (Vec<usize>, Vec<(u32, u32)>, Vec<usize>) {
     let nv = vp.len();
     let n = npoints.max(1);
+    let np = offs.len() - 1;
+    let prim_run = crate::limits::rayon_chunk_size(np);
+    let chunk_size = crate::limits::rayon_chunk_size(n);
 
     // half-edges as (lower, higher); `u32::MAX` marks "no edge". In parallel over runs of primitives, which own contiguous,
     // disjoint vertex ranges. Every big array here starts zeroed: the OS hands those pages out lazily, so touching them happens
     // in the parallel loops instead of in a serial fill (which was half the time on many cores).
     let mut half: Vec<(u32, u32)> = vec![(0, 0); nv];
     {
-        let np = offs.len() - 1;
-        let mut parts: Vec<(usize, &mut [(u32, u32)])> = Vec::with_capacity(np / RUN + 1);
+        let mut parts: Vec<(usize, &mut [(u32, u32)])> = Vec::with_capacity(np / prim_run + 1);
         let mut rest: &mut [(u32, u32)] = &mut half;
-        for first in (0..np).step_by(RUN) {
-            let last = (first + RUN).min(np);
+        for first in (0..np).step_by(prim_run) {
+            let last = (first + prim_run).min(np);
             let (part, r) = rest.split_at_mut((offs[last] - offs[first]) as usize);
             parts.push((first, part));
             rest = r;
         }
         parts.par_iter_mut().for_each(|(first, part)| {
             let base = offs[*first] as usize;
-            for p in *first..(*first + RUN).min(np) {
+            for p in *first..(*first + prim_run).min(np) {
                 let (s, e) = (offs[p] as usize, offs[p + 1] as usize);
                 let closed = closed.is_none_or(|c| c[p]);
                 for v in s..e {
@@ -88,9 +87,9 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
     });
     // prefix sum in two parallel passes over runs of points (a serial scan over the run totals in between); the counters become
     // each bucket's next free slot
-    let run_total: Vec<usize> = (0..n.div_ceil(RUN))
+    let run_total: Vec<usize> = (0..n.div_ceil(chunk_size))
         .into_par_iter()
-        .map(|r| fill[r * RUN..((r + 1) * RUN).min(n)].iter().map(|c| c.load(Ordering::Relaxed) as usize).sum())
+        .map(|r| fill[r * chunk_size..((r + 1) * chunk_size).min(n)].iter().map(|c| c.load(Ordering::Relaxed) as usize).sum())
         .collect();
     let mut run_start = Vec::with_capacity(run_total.len());
     let mut total = 0usize;
@@ -99,7 +98,7 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
         total += t;
     }
     let mut start = vec![0usize; n + 1];
-    start[..n].par_chunks_mut(RUN).zip(fill.par_chunks(RUN)).zip(run_start.par_iter()).for_each(|((st, c), &s0)| {
+    start[..n].par_chunks_mut(chunk_size).zip(fill.par_chunks(chunk_size)).zip(run_start.par_iter()).for_each(|((st, c), &s0)| {
         let mut s = s0;
         for (st, c) in st.iter_mut().zip(c) {
             *st = s;
@@ -126,10 +125,10 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
 
     // runs of lower points own contiguous, disjoint parts of `sorted`; sort each bucket by the higher point (buckets are tiny:
     // a point's valence) and count the distinct edges of each run
-    let mut runs: Vec<(usize, &mut [(u32, u32)])> = Vec::with_capacity(n / RUN + 1);
+    let mut runs: Vec<(usize, &mut [(u32, u32)])> = Vec::with_capacity(n / chunk_size + 1);
     let mut rest: &mut [(u32, u32)] = &mut sorted;
-    for first in (0..n).step_by(RUN) {
-        let last = (first + RUN).min(n);
+    for first in (0..n).step_by(chunk_size) {
+        let last = (first + chunk_size).min(n);
         let (run, r) = rest.split_at_mut(start[last] - start[first]);
         runs.push((first, run));
         rest = r;
@@ -139,7 +138,7 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
         .map(|(first, run)| {
             let base = start[*first];
             let mut edges = 0;
-            for lo in *first..(*first + RUN).min(n) {
+            for lo in *first..(*first + chunk_size).min(n) {
                 let b = &mut run[start[lo] - base..start[lo + 1] - base];
                 b.sort_unstable();
                 edges += b.iter().enumerate().filter(|(i, x)| *i == 0 || b[i - 1].0 != x.0).count();
@@ -154,11 +153,12 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
 /// topology ([`crate::geometry::validate_topology`]).
 pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> Edges {
     let n = npoints.max(1);
+    let chunk_size = crate::limits::rayon_chunk_size(n);
     let nv = vp.len();
     let (start, sorted, distinct) = bucketed(vp, offs, closed, npoints);
     let ne: usize = distinct.iter().sum();
-    let runs: Vec<(usize, &[(u32, u32)])> = (0..n).step_by(RUN).map(|first| {
-        let last = (first + RUN).min(n);
+    let runs: Vec<(usize, &[(u32, u32)])> = (0..n).step_by(chunk_size).map(|first| {
+        let last = (first + chunk_size).min(n);
         (first, &sorted[start[first]..start[last]])
     }).collect();
 
@@ -186,7 +186,7 @@ pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usi
         let ov = &ov;
         let base = start[first];
         let mut e = 0usize;
-        for lo in first..(first + RUN).min(n) {
+        for lo in first..(first + chunk_size).min(n) {
             let mut prev: Option<u32> = None;
             for &(hi, v) in &run[start[lo] - base..start[lo + 1] - base] {
                 if prev != Some(hi) {
@@ -208,6 +208,7 @@ pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usi
 /// Only the `(E * 2)` point numbers of [`edges_raw`], as `u32` (what the viewport draws), without the per-vertex and count arrays.
 pub fn edge_points_u32(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> Vec<u32> {
     let n = npoints.max(1);
+    let chunk_size = crate::limits::rayon_chunk_size(n);
     let (start, sorted, distinct) = bucketed(vp, offs, closed, npoints);
     let ne: usize = distinct.iter().sum();
     let mut points = vec![0u32; ne * 2];
@@ -215,12 +216,12 @@ pub fn edge_points_u32(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoint
     let mut rest: &mut [u32] = &mut points;
     for (i, k) in distinct.iter().enumerate() {
         let (pp, r) = rest.split_at_mut(k * 2);
-        jobs.push((i * RUN, pp));
+        jobs.push((i * chunk_size, pp));
         rest = r;
     }
     jobs.into_par_iter().for_each(|(first, pp)| {
         let mut e = 0;
-        for lo in first..(first + RUN).min(n) {
+        for lo in first..(first + chunk_size).min(n) {
             let mut prev: Option<u32> = None;
             for &(hi, _) in &sorted[start[lo]..start[lo + 1]] {
                 if prev != Some(hi) {
@@ -238,3 +239,28 @@ pub fn edge_points_u32(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoint
 /// A raw pointer that may be shared by the threads of one parallel loop (each writes elements no other thread touches).
 pub(crate) struct SharedMut<T>(pub(crate) *mut T);
 unsafe impl<T> Sync for SharedMut<T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::{edge_points_u32, edges_raw};
+
+    #[test]
+    fn large_topology_output_is_identical_across_rayon_pools() {
+        let npoints = 70_001;
+        let mut vp = Vec::with_capacity(140_000);
+        let mut offs = Vec::with_capacity(npoints);
+        offs.push(0);
+        for i in 0..70_000 {
+            vp.extend([i, i + 1]);
+            offs.push(vp.len() as i32);
+        }
+        let calculate = |threads| rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(|| {
+            (
+                edges_raw(&vp, &offs, Some(&vec![false; 70_000]), npoints),
+                edge_points_u32(&vp, &offs, Some(&vec![false; 70_000]), npoints),
+                crate::normals::point_prims(&vp, &offs, npoints),
+            )
+        });
+        assert_eq!(calculate(1), calculate(8));
+    }
+}

@@ -5,7 +5,7 @@ use super::super::theme::Theme;
 use crate::units::LengthUnit;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Tab { #[default] Interface, Units, Viewport, Keymap, Files, Security }
+enum Tab { #[default] Interface, Units, Viewport, Performance, Keymap, Files, Security }
 #[derive(Clone, Default)]
 struct State { tab: Tab, search: String, capture: Option<usize>, conflict: String }
 
@@ -20,7 +20,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.set_min_width(130.);
-                    for (tab,label) in [(Tab::Interface,"Interface"),(Tab::Units,"Units"),(Tab::Viewport,"Viewport"),(Tab::Keymap,"Keymap"),(Tab::Files,"Files"),(Tab::Security,"Security")] {
+                    for (tab,label) in [(Tab::Interface,"Interface"),(Tab::Units,"Units"),(Tab::Viewport,"Viewport"),(Tab::Performance,"Performance"),(Tab::Keymap,"Keymap"),(Tab::Files,"Files"),(Tab::Security,"Security")] {
                         if ui.selectable_label(state.tab == tab, label).clicked() { state.tab = tab; state.capture = None; state.conflict.clear(); }
                     }
                 });
@@ -84,6 +84,14 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.clip_end).range(1e-6..=1e9).speed(1.0).prefix("Clip End  ")).changed();
                             (prefs.viewport.clip_start, prefs.viewport.clip_end) = minihou_app::sanitize_clip_planes(prefs.viewport.clip_start, prefs.viewport.clip_end);
                             changed |= crate::ui::sketch::inference_preferences(ui, &mut prefs.inference);
+                        }
+                        Tab::Performance => {
+                            heading(ui,"Performance limits",theme);
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.copy_memory_limit_mib).range(16..=16_384).prefix("Copy memory  ").suffix(" MiB")).changed();
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.loop_iteration_budget).range(1..=usize::MAX).prefix("Loop iterations  ")).changed();
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.solver_steps).range(1..=usize::MAX).prefix("Solver steps  ")).changed();
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.solver_substeps).range(1..=usize::MAX).prefix("Solver substeps  ")).changed();
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.viewport_normal_lines).range(1..=usize::MAX).prefix("Viewport normal lines  ")).changed();
                         }
                         Tab::Keymap => {
                             heading(ui,"Keymap",theme);

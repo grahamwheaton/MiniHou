@@ -25,6 +25,12 @@ pub struct Preferences {
     pub recent_files: Vec<PathBuf>, pub viewport: ViewportPreferences,
     pub units: UnitSettings,
     pub node_physics_snappiness: f32,
+    /// User-adjustable performance budgets. Copy memory is stored in MiB for the existing copy node reader.
+    pub copy_memory_limit_mib: u64,
+    pub loop_iteration_budget: usize,
+    pub solver_steps: usize,
+    pub solver_substeps: usize,
+    pub viewport_normal_lines: usize,
     /// Security: run `python` nodes (trusted code, user privileges). Off by default; only this window changes it.
     pub allow_python_nodes: bool,
     /// Wall-clock limit for one python node cook, in seconds.
@@ -32,7 +38,14 @@ pub struct Preferences {
     /// Viewport inferencing (snap tolerance, markers, colours, tool keys); see docs/RUST_INFERENCE.md.
     pub inference: minihou_app::inference::InferenceSettings,
 }
-impl Default for Preferences { fn default() -> Self { Self {
+impl Default for Preferences { fn default() -> Self {
+    let limits = minihou_core::limits::Limits::default();
+    Self {
+    copy_memory_limit_mib: limits.copy_memory_bytes / (1024 * 1024),
+    loop_iteration_budget: limits.loop_iterations,
+    solver_steps: limits.goal_solver_steps,
+    solver_substeps: limits.rbd_substeps,
+    viewport_normal_lines: limits.normal_lines,
     theme: ThemePref::System, ui_scale: 1., emulate_numpad: false, snap_increment: 0.25,
     snap_targets: crate::ui::SnapTargets::default(),
     show_stats: true, show_parameter_links: true, autosave_minutes: Some(5), keymap_overrides: json!({"bindings": []}),
@@ -68,6 +81,11 @@ impl Preferences {
         "emulate_numpad": self.emulate_numpad, "snap_increment": self.snap_increment, "show_parameter_links": self.show_parameter_links,
         "snap_targets": self.snap_targets.bits(),
         "node_physics_snappiness": self.node_physics_snappiness,
+        "copy_memory_limit_mib": self.copy_memory_limit_mib,
+        "loop_iteration_budget": self.loop_iteration_budget,
+        "solver_steps": self.solver_steps,
+        "solver_substeps": self.solver_substeps,
+        "viewport_normal_lines": self.viewport_normal_lines,
         "show_stats": self.show_stats, "autosave_minutes": self.autosave_minutes,
         "keymap_overrides": self.keymap_overrides,
         "recent_files": self.recent_files.iter().take(10).collect::<Vec<_>>(),
@@ -95,6 +113,11 @@ impl Preferences {
         if let Some(x) = v.get("snap_increment").and_then(Value::as_f64) { p.snap_increment = (x as f32).max(0.0001); }
         if let Some(x) = v.get("snap_targets").and_then(Value::as_u64) { p.snap_targets = crate::ui::SnapTargets::from_bits((x & 63) as u8); }
         if let Some(x) = v.get("node_physics_snappiness").and_then(Value::as_f64) { p.node_physics_snappiness = (x as f32).clamp(0.0, 1.0); }
+        if let Some(x) = v.get("copy_memory_limit_mib").and_then(Value::as_u64).filter(|n| (16..=16384).contains(n)) { p.copy_memory_limit_mib = x; }
+        if let Some(x) = v.get("loop_iteration_budget").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).filter(|n| *n > 0) { p.loop_iteration_budget = x; }
+        if let Some(x) = v.get("solver_steps").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).filter(|n| *n > 0) { p.solver_steps = x; }
+        if let Some(x) = v.get("solver_substeps").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).filter(|n| *n > 0) { p.solver_substeps = x; }
+        if let Some(x) = v.get("viewport_normal_lines").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).filter(|n| *n > 0) { p.viewport_normal_lines = x; }
         if let Some(x) = v.get("show_stats").and_then(Value::as_bool) { p.show_stats = x; }
         if let Some(x) = v.get("inference") { p.inference = minihou_app::inference::InferenceSettings::from_json(x); }
         if let Some(sec) = v.get("security") {
@@ -219,6 +242,28 @@ impl Preferences {
         }
     }
     fn test_path(name: &str) -> PathBuf { std::env::temp_dir().join(format!("minihou-{name}-{}",std::process::id())).join("preferences.json") }
+    #[test] fn performance_defaults_round_trip_through_save_and_load() {
+        let path = test_path("prefs-performance");
+        let defaults = minihou_core::limits::Limits::default();
+        let p = Preferences::default();
+        assert_eq!(p.copy_memory_limit_mib, defaults.copy_memory_bytes / (1024 * 1024));
+        assert_eq!(p.loop_iteration_budget, defaults.loop_iterations);
+        assert_eq!(p.solver_steps, defaults.goal_solver_steps);
+        assert_eq!(p.solver_substeps, defaults.rbd_substeps);
+        assert_eq!(p.viewport_normal_lines, defaults.normal_lines);
+        p.save_to(&path).unwrap();
+        assert_eq!(Preferences::load_from(&path), p);
+
+        let mut custom = p;
+        custom.copy_memory_limit_mib = 512;
+        custom.loop_iteration_budget = 20_000;
+        custom.solver_steps = 2_000;
+        custom.solver_substeps = 64;
+        custom.viewport_normal_lines = 30_000;
+        custom.save_to(&path).unwrap();
+        assert_eq!(Preferences::load_from(&path), custom);
+        let _ = fs::remove_file(path);
+    }
     #[test] fn round_trip() {
         let path = test_path("prefs-roundtrip");
         let mut p = Preferences { theme: ThemePref::Light, ui_scale: 1.25, recent_files: vec![PathBuf::from("a.hou")], ..Default::default() };
