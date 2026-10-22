@@ -18,6 +18,13 @@ pub(crate) fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let append_to_groups = get_bool(p, &["append_to_groups", "append_groups"], false);
 
     let mode = get_mode(p);
+    if !matches!(mode.as_str(),
+        "quadrilaterals" | "triangles" | "triangle_fan" | "single_polygon"
+        | "quadrilateral_fan" | "quadrilateral_grid" | "single" | "trifan"
+        | "quadfan" | "grid"
+    ) {
+        return Err(Error::new(format!("invalid PolyFill mode {mode:?}")));
+    }
     let auto_complete = get_bool(p, &["auto_complete_boundaries", "autocomplete"], true);
     let reverse_patches = get_bool(p, &["reverse_patches", "reverse"], false);
     let unique_points = get_bool(p, &["unique_points", "uniquepoints"], false);

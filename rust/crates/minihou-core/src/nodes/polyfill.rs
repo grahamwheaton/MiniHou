@@ -125,7 +125,7 @@ fn get_mode(p: &Params) -> String {
                 3 => "single_polygon".to_string(),
                 4 => "quadrilateral_fan".to_string(),
                 5 => "quadrilateral_grid".to_string(),
-                _ => "quadrilaterals".to_string(),
+                _ => format!("invalid mode {i}"),
             };
         }
     }
@@ -346,6 +346,14 @@ mod tests {
         ).unwrap();
         let err = cook(g, json!({"mode": "single_polygon"})).unwrap_err();
         assert!(err.0.contains("degenerate boundary loop"), "{err}");
+    }
+
+    #[test]
+    fn invalid_fill_mode_is_reported() {
+        for mode in [json!("unknown"), json!(99)] {
+            let err = cook(cube_missing_face(), json!({"mode": mode})).unwrap_err();
+            assert!(err.0.contains("invalid PolyFill mode"), "{err}");
+        }
     }
 
     #[test]
