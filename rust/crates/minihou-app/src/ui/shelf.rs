@@ -141,7 +141,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                         } else if tool.node_type == "mirror" {
                             // The Mirror button starts the interactive tool (axis cubes + plane), like Alt+M.
                             out.push(UiAction::Command("mirror_tool".into()));
-                        } else { out.push(UiAction::AddNode { node_type: tool.node_type.to_owned(), after: Some(v.selected.to_owned()) }); }
+                        } else { out.push(UiAction::AddNode { node_type: tool.node_type.to_owned(), after: Some(v.selected.to_owned()), tab_menu: false }); }
                     }
                 }
             });

@@ -261,7 +261,7 @@ impl App {
             }
             LastOperator::AddNode { node_type, after_selection } => {
                 let after = if after_selection { Some(self.selected.clone()) } else { None };
-                self.add_node(ctx, &node_type, after.as_deref());
+                self.add_node(ctx, &node_type, after.as_deref(), false);
             }
             LastOperator::Duplicate => {
                 if let Some(sel) = self.selected_set.iter().next().cloned() { self.duplicate_node(&sel); }

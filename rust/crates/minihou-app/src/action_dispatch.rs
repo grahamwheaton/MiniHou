@@ -199,13 +199,13 @@ impl App {
                 if self.remove_selected_wires(ctx, false) { return; }
                 if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
                     let Some(source) = self.active_object().map(str::to_owned) else { self.file_status = "Select displayed elements to blast".into(); return; };
-                    self.add_node(ctx, "blast", Some(&source));
+                    self.add_node(ctx, "blast", Some(&source), false);
                 } else if let Some(id) = self.selected_set.iter().next().cloned() { self.delete_node(&id); }
             }
             "group_selection" => {
                 if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
                     let Some(source) = self.active_object().map(str::to_owned) else { self.file_status = "Select displayed elements to group".into(); return; };
-                    self.add_node(ctx, "group_create", Some(&source));
+                    self.add_node(ctx, "group_create", Some(&source), false);
                     return;
                 }
                 if self.network_hover {
@@ -294,7 +294,7 @@ impl App {
                 let has_selection=if matches!(kind,ModelKind::Extrude | ModelKind::Bevel) { !self.selection.is_empty() }
                     else { self.editor_state.selection==ui::SelectionMode::Faces && !self.selection.tris.is_empty() };
                 if self.editor_state.selection==ui::SelectionMode::Object || !has_selection {
-                    let after=self.selected.clone(); self.add_node(ctx,kind.node(),Some(&after));
+                    let after=self.selected.clone(); self.add_node(ctx,kind.node(),Some(&after),false);
                 } else { self.start_model_modal(ctx,kind); }
             }
             "opposite_view" => {
@@ -497,7 +497,7 @@ impl App {
                 UiAction::AddNode { node_type, .. } if node_type.starts_with("sketch_") => {
                     if let Some(mode) = ui::sketch::SketchMode::DRAW.into_iter().find(|m| m.command_id() == node_type) { self.start_sketch(ctx, mode); }
                 }
-                UiAction::AddNode { node_type, after } => self.add_node(ctx, &node_type, after.as_deref()),
+                UiAction::AddNode { node_type, after, tab_menu } => self.add_node(ctx, &node_type, after.as_deref(), tab_menu),
                 UiAction::AddNetworkNode { node_type, pos, wire } => {
                     if let Some((mut value, id)) = graph_edit::add(self.editor.doc.value(), &node_type, None) {
                         if node_type == "subnet" { subnet_edit::initialize(&mut value, &id); }

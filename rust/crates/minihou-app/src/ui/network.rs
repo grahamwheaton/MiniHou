@@ -328,7 +328,7 @@ pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -
             if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
             inner=next;
         },
-        UiAction::AddNode {node_type,after} => {
+        UiAction::AddNode {node_type,after,..} => {
             let (mut next,id)=crate::graph_edit::add(&inner,&node_type,after.as_deref())?;
             if node_type == "subnet" { crate::subnet_edit::initialize(&mut next,&id); }
             inner=next;

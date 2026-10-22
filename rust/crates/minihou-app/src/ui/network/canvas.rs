@@ -120,7 +120,9 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         let zoom = if state.zoom <= 0.0 { 1.0 } else { state.zoom };
         let graph_pos = ((at - r.min - state.pan) / zoom).to_pos2();
         if tab || target.is_none() { state.add_pos = Some(graph_pos); }
-        state.menu = Some(network_menu::MenuState::new(at, target, tab).with_canvas_pos(graph_pos));
+        let menu = if tab { network_menu::MenuState::tab(at) }
+            else { network_menu::MenuState::new(at, target, false) };
+        state.menu = Some(menu.with_canvas_pos(graph_pos));
         if tab { ctx.input_mut(|i| i.consume_key(egui::Modifiers::default(), egui::Key::Tab)); }
     }
     let p = ui.painter().with_clip_rect(r);

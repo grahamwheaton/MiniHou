@@ -10,15 +10,25 @@ impl App {
         self.finish_history();
         self.commit_document(value, "fill selection node");
     }
-    pub(crate) fn add_node(&mut self, ctx: &egui::Context, node_type: &str, after: Option<&str>) {
-        self.add_node_at(ctx, node_type, after, self.editor_state.cursor);
+    pub(crate) fn add_node(&mut self, ctx: &egui::Context, node_type: &str, after: Option<&str>, tab_menu: bool) {
+        self.add_node_at_with_tab_menu(ctx, node_type, after, self.editor_state.cursor, tab_menu);
     }
     pub(crate) fn add_node_at(&mut self, ctx: &egui::Context, node_type: &str, after: Option<&str>, pos: [f32; 3]) {
+        self.add_node_at_with_tab_menu(ctx, node_type, after, pos, false);
+    }
+    fn add_node_at_with_tab_menu(&mut self, ctx: &egui::Context, node_type: &str, after: Option<&str>, pos: [f32; 3], tab_menu: bool) {
         let merge_sources = (node_type == "merge" && self.selected_set.len() > 1)
             .then(|| self.selected_set.iter().cloned().collect::<Vec<_>>());
         let selected_merge = merge_sources.as_ref().and_then(|sources| after.map(|anchor| (sources, anchor)));
+        // The active object is the last object selected.  For a two-object Tab Boolean,
+        // the earlier object is therefore the cutter (Boolean input b).
+        let selected_boolean = tab_menu && node_type == "boolean"
+            && self.editor_state.selection == ui::SelectionMode::Object
+            && after == Some(self.selected.as_str());
         let Some((mut value, id)) = (match selected_merge {
             Some((sources, anchor)) => graph_edit::add_selected_merge(self.editor.doc.value(), sources, anchor),
+            None if selected_boolean => graph_edit::add_selected_boolean(self.editor.doc.value(), &self.selected_set, &self.selected)
+                .or_else(|| graph_edit::add_at(self.editor.doc.value(), node_type, after, pos)),
             None => graph_edit::add_at(self.editor.doc.value(), node_type, after, pos),
         }) else {
             self.file_status = format!("The Rust core has no {node_type} node yet");

@@ -84,8 +84,9 @@ pub enum UiAction {
     AddSubnetOutput(String),
     /// A timeline cook without changing the document or undo history.
     Time(Edit),
-    /// A shelf tool: add a node of this type (after `after`, wired to it, when given).
-    AddNode { node_type: String, after: Option<String> },
+    /// A shelf or menu tool: add a node of this type (after `after`, wired to it, when given).
+    /// `tab_menu` preserves the one Tab-menu-only multi-object Boolean shortcut.
+    AddNode { node_type: String, after: Option<String>, tab_menu: bool },
     /// A shelf drop in network coordinates, independent of viewport/world placement.
     AddNetworkNode { node_type: String, pos: [f32; 2], wire: Option<crate::graph_edit::WireRef> },
     AddConnectedNode { node_type: String, connection: crate::graph_edit::AddConnection, pos: [f32; 2] },

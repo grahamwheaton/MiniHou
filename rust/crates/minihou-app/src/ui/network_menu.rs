@@ -124,12 +124,13 @@ fn search_score(ty: &str, query: &str) -> Option<u32> {
 
 #[derive(Clone)]
 pub(super) struct MenuState { at: Pos2, target: Option<String>, add: bool, pie: bool, category: Option<usize>, open: HashSet<usize>, query: String, active: usize, focus: bool,
-    pub(super) connect_to: Option<(crate::graph_edit::AddConnection, Pos2)>,
+    tab_menu: bool, pub(super) connect_to: Option<(crate::graph_edit::AddConnection, Pos2)>,
     pub(super) canvas_pos: Option<Pos2> }
 impl MenuState {
     pub(super) fn new(at: Pos2, target: Option<String>, add: bool) -> Self {
-        Self { at, target, add, pie: false, category: None, open: HashSet::from([0, 3]), query: String::new(), active: 1, focus: true, connect_to: None, canvas_pos: None }
+        Self { at, target, add, pie: false, category: None, open: HashSet::from([0, 3]), query: String::new(), active: 1, focus: true, tab_menu: false, connect_to: None, canvas_pos: None }
     }
+    pub(super) fn tab(at: Pos2) -> Self { let mut menu = Self::new(at, None, true); menu.tab_menu = true; menu }
     pub(super) fn pie(at: Pos2) -> Self { let mut menu = Self::new(at, None, true); menu.pie = true; menu }
     pub(super) fn query(&self) -> &str { &self.query }
     pub(super) fn at(&self) -> Pos2 { self.at }
@@ -231,7 +232,7 @@ fn activate(entry: Entry, menu: &mut MenuState, v: &View, out: &mut Actions) -> 
                 return Some(Choice::Close);
             }
             let after = (!v.selected.is_empty() && v.graph.nodes.iter().any(|(id, _)| id == v.selected)).then(|| v.selected.to_owned());
-            out.push(UiAction::AddNode { node_type: node_type.to_owned(), after });
+            out.push(UiAction::AddNode { node_type: node_type.to_owned(), after, tab_menu: menu.tab_menu });
             Some(Choice::Close)
         }
         Entry::Item(Item::Add) => { menu.add = true; menu.category = None; menu.active = 0; menu.focus = true; None }

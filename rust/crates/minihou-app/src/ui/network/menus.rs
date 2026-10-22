@@ -10,7 +10,7 @@ pub fn open_add_menu(ctx: &egui::Context, path: &Path) {
         let graph_pos = ((at - r.min - state.pan) / zoom).to_pos2();
         if state.menu.is_none() {
             state.add_pos = Some(graph_pos);
-            state.menu = Some(network_menu::MenuState::new(at, None, true).with_canvas_pos(graph_pos));
+            state.menu = Some(network_menu::MenuState::tab(at).with_canvas_pos(graph_pos));
         }
         d.insert_persisted(id, state);
     });

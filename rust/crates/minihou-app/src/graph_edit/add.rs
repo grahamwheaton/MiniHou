@@ -52,6 +52,23 @@ pub fn add_selected_merge(value: &Value, selected: &[String], after: &str) -> Op
     Some((next, id))
 }
 
+/// Return Boolean inputs for a two-object selection. The active object is the
+/// most recently selected one, so the earlier object is the cutter on input b.
+pub fn boolean_input_order(selected: &std::collections::BTreeSet<String>, active: &str) -> Option<[String; 2]> {
+    if selected.len() != 2 || !selected.contains(active) { return None; }
+    let cutter = selected.iter().find(|id| id.as_str() != active)?.clone();
+    Some([active.to_owned(), cutter])
+}
+
+/// Add a subtract Boolean without splicing existing consumers of either object.
+pub fn add_selected_boolean(value: &Value, selected: &std::collections::BTreeSet<String>, active: &str) -> Option<(Value, String)> {
+    let [subject, cutter] = boolean_input_order(selected, active)?;
+    let (mut next, id) = add_impl(value, "boolean", Some(&subject), false)?;
+    next = connect(&next, &cutter, &id, Some("b"))?;
+    next["nodes"][&id]["params"] = json!({"operation": "subtract"});
+    Some((next, id))
+}
+
 /// Repair the older viewport shape `source -> output -> operator` in place.
 /// Each hanging operator becomes the last operation before its output.
 pub fn repair_output_hangs(value: &mut Value) -> usize {

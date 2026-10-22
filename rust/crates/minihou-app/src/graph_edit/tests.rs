@@ -38,6 +38,19 @@
         assert_eq!(next["nodes"]["out"]["pos"], json!([96.,288.]));
         assert_eq!(next["nodes"]["out"]["inputs"]["geo"], id);
     }
+    #[test] fn tab_boolean_wires_first_selected_object_as_the_cutter_and_cooks() {
+        let base = json!({"version":1,"display":["cutter","subject"],"nodes":{
+            "cutter":{"type":"box","params":{"size":[1.,1.,1.]}},
+            "subject":{"type":"box","params":{"size":[2.,2.,2.]}}
+        }});
+        // `subject` is active because it was selected after `cutter`.
+        let selected = std::collections::BTreeSet::from(["cutter".to_owned(), "subject".to_owned()]);
+        assert_eq!(boolean_input_order(&selected, "subject"), Some(["subject".into(), "cutter".into()]));
+        let (next, id) = add_selected_boolean(&base, &selected, "subject").unwrap();
+        assert_eq!(next["nodes"][&id]["inputs"], json!({"a":"subject", "b":"cutter"}));
+        assert_eq!(next["nodes"][&id]["params"]["operation"], "subtract");
+        assert!(minihou_core::Graph::from_value(&next).unwrap().cook(Some(&id)).is_ok());
+    }
     #[test] fn repairs_operator_hanging_after_output() {
         let mut bad = json!({"nodes":{"source":{"type":"box","pos":[96,32]},
             "out":{"type":"output","inputs":{"geo":"source"},"pos":[96,160]},
