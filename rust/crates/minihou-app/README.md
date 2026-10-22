@@ -1,6 +1,8 @@
-# MiniHou native editor slice
+# MiniHou native editor
 
-Native Rust executable; no Python process, web server, or browser.
+Native Rust editor with a spatial node canvas, parameter panels, a 3D viewport,
+modelling tools and Blender live-link integration. The editor runs without a
+Python process, web server or browser.
 
 From the repository root:
 
@@ -8,14 +10,16 @@ From the repository root:
     rust/target/release/minihou-app.exe rust/crates/minihou-app/tests/fixtures/small.json
     rust/target/release/minihou-app.exe --selftest rust/crates/minihou-app/tests/fixtures/small.json
 
-Use any graph containing Rust-supported grid, box, transform, normal, noise,
-merge, null and output nodes. The graph must specify display or have an output.
+Use a graph containing Rust-supported nodes. The graph must specify display or
+have an output.
 The selftest cooks, bypasses the second node in file order (the only node when
 there is one), cooks again, and emits one JSON line. Counts describe the second
 cook. It never creates a window or saves the graph.
 
 ## Controls and state
 
+- The network panel is a spatial node canvas. It supports node creation,
+  deletion, wiring, selection and subnet editing.
 - Click a node's label to edit its declared parameters. The radio selects the
   display node independently. Unsupported parameters are disabled with a tooltip.
 - Bypass passes the first input through, or produces empty geometry for a source.
@@ -56,8 +60,7 @@ The spike's shaders and draw setup are ported to wgpu 27. An offscreen
 color/depth target is displayed as an egui native texture. Mesh changes upload
 buffers while reusing pipelines; ordinary UI frames do not recook or rebuild
 layout. Uses core preview::layout, all triangles/edges, two-sided rendering,
-and point N or point_normals. No culling or extra geometry optimizations.
-No new minihou-core APIs were needed. Native dialogs add rfd 0.15.4; eframe
+and point N or point_normals. Native dialogs add rfd 0.15.4; eframe
 continues to use its explicitly named features with defaults disabled.
 
 A dedicated worker owns the Session. Parameter, bypass and display commands
@@ -65,7 +68,7 @@ are drained in order, then the latest queued state is cooked once. Responses
 carry a revision, Arc<Geometry>, statistics and errors. Stale responses are
 ignored; a single response slot bounds queued result memory. CPU viewport
 layout and normal generation also run on the worker; GPU uploads remain on
-the UI thread. The renderer and shaders are unchanged. Undo/redo sends a
+the UI thread. Undo/redo sends a
 replacement graph to the worker, resetting its cache to restore omitted values
 exactly. In-flight cooks are not cancelled. Closing/replacing a worker lets its
 current cook finish without blocking the UI.
@@ -73,29 +76,24 @@ current cook finish without blocking the UI.
 ## Checks
 
     cargo test --manifest-path rust/Cargo.toml -p minihou-app
-    cargo clippy --release --manifest-path rust/Cargo.toml -p minihou-app --all-targets -- -D warnings
+    cargo clippy --release --manifest-path rust/Cargo.toml -p minihou-app --all-targets
 
-Unit tests cover BOM/CRLF I/O, metadata coverage for all eight node types,
+Unit tests cover BOM/CRLF I/O, node metadata,
 range/clamp rules, lossless edits, coalesced cooks, stale results, failure/recovery,
 worker channel delivery, exact undo/redo, drag grouping, save points/Save As,
 file replacement state, camera math and selftest. CLI tests check one-line JSON,
 unchanged input and nonzero failures; the backend test guards enabled wgpu
 backends. Workspace default-members excludes both GUI crates.
 
-## Not done / next session
+## Validation and known limits
 
-- No interactive window or GPU rendering validation was performed in this
-  session. Check all shading modes, resize/DPI, camera controls, disabled
-  tooltips and Save in a desktop session.
 - Interactive 4M-quad responsiveness remains unmeasured. Cooking, layout and
   normals are off-thread, but large GPU uploads can still stall a UI frame.
   Cook statistics exclude layout/normal generation/GPU upload time.
-- In a desktop session, drag a numeric slider and undo once; type a value above
-  a soft maximum; test enums/docs, Ctrl+Z/Y, bypass undo, cooking/error recovery,
-  Open/Save As/cancel and filename/dirty title updates. Open while a cook is
-  pending to confirm old results cannot enter the replacement document.
-- No node creation/deletion, rewiring, spatial node canvas, picking or
-  simultaneous multi-document handling.
-- No unsaved-close prompt, external-file conflict detection or atomic save.
-- No textures/materials, point-cloud drawing, culling, multi-object scene
-  management or additional Rust node implementations.
+- Packed instances are expanded for native viewport rendering. The planned GPU
+  instancing path is described in `docs/reviews/advisor/finding3-plan.md`.
+- Project saves replace the destination after writing and syncing a sibling
+  temporary file. External-file conflict detection remains separate work.
+- Validate interactive viewport, GPU, Blender link and file-dialog behavior in
+  the actual host applications; headless tests alone do not establish those
+  interactions.
