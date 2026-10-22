@@ -151,7 +151,7 @@ fn detail(g: &Geometry, n: &str) -> Result<Vec<f64>> {
             .ok_or_else(|| Error::new("non-numeric detail attribute"))
     }
 }
-fn read(g: &Geometry, d: Domain, i: usize, text: &str) -> Result<Vec<f64>> {
+fn read(g: &Geometry, d: Domain, i: usize, text: &str, inputs: &Inputs) -> Result<Vec<f64>> {
     if text == "PI" {
         return Ok(vec![std::f64::consts::PI]);
     }
@@ -159,6 +159,39 @@ fn read(g: &Geometry, d: Domain, i: usize, text: &str) -> Result<Vec<f64>> {
         return Ok(vec![std::f64::consts::E]);
     }
     let (n, c) = reference(text)?;
+    if let Some(rest) = n.strip_prefix("opinput") {
+        if let Some((slot, attribute)) = rest.split_once('_') {
+            if let Ok(slot) = slot.parse::<usize>() {
+                if (1..=3).contains(&slot) && !attribute.is_empty() {
+                    let other = WRANGLE.one(inputs, slot)?;
+                    let value = if i < d.count(&other) {
+                        read(&other, d, i, &format!("@{attribute}"), inputs)?
+                    } else {
+                        // Houdini's virtual binding uses zero when the other
+                        // input has no corresponding element.
+                        let width = if d.count(&other) > 0 {
+                            read(&other, d, 0, &format!("@{attribute}"), inputs)?.len()
+                        } else {
+                            d.table(&other)
+                                .and_then(|t| t.get(attribute))
+                                .or_else(|| other.point.get(attribute))
+                                .or_else(|| other.prim.get(attribute))
+                                .or_else(|| other.vertex.get(attribute))
+                                .map(|a| a.width)
+                                .ok_or_else(|| Error::new(format!("input {slot} has no attribute @{attribute}")))?
+                        };
+                        vec![0.; width]
+                    };
+                    return if let Some(k) = c {
+                        value.get(k).copied().map(|x| vec![x])
+                            .ok_or_else(|| Error::new(format!("component outside @{n}")))
+                    } else {
+                        Ok(value)
+                    };
+                }
+            }
+        }
+    }
     let special = match n {
         "Frame" => Some(crate::timectx::frame() as f64),
         "Time" => Some(crate::timectx::seconds()),
@@ -259,14 +292,14 @@ fn split_top(s: &str, delim: char) -> Option<Vec<&str>> {
         Some(parts)
     }
 }
-fn eval(s: &str, g: &Geometry, d: Domain, i: usize) -> Result<Vec<f64>> {
+fn eval(s: &str, g: &Geometry, d: Domain, i: usize, inputs: &Inputs) -> Result<Vec<f64>> {
     let s = s.trim();
     if s == "rand()" {
-        return eval(&format!("rand({i})"), g, d, i);
+        return eval(&format!("rand({i})"), g, d, i, inputs);
     }
     if s.starts_with("noise(") && s.ends_with(')') {
         let args = &s[6..s.len() - 1];
-        if let Ok(v) = eval(args, g, d, i) {
+        if let Ok(v) = eval(args, g, d, i, inputs) {
             if v.len() == 3 {
                 return Ok(vec![crate::noise::fbm3_one(
                     [v[0] as f32, v[1] as f32, v[2] as f32],
@@ -294,7 +327,7 @@ fn eval(s: &str, g: &Geometry, d: Domain, i: usize) -> Result<Vec<f64>> {
         return parts
             .into_iter()
             .map(|p| {
-                let v = eval(p, g, d, i)?;
+                let v = eval(p, g, d, i, inputs)?;
                 if v.len() != 1 {
                     Err(Error::new("vector component must be scalar"))
                 } else {
@@ -304,13 +337,13 @@ fn eval(s: &str, g: &Geometry, d: Domain, i: usize) -> Result<Vec<f64>> {
             .collect();
     }
     if s.starts_with('@') && reference(s).is_ok() {
-        return read(g, d, i, s);
+        return read(g, d, i, s, inputs);
     }
     for op in ['+', '-', '*', '/'] {
         if let Some(parts) = split_top(s, op) {
             if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                let a = eval(parts[0], g, d, i)?;
-                let b = eval(parts[1], g, d, i)?;
+                let a = eval(parts[0], g, d, i, inputs)?;
+                let b = eval(parts[1], g, d, i, inputs)?;
                 if a.len() > 1 || b.len() > 1 {
                     let w = a.len().max(b.len());
                     if a.len() != 1 && a.len() != w || b.len() != 1 && b.len() != w {
@@ -334,7 +367,7 @@ fn eval(s: &str, g: &Geometry, d: Domain, i: usize) -> Result<Vec<f64>> {
     }
     let expr = Expr::parse(s)?;
     let result = expr.eval(&mut |name| {
-        let v = read(g, d, i, name)?;
+        let v = read(g, d, i, name, inputs)?;
         if v.len() != 1 {
             return Err(Error::new(format!("select a component of {name}")));
         }
@@ -407,7 +440,7 @@ fn mask(g: &Geometry, d: Domain, pattern: &str) -> Result<Vec<bool>> {
     }
     Ok(out)
 }
-fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &str) -> Result<()> {
+fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &str, inputs: &Inputs) -> Result<()> {
     let (prefix, target) = if left.len() > 1 && left.as_bytes()[1] == b'@' {
         (&left[..1], &left[1..])
     } else {
@@ -427,7 +460,7 @@ fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &s
     if name == "P" && !matches!(d, Domain::Point) {
         return Err(Error::new("@P can only be written over points"));
     }
-    let rhs = eval(right, g, d, i)?;
+    let rhs = eval(right, g, d, i, inputs)?;
     if rhs.iter().any(|x| !x.is_finite()) {
         return Err(Error::new("expression result is not finite"));
     }
@@ -571,7 +604,7 @@ fn wrangle(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             };
             for (i, &choose) in selected.iter().enumerate() {
                 if choose {
-                    assign(&mut out, d, i, target.trim(), op, right.trim()).map_err(|e| {
+                    assign(&mut out, d, i, target.trim(), op, right.trim(), inputs).map_err(|e| {
                         Error::new(format!("{} {i}, line {}: {e}", d.label(), line + 1))
                     })?;
                 }
@@ -642,5 +675,20 @@ mod tests {
     fn errors_name_element_and_line() {
         let e = cook(fixture(), "points", "f@x = 1;\nf@y = @missing", "").unwrap_err();
         assert!(e.0.contains("point 0, line 2"), "{e}");
+    }
+
+    #[test]
+    fn extra_input_reads_match_element_number_and_zero_pad() {
+        let source = fixture();
+        let mut other = Geometry::points_only(vec![7., 0., 0., 8., 0., 0.]).unwrap();
+        other.point.insert("weight".into(), Arc::new(Attr::f32(1, vec![10., 20.])));
+        let p = Params::resolve(WRANGLE.params,
+            json!({"run_over": "points", "snippet": "f@copied = @opinput1_weight; v@position2 = @opinput1_P"}).as_object()).unwrap();
+        let out = wrangle(&[vec![Arc::new(source.clone())], vec![Arc::new(other)], vec![], vec![]], &p).unwrap();
+        assert_eq!(out.point["copied"].as_f32().unwrap(), &[10., 20., 0.]);
+        assert_eq!(out.point["position2"].as_f32().unwrap(), &[7., 0., 0., 8., 0., 0., 0., 0., 0.]);
+
+        let err = cook(source, "points", "f@x = @opinput1_weight", "").unwrap_err();
+        assert!(err.0.contains("input 'opinput1' is not connected"), "{err}");
     }
 }
