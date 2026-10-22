@@ -1,23 +1,25 @@
 use crate::{graph_embed, modifier_inputs, History, Result};
 use minihou_core::{session::Session, Graph};
 use serde_json::{json, Value};
-use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
+use std::{cell::OnceCell, collections::HashMap, ops::Range, path::Path, sync::Arc, time::Instant};
 
 
 /// Keeps original spelling, whitespace and unknown fields. Edits replace only
 /// the corresponding JSON token (or insert an omitted member).
 #[derive(Clone)]
-pub struct Document { pub(crate) value: Value, pub(crate) text: String }
+pub struct Document { pub(crate) value: Value, pub(crate) text: String, graph: OnceCell<Arc<Graph>>, revision: u64 }
 impl Document {
     pub fn parse(text: String) -> Result<Self> {
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned();
         let value = serde_json::from_str(&text)?;
-        Graph::from_value(&value)?;
+        let graph = Graph::from_value(&value)?;
         modifier_inputs::validate_document(&value)?;
-        Ok(Self { value, text })
+        Ok(Self { value, text, graph: OnceCell::from(Arc::new(graph)), revision: 0 })
     }
     pub fn open(path: &Path) -> Result<Self> { Self::parse(std::fs::read_to_string(path)?) }
     pub fn value(&self) -> &Value { &self.value }
+    pub fn graph(&self) -> &Graph { self.graph.get_or_init(|| Arc::new(Graph::from_value(&self.value).expect("validated document"))) }
+    pub fn revision(&self) -> u64 { self.revision }
     pub fn text(&self) -> &str { &self.text }
     pub fn save(&self, path: &Path) -> Result<()> { Ok(std::fs::write(path, &self.text)?) }
     pub fn session(&self) -> Result<Session> { Ok(Session::new(Graph::from_value(&self.value)?)) }
@@ -65,7 +67,12 @@ impl Document {
                 break;
             }
         }
-        self.value = serde_json::from_str(&self.text).expect("validated JSON token replacement");
+        let next: Value = serde_json::from_str(&self.text).expect("validated JSON token replacement");
+        if next != self.value {
+            self.value = next;
+            self.graph = OnceCell::new();
+            self.revision = self.revision.wrapping_add(1);
+        }
     }
     fn value_at(&self, keys: &[String]) -> &Value {
         keys.iter().fold(&self.value, |v,k| &v[k])
@@ -244,6 +251,22 @@ mod default_graph_tests {
         let graph=Graph::from_value(doc.value()).unwrap();
         assert_eq!(graph.to_value(),*doc.value());
         assert!(graph.nodes.iter().all(|(_,node)|node.channels.is_none()&&node.locked_params.is_none()));
+    }
+
+    #[test]
+    fn graph_snapshot_changes_only_with_document_value() {
+        let mut doc = Document::parse(json!({"nodes":{"box":{"type":"box"}},"display":"box"}).to_string()).unwrap();
+        let old_graph = doc.graph.get().unwrap().clone();
+        assert!(std::ptr::eq(doc.graph(), doc.graph()));
+        assert_eq!(doc.revision(), 0);
+        doc.edit(&Edit::Bypass { node: "box".into(), flag: true }).unwrap();
+        assert_eq!(doc.revision(), 1);
+        assert!(doc.graph().nodes[0].1.bypass);
+        assert!(!std::ptr::eq(old_graph.as_ref(), doc.graph()));
+        let graph = doc.graph() as *const Graph;
+        doc.edit(&Edit::Bypass { node: "box".into(), flag: true }).unwrap();
+        assert_eq!(doc.revision(), 1);
+        assert_eq!(graph, doc.graph() as *const Graph);
     }
 }
 
