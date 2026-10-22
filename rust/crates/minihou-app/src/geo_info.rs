@@ -7,6 +7,7 @@ use serde_json::Value;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ElementDomain {
     Points,
+    Edges,
     Vertices,
     Primitives,
     Detail,
@@ -15,7 +16,7 @@ pub enum ElementDomain {
 impl ElementDomain {
     pub const ALL: [ElementDomain; 4] = [
         ElementDomain::Points,
-        ElementDomain::Vertices,
+        ElementDomain::Edges,
         ElementDomain::Primitives,
         ElementDomain::Detail,
     ];
@@ -23,6 +24,7 @@ impl ElementDomain {
     pub fn as_str(&self) -> &'static str {
         match self {
             ElementDomain::Points => "point",
+            ElementDomain::Edges => "edge",
             ElementDomain::Vertices => "vertex",
             ElementDomain::Primitives => "prim",
             ElementDomain::Detail => "detail",
@@ -32,18 +34,20 @@ impl ElementDomain {
     pub fn label(&self) -> &'static str {
         match self {
             ElementDomain::Points => "Points",
+            ElementDomain::Edges => "Edges",
             ElementDomain::Vertices => "Vertices",
-            ElementDomain::Primitives => "Primitives",
-            ElementDomain::Detail => "Detail",
+            ElementDomain::Primitives => "Faces",
+            ElementDomain::Detail => "Objects",
         }
     }
 
     pub fn row_count(&self, g: &Geometry) -> usize {
         match self {
             ElementDomain::Points => g.npoints,
+            ElementDomain::Edges => g.nedges(),
             ElementDomain::Vertices => g.nvertices(),
             ElementDomain::Primitives => g.nprims(),
-            ElementDomain::Detail => if g.detail.is_empty() { 0 } else { 1 },
+            ElementDomain::Detail => 1,
         }
     }
 }
@@ -142,6 +146,30 @@ pub fn flatten_columns(g: &Geometry, domain: ElementDomain) -> Vec<SpreadsheetCo
                 }
             }
         }
+        ElementDomain::Edges => {
+            for name in ["point_a", "point_b"] {
+                cols.push(SpreadsheetColumn {
+                    name: name.into(),
+                    attr_name: name.into(),
+                    comp_index: 0,
+                    total_comps: 1,
+                    dtype: "int32",
+                    is_topology: true,
+                });
+            }
+            for (attr_name, attr) in &g.edge {
+                for (comp_index, name) in split_component_names(attr_name, attr.width).into_iter().enumerate() {
+                    cols.push(SpreadsheetColumn {
+                        name,
+                        attr_name: attr_name.clone(),
+                        comp_index,
+                        total_comps: attr.width,
+                        dtype: attr.dtype(),
+                        is_topology: false,
+                    });
+                }
+            }
+        }
         ElementDomain::Vertices => {
             // Built-in topology columns: point index and prim index
             cols.push(SpreadsheetColumn {
@@ -209,6 +237,16 @@ pub fn flatten_columns(g: &Geometry, domain: ElementDomain) -> Vec<SpreadsheetCo
             }
         }
         ElementDomain::Detail => {
+            for name in ["points", "edges", "faces"] {
+                cols.push(SpreadsheetColumn {
+                    name: name.into(),
+                    attr_name: name.into(),
+                    comp_index: 0,
+                    total_comps: 1,
+                    dtype: "int32",
+                    is_topology: true,
+                });
+            }
             // Detail attributes in sorted key order
             let mut keys: Vec<&String> = g.detail.keys().collect();
             keys.sort();
@@ -345,6 +383,11 @@ pub fn format_float64(x: f64) -> String {
 pub fn format_cell(g: &Geometry, domain: ElementDomain, row: usize, col: &SpreadsheetColumn) -> String {
     if col.is_topology {
         match domain {
+            ElementDomain::Edges => {
+                if let Some((a, b)) = g.topology.edge_pair(row) {
+                    return if col.attr_name == "point_a" { a } else { b }.to_string();
+                }
+            }
             ElementDomain::Vertices => {
                 if col.attr_name == "point" {
                     return g.topology.vertex_point.get(row).map_or_else(|| "—".into(), |p| p.to_string());
@@ -361,6 +404,13 @@ pub fn format_cell(g: &Geometry, domain: ElementDomain, row: usize, col: &Spread
                     return if g.topology.is_closed(row) { "1".into() } else { "0".into() };
                 }
             }
+            ElementDomain::Detail => {
+                return match col.attr_name.as_str() {
+                    "points" => g.npoints,
+                    "edges" => g.nedges(),
+                    _ => g.nprims(),
+                }.to_string();
+            }
             _ => {}
         }
     }
@@ -368,6 +418,17 @@ pub fn format_cell(g: &Geometry, domain: ElementDomain, row: usize, col: &Spread
     match domain {
         ElementDomain::Points => {
             if let Some(attr) = g.point.get(&col.attr_name) {
+                let idx = row * attr.width + col.comp_index;
+                match &attr.data {
+                    AttrData::F32(v) => v.get(idx).map_or_else(|| "—".into(), |&x| format_float(x)),
+                    AttrData::I32(v) => v.get(idx).map_or_else(|| "—".into(), |&x| x.to_string()),
+                }
+            } else {
+                "—".into()
+            }
+        }
+        ElementDomain::Edges => {
+            if let Some(attr) = g.edge.get(&col.attr_name) {
                 let idx = row * attr.width + col.comp_index;
                 match &attr.data {
                     AttrData::F32(v) => v.get(idx).map_or_else(|| "—".into(), |&x| format_float(x)),
@@ -462,6 +523,28 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn spreadsheet_tabs_match_geometry_domains() {
+        let g = Geometry::from_arrays(
+            vec![0.0; 9], vec![0, 1, 2], vec![0, 3], None,
+        ).unwrap();
+        assert_eq!(ElementDomain::ALL.map(|d| d.label()), ["Points", "Edges", "Faces", "Objects"]);
+        assert_eq!(ElementDomain::ALL.map(|d| d.row_count(&g)), [3, 3, 1, 1]);
+        assert_eq!(ElementDomain::Points.as_str(), "point");
+    }
+
+    #[test]
+    fn geo_info_edge_endpoints_and_attributes() {
+        let mut g = Geometry::from_arrays(
+            vec![0.0; 9], vec![2, 0, 1], vec![0, 3], None,
+        ).unwrap();
+        g.edge.insert("weight".into(), Arc::new(Attr::f32(1, vec![0.1, 0.2, 0.3])));
+        let cols = flatten_columns(&g, ElementDomain::Edges);
+        assert_eq!(cols.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["point_a", "point_b", "weight"]);
+        assert_eq!(format_row_tsv(&g, ElementDomain::Edges, 0, &cols), "0\t0\t1\t0.100");
+        assert_eq!(format_row_tsv(&g, ElementDomain::Edges, 2, &cols), "2\t1\t2\t0.300");
+    }
+
+    #[test]
     fn geo_info_point_columns_split_and_p_first() {
         let mut g = Geometry::from_arrays(
             vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -554,12 +637,15 @@ mod tests {
         assert_eq!(ElementDomain::Detail.row_count(&g), 1);
         let cols = flatten_columns(&g, ElementDomain::Detail);
         let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, vec!["author", "scale.x", "scale.y", "scale.z"]);
+        assert_eq!(names, vec!["points", "edges", "faces", "author", "scale.x", "scale.y", "scale.z"]);
 
-        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[0]), "minihou");
-        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[1]), "2.500");
-        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[2]), "3.500");
-        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[3]), "4.500");
+        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[0]), "3");
+        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[1]), "3");
+        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[2]), "1");
+        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[3]), "minihou");
+        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[4]), "2.500");
+        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[5]), "3.500");
+        assert_eq!(format_cell(&g, ElementDomain::Detail, 0, &cols[6]), "4.500");
     }
 
     #[test]

@@ -129,6 +129,11 @@ impl Topology {
         self.cached_edge_pairs().to_vec()
     }
 
+    /// The endpoints for one stable edge-domain row.
+    pub fn edge_pair(&self, index: usize) -> Option<(i32, i32)> {
+        self.cached_edge_pairs().get(index).copied()
+    }
+
     fn cached_edge_pairs(&self) -> &[(i32, i32)] {
         self.cached_edges.get_or_init(|| self.build_edge_pairs())
     }
