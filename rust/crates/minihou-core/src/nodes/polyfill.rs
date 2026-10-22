@@ -266,6 +266,21 @@ mod tests {
     }
 
     #[test]
+    fn touching_boundaries_report_ambiguity_instead_of_dropping_a_loop() {
+        // Two triangles meet only at point 0, leaving two possible boundary
+        // successors there. Reordering primitives must not change the result.
+        let positions = vec![
+            0., 0., 0., 1., 0., 0., 0., 1., 0.,
+            -1., 0., 0., 0., -1., 0.,
+        ];
+        for faces in [vec![0, 1, 2, 0, 3, 4], vec![0, 3, 4, 0, 1, 2]] {
+            let g = Geometry::from_arrays(positions.clone(), faces, vec![0, 3, 6], None).unwrap();
+            let err = cook(g, json!({"mode": "single_polygon"})).unwrap_err();
+            assert!(err.0.contains("boundary touches itself at point 0"), "{err}");
+        }
+    }
+
+    #[test]
     fn test_existing_graphs_still_cook() {
         let g = cube_missing_face();
         let out = cook(g, json!({})).unwrap();

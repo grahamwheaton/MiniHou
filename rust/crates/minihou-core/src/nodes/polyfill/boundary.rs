@@ -90,7 +90,13 @@ pub(super) fn extract_loops(g: &Geometry, boundary_mask: &[bool], auto_complete:
         if edge_id >= 0 && e.count[edge_id as usize] == 1 {
             let a = vp[v] as usize;
             let b = vp[nx[v]] as usize;
-            all_succ.insert(b, (a, v));
+            // A boundary walk has no unambiguous successor at a junction. Do not
+            // silently replace an earlier edge and lose a hole.
+            if all_succ.insert(b, (a, v)).is_some() {
+                return Err(Error::new(format!(
+                    "boundary touches itself at point {b}; cannot choose a fill loop"
+                )));
+            }
 
             if boundary_mask[edge_id as usize] {
                 succ.insert(b, (a, v));
