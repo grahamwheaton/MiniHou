@@ -17,6 +17,7 @@ fn measure_volume(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let group = p.s("group")?;
     if g.npoints == 0 || g.nprims() == 0 {
         out.detail.insert("volume".into(), serde_json::json!(0.0));
+        out.detail.insert("volume_status".into(), serde_json::json!("ok"));
         return Ok(out);
     }
     let sel = if group.trim().is_empty() {
@@ -27,8 +28,31 @@ fn measure_volume(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let face = crate::normals::prim_normals(g.p(), &g.topology);
     let centres = crate::nodes::group::centroids64(&g);
     let mut volume = 0.0f64;
+    let edges = crate::topo::edges(&g.topology, g.npoints);
+    let mut selected_edge_counts = vec![0usize; edges.len()];
+    let has_open_primitive = (0..g.nprims()).any(|i| sel[i] && !g.topology.is_closed(i));
+    if !has_open_primitive {
+        for (i, &selected) in sel.iter().enumerate() {
+            if !selected {
+                continue;
+            }
+            let s = g.topology.prim_offsets[i] as usize;
+            let e = g.topology.prim_offsets[i + 1] as usize;
+            for vertex in s..e {
+                let edge = edges.of_vertex[vertex];
+                if edge >= 0 {
+                    selected_edge_counts[edge as usize] += 1;
+                }
+            }
+        }
+    }
+    if has_open_primitive || selected_edge_counts.iter().any(|&count| count != 0 && count != 2) {
+        out.detail.insert("volume".into(), serde_json::Value::Null);
+        out.detail.insert("volume_status".into(), serde_json::json!("open_mesh"));
+        return Ok(out);
+    }
     for i in 0..g.nprims() {
-        if !sel[i] || !g.topology.is_closed(i) {
+        if !sel[i] {
             continue;
         }
         let s = g.topology.prim_offsets[i] as usize;
@@ -41,6 +65,7 @@ fn measure_volume(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         volume += (n[0] * c[0] + n[1] * c[1] + n[2] * c[2]) / 6.0;
     }
     out.detail.insert("volume".into(), serde_json::json!(volume));
+    out.detail.insert("volume_status".into(), serde_json::json!("ok"));
     Ok(out)
 }
 

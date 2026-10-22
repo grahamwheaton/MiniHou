@@ -87,14 +87,6 @@ fn spreadsheet_ui(ui: &mut egui::Ui, v: &View<'_>, id: egui::Id) {
     let mut selected_cell = ui.ctx().data_mut(|d| d.get_temp::<(usize, usize)>(id.with("selected_cell")));
     let mut selected_row = ui.ctx().data_mut(|d| d.get_temp::<usize>(id.with("selected_row")));
 
-    let total_rows = domain.row_count(g);
-    let total_pgs = geo_info::total_pages(total_rows, page_size);
-    if page >= total_pgs {
-        page = total_pgs.saturating_sub(1);
-    }
-    let page_range = geo_info::page_row_range(total_rows, page, page_size);
-    let cols = geo_info::flatten_columns(g, domain);
-
     // 1. Toolbar (Domain selector, paging controls, copy buttons)
     let bar_rect = line(ui, 24.);
     ui.painter().rect_filled(bar_rect, 0., v.theme.panel2);
@@ -132,6 +124,14 @@ fn spreadsheet_ui(ui: &mut egui::Ui, v: &View<'_>, id: egui::Id) {
         ui.painter().text(chip_rect.center(), Align2::CENTER_CENTER, &label, FontId::monospace(10.), text_col);
         cur_x += chip_w + 4.;
     }
+
+    let total_rows = domain.row_count(g);
+    let total_pgs = geo_info::total_pages(total_rows, page_size);
+    if page >= total_pgs {
+        page = total_pgs.saturating_sub(1);
+    }
+    let page_range = geo_info::page_row_range(total_rows, page, page_size);
+    let cols = geo_info::flatten_columns(g, domain);
 
     cur_x += 8.;
     // Paging controls
@@ -548,6 +548,9 @@ mod tests {
         extract_texts(&full.shapes, &mut texts);
 
         assert!(texts.iter().any(|t| t == "Spreadsheet"), "Spreadsheet tab header missing: {texts:?}");
+        for label in ["Points (2)", "Edges (1)", "Faces (1)", "Objects (1)"] {
+            assert!(texts.iter().any(|t| t == label), "{label} tab missing: {texts:?}");
+        }
         assert!(texts.iter().any(|t| t == "P.x"), "P.x column missing: {texts:?}");
         assert!(texts.iter().any(|t| t == "P.y"), "P.y column missing: {texts:?}");
         assert!(texts.iter().any(|t| t == "P.z"), "P.z column missing: {texts:?}");

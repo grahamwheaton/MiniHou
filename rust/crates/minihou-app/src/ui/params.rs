@@ -12,6 +12,7 @@ pub mod sections;
 pub use sections::*;
 pub mod output_groups;
 pub use output_groups::{is_output_group_field, output_group_label, output_group_toggle, target_field, TARGET_TEAL};
+pub mod output_targets;
 pub mod pick;
 mod group_fuzzy;
 pub use pick::{domain_edit_mode, is_input_group_field, pick_domain, pick_domain_for, pick_field, PICK_PURPLE, SELECT_ORANGE};
@@ -120,6 +121,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                         ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors));
                     }
                 }
+                output_targets::show(ui, id, spec.outputs, v.theme.accent);
                 if typ == "attribute_create" { attribute_create_panel(ui,v,out,id,flags.locked); }
                 if typ == "bezier" { bezier_controls_panel(ui,v,out,id,flags.locked); }
                 if typ == "knife" { knife_chains_panel(ui,v,out,id,flags.locked); }

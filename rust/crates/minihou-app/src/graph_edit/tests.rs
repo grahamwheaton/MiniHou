@@ -168,6 +168,19 @@
         "box1": {"type": "box"}, "box2": {"type": "box"},
         "merge1": {"type": "merge", "inputs": {"geos": ["box1", "box2"]}}
     }}) }
+    #[test] fn joining_two_objects_keeps_selection_order_and_displays_one_result() {
+        let base = json!({"version":1,"display":["box1","box2"],"nodes":{
+            "box1":{"type":"box"},"box2":{"type":"sphere"}
+        }});
+        let selected = ["box2".to_owned(), "box1".to_owned()];
+        let (joined, id) = join_objects(&base, &selected).unwrap();
+        assert_eq!(joined["nodes"][&id]["type"], "merge");
+        assert_eq!(joined["nodes"][&id]["inputs"]["geos"], json!(["box2", "box1"]));
+        assert_eq!(joined["display"], json!(id));
+        assert_eq!(minihou_app::display_nodes(&joined), vec![id]);
+        validated(joined).unwrap();
+        assert!(join_objects(&base, &["box1".to_owned()]).is_none());
+    }
     #[test] fn adding_after_middle_splices_scalar_and_multi_consumers() {
         let base = json!({"version":1,"display":"out","nodes":{
             "a":{"type":"box"}, "b":{"type":"normal","inputs":{"geo":"a"}},

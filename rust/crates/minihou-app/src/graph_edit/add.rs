@@ -69,6 +69,15 @@ pub fn add_selected_boolean(value: &Value, selected: &std::collections::BTreeSet
     Some((next, id))
 }
 
+/// Join selected viewport objects into one displayed object, preserving their input order.
+pub fn join_objects(value: &Value, selected: &[String]) -> Option<(Value, String)> {
+    if selected.len() < 2 { return None; }
+    let (mut next, id) = add_selected_merge(value, selected, &selected[0])?;
+    next["display"] = json!(id);
+    validated(next.clone()).ok()?;
+    Some((next, id))
+}
+
 /// Repair the older viewport shape `source -> output -> operator` in place.
 /// Each hanging operator becomes the last operation before its output.
 pub fn repair_output_hangs(value: &mut Value) -> usize {

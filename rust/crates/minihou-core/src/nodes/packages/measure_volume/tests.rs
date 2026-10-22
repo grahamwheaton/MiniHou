@@ -34,6 +34,7 @@ fn test_measure_volume_unit_cube() {
     assert_eq!(res.nprims(), cube.nprims());
     let vol = res.detail.get("volume").unwrap().as_f64().unwrap();
     assert!((vol - 1.0).abs() < 1e-5, "expected volume 1.0, got {vol}");
+    assert_eq!(res.detail.get("volume_status").unwrap(), "ok");
 }
 
 #[test]
@@ -41,8 +42,8 @@ fn test_measure_volume_grid_2x2() {
     let grid = grid_2x2();
     let p = Params::resolve(NODE.params, None).unwrap();
     let res = (NODE.cook)(&[vec![Arc::new(grid)]], &p).unwrap();
-    let vol = res.detail.get("volume").unwrap().as_f64().unwrap();
-    assert!((vol - 0.0).abs() < 1e-5, "expected volume 0.0 for open grid, got {vol}");
+    assert!(res.detail.get("volume").unwrap().is_null());
+    assert_eq!(res.detail.get("volume_status").unwrap(), "open_mesh");
 }
 
 #[test]
@@ -50,8 +51,8 @@ fn test_measure_volume_line_3() {
     let line = line_3();
     let p = Params::resolve(NODE.params, None).unwrap();
     let res = (NODE.cook)(&[vec![Arc::new(line)]], &p).unwrap();
-    let vol = res.detail.get("volume").unwrap().as_f64().unwrap();
-    assert_eq!(vol, 0.0);
+    assert!(res.detail.get("volume").unwrap().is_null());
+    assert_eq!(res.detail.get("volume_status").unwrap(), "open_mesh");
 }
 
 #[test]

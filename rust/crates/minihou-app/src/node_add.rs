@@ -53,6 +53,15 @@ impl App {
             let Some(params) = params else { self.file_status = "Select points, edges or faces to blast".into(); return; };
             merge_params(&mut value, &id, params);
         } else if let Some(params) = params { merge_params(&mut value, &id, params); }
+        if node_type == "lattice_grid" {
+            if let Some(params) = self.active_object()
+                .and_then(|object| active_range(object, &self.display_ranges))
+                .and_then(|range| self.scene.as_ref()?.positions().get(range.start as usize * 3..range.end as usize * 3))
+                .and_then(lattice_grid_fit_params)
+            {
+                merge_params(&mut value, &id, params);
+            }
+        }
         let before = if let Some((sources, _)) = selected_merge {
             ui::network::position_add_merge(ctx, &self.editor.path, self.editor.doc.value(), &mut value, sources)
         } else {
@@ -99,6 +108,16 @@ impl App {
     }
 }
 
+fn lattice_grid_fit_params(positions: &[f32]) -> Option<Value> {
+    if positions.is_empty() || positions.len() % 3 != 0 { return None; }
+    let (lo, hi) = minihou_core::preview::bounds(positions);
+    if (0..3).any(|axis| !lo[axis].is_finite() || !hi[axis].is_finite() || hi[axis] <= lo[axis]) { return None; }
+    Some(json!({
+        "center": ([0, 1, 2].map(|axis| (lo[axis] + hi[axis]) * 0.5)),
+        "size": ([0, 1, 2].map(|axis| hi[axis] - lo[axis])),
+    }))
+}
+
 fn selection_autofill_doc(doc: &Value, id: &str, params: Value) -> Option<Value> {
     let mut value = doc.clone();
     merge_params(&mut value, id, params);
@@ -134,5 +153,25 @@ mod autofill_tests {
         merge_params(&mut added, &id, t.node_params("attribute_create", &selection).unwrap());
         assert_eq!(added["nodes"][&id]["params"], json!({
             "group":"0", "domain":"primitives", "group_type":"primitives"}));
+    }
+
+    #[test]
+    fn tab_added_lattice_grid_fits_selected_object_bounds() {
+        let doc = json!({"display":"box1","nodes":{"box1":{"type":"box"}}});
+        let (mut added, id) = graph_edit::add_at(&doc, "lattice_grid", Some("box1"), [0.; 3]).unwrap();
+        let object_positions = [-3., 2., 1., 5., 8., 9., 1., -4., 3.];
+        merge_params(&mut added, &id, lattice_grid_fit_params(&object_positions).unwrap());
+
+        let params = &added["nodes"][&id]["params"];
+        let center = params["center"].as_array().unwrap();
+        let size = params["size"].as_array().unwrap();
+        let lo = [-3., -4., 1.];
+        let hi = [5., 8., 9.];
+        for axis in 0..3 {
+            let center = center[axis].as_f64().unwrap() as f32;
+            let size = size[axis].as_f64().unwrap() as f32;
+            assert_eq!(center - size * 0.5, lo[axis]);
+            assert_eq!(center + size * 0.5, hi[axis]);
+        }
     }
 }
