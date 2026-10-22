@@ -306,6 +306,39 @@ mod tests {
     }
 
     #[test]
+    fn open_curve_sharing_a_mesh_edge_does_not_hide_the_hole() {
+        let mut g = cube_missing_face();
+        let mut topology = (*g.topology).clone();
+        topology.vertex_point.extend([4, 5]);
+        topology.prim_offsets.push(topology.vertex_point.len() as i32);
+        topology.closed = Some(vec![true, true, true, true, true, false]);
+        g.topology = Arc::new(topology);
+        g.vertex.insert("uv".into(), Arc::new(Attr::f32(2,
+            (0..5).flat_map(|_| [0., 0., 1., 0., 1., 1., 0., 1.])
+                .chain([0., 0., 1., 0.]).collect())));
+        g.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![1; 6])));
+        g.validate().unwrap();
+
+        let out = cook(g, json!({"mode": "single_polygon", "edge_loop": 0.0})).unwrap();
+        assert_eq!(out.nprims(), 7);
+        assert_eq!(&out.topology.vertex_point[20..22], &[4, 5]);
+        assert_eq!(out.topology.closed.as_ref().unwrap(), &[true, true, true, true, true, false, true]);
+    }
+
+    #[test]
+    fn curve_without_polygons_has_no_fill_boundary() {
+        let g = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 1., 1., 0.],
+            vec![0, 1, 2], vec![0, 3], Some(vec![false]),
+        ).unwrap();
+        let out = cook(g.clone(), json!({})).unwrap();
+        assert_eq!(out.nprims(), 1);
+        assert_eq!(out.npoints, g.npoints);
+        assert_eq!(out.topology.vertex_point, g.topology.vertex_point);
+        assert_eq!(out.topology.closed, g.topology.closed);
+    }
+
+    #[test]
     fn test_fill_group_param_backward_compat() {
         let g = cube_missing_face();
         let out = cook(g, json!({"fill_group": "my_cap"})).unwrap();

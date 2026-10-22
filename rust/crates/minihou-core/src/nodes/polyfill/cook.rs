@@ -2,8 +2,6 @@ use super::*;
 
 pub(crate) fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = POLYFILL.one(inputs, 0)?;
-    model::polygons(&g, "polyfill")?;
-
     let boundary_group = get_str_opt(p, &["boundary_group", "group"]);
     let fill_group = get_str_opt(p, &["fill_group"]);
     let patch_group = {
