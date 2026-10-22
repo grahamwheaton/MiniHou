@@ -72,7 +72,7 @@ fn edges_of_a_closed_box_are_shared_twice_and_sorted() {
 
 #[test]
 fn open_curves_have_no_closing_edge() {
-    let topo = minihou_core::Topology { vertex_point: vec![0, 1, 2], prim_offsets: vec![0, 3], closed: Some(vec![false]) };
+    let topo = minihou_core::Topology { vertex_point: vec![0, 1, 2], prim_offsets: vec![0, 3], closed: Some(vec![false]) , ..Default::default()};
     let e = topo::edges(&topo, 3);
     assert_eq!(e.points, vec![0, 1, 1, 2]);
     assert_eq!(e.of_vertex, vec![0, 1, -1]);

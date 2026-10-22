@@ -408,7 +408,7 @@ fn geometry_from(arrays: &[Arr], prefix: &str, npoints: usize, detail: Map<Strin
         }
     };
     let closed = find("topo/prim_closed").map(|a| a.bytes.iter().map(|b| *b != 0).collect());
-    let topology = Topology { vertex_point: ints("topo/vertex_point", vec![])?, prim_offsets: ints("topo/prim_offsets", vec![0])?, closed };
+    let topology = Topology { vertex_point: ints("topo/vertex_point", vec![])?, prim_offsets: ints("topo/prim_offsets", vec![0])?, closed , ..Default::default()};
     topology.validate(npoints).map_err(|e| e.to_string())?;
     let mut g = Geometry { npoints, topology: Arc::new(topology), detail, ..Default::default() };
     for a in arrays {

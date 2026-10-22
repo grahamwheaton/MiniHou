@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, master, "ccr-*", "Rust"]
+    branches: [main, master, "ccr-*", "Rust", "native-ui*"]
   pull_request:
   workflow_dispatch:
 
@@ -14,6 +14,29 @@ env:
   PYTHONWARNDEFAULTENCODING: "1"
 
 jobs:
+  native-app:
+    name: Native app on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libasound2-dev
+      - name: toolchain (the version in rust-toolchain.toml)
+        working-directory: rust
+        run: rustup toolchain install
+      - name: cargo test minihou-app
+        working-directory: rust
+        run: cargo test -p minihou-app
+      - name: cargo clippy minihou-app
+        working-directory: rust
+        run: cargo clippy -p minihou-app --all-targets
+
   rust:
     name: Rust core on ${{ matrix.os }} (cargo test${{ matrix.full && ', clippy, parity, suite with Rust on' || ', parity' }})
     runs-on: ${{ matrix.os }}

@@ -171,7 +171,7 @@ fn drop_points(g: &Geometry, keep_point: &[bool]) -> Geometry {
     let mut out = g.clone();
     out.npoints = rows.len();
     out.topology = Arc::new(Topology { vertex_point: t.vertex_point.iter().map(|&v| remap[v as usize]).collect(),
-        prim_offsets: t.prim_offsets.clone(), closed: t.closed.clone() });
+        prim_offsets: t.prim_offsets.clone(), closed: t.closed.clone() , ..Default::default()});
     out.point = super::group::gather_table(&g.point, &rows);
     out
 }
@@ -275,7 +275,7 @@ fn extract(g: &Geometry, prims: &[usize], loose: bool) -> Geometry {
     let mut out = g.clone();
     out.npoints = rows.len();
     out.topology = Arc::new(Topology { vertex_point: verts.iter().map(|&v| remap[t.vertex_point[v] as usize]).collect(),
-        prim_offsets: offs, closed: t.has_open().then(|| prims.iter().map(|&i| t.is_closed(i)).collect()) });
+        prim_offsets: offs, closed: t.has_open().then(|| prims.iter().map(|&i| t.is_closed(i)).collect()) , ..Default::default()});
     out.point = super::group::gather_table(&g.point, &rows);
     out.vertex = super::group::gather_table(&g.vertex, &verts);
     out.prim = super::group::gather_table(&g.prim, prims);

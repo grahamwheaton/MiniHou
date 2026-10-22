@@ -448,7 +448,7 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             vertex_point: new_vp,
             prim_offsets: geo.topology.prim_offsets.clone(),
             closed: geo.topology.closed.clone(),
-        }),
+        ..Default::default()}),
         point: model::gather(&geo.point, &survivors),
         vertex: geo.vertex.clone(),
         prim: geo.prim.clone(),

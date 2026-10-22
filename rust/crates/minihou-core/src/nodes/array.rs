@@ -113,7 +113,7 @@ fn weld_seams(g: Geometry, n: usize, dist: f64) -> Result<Geometry> {
             vertex_point: g.topology.vertex_point.iter().map(|&v| remap[v as usize]).collect(),
             prim_offsets: g.topology.prim_offsets.clone(),
             closed: g.topology.closed.clone(),
-        }),
+        ..Default::default()}),
         point: model::gather(&g.point, &keep),
         vertex: g.vertex,
         prim: g.prim,

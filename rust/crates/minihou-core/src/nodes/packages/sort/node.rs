@@ -78,7 +78,7 @@ fn sort(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             vertex_point: new_vp,
             prim_offsets: g.topology.prim_offsets.clone(),
             closed: g.topology.closed.clone(),
-        };
+        ..Default::default()};
         let mut out = Geometry { packed: Default::default(), edge: Default::default(),
             npoints: n,
             topology: Arc::new(topo),
@@ -110,7 +110,7 @@ fn sort(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             vertex_point: new_vp,
             prim_offsets: new_offsets,
             closed,
-        };
+        ..Default::default()};
         let out = Geometry { packed: Default::default(), edge: Default::default(),
             npoints: g.npoints,
             topology: Arc::new(topo),

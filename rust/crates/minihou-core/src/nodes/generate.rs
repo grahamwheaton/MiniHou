@@ -263,7 +263,7 @@ pub fn fuse_points(geo: &Geometry, distance: f64) -> Geometry {
         vertex_point: topo.vertex_point.iter().map(|&v| remap[v as usize]).collect(),
         prim_offsets: topo.prim_offsets.clone(),
         closed: topo.closed.clone(),
-    });
+    ..Default::default()});
     for a in out.point.values_mut() {
         *a = Arc::new(take_rows(a, &keep));
     }
@@ -344,7 +344,7 @@ pub fn drop_degenerate(geo: &Geometry) -> Geometry {
         vertex_point: new_vp,
         prim_offsets: new_offs,
         closed: new_closed,
-    });
+    ..Default::default()});
 
     for a in out.vertex.values_mut() {
         *a = Arc::new(take_rows(a, &keep_v));

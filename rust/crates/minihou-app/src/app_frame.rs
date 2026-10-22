@@ -2,6 +2,22 @@ use super::*;
 mod link_updates;
 mod cook_updates;
 
+#[cfg(test)]
+mod graph_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn moving_camera_does_not_rebuild_graph() {
+        let doc = Document::parse(include_str!("default_graph.json").into()).unwrap();
+        let mut camera = Camera::frame([0.; 3], 1.);
+        let graph = doc.graph() as *const Graph;
+        camera.orbit(24., -12.);
+        camera.pan(3., 5.);
+        assert_eq!(doc.revision(), 0);
+        assert_eq!(graph, doc.graph() as *const Graph);
+    }
+}
+
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let focused = ctx.memory(|m| m.focused().is_some());
@@ -104,11 +120,11 @@ impl eframe::App for App {
             ui::prim_handles::finish_input(ctx);
             ui::deform_gizmo::finish_input(ctx);
         }
-        let graph = Graph::from_value(self.editor.doc.value()).expect("validated document");
+        let graph = self.editor.doc.graph();
         let mut out = Actions::default();
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover,
             in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
-        ui::deform_gizmo::keyboard(ctx,&graph,&self.selected,self.editor_state.tool,self.viewport_hover,
+        ui::deform_gizmo::keyboard(ctx,graph,&self.selected,self.editor_state.tool,self.viewport_hover,
             fly_frame || busy || ui::selection_region::active(ctx) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx) || ui::curve_tool::active(ctx) || ui::viewport_ui::popup_open(ctx),&mut out);
         if !fly_frame && !busy && !ui::viewport_ui::popup_open(ctx) && self.modal.is_none() && self.model_modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         ctx.data_mut(|d| d.insert_temp(ui::sketch::settings_id(), self.prefs.inference.clone()));
@@ -119,7 +135,7 @@ impl eframe::App for App {
             let normal_frame = self.selection_normal_frame(&display_trs).axes.map(|axis| axis.map(|x| x as f32));
             let active_pick_set=self.active_pick_set(); let node_pick_set=self.pick_set();
             let active_cut_range=self.active_object().and_then(|id|active_range(id,&self.display_ranges).map(|range|(id.to_owned(),range.clone())));
-            let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
+            let v = View { graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, selected_set: &self.selected_set, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
                 mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,

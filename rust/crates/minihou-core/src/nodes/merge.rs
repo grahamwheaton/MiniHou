@@ -48,7 +48,7 @@ pub(super) fn merge(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
     }
     offs.push(vbase);
     let closed = geos.iter().any(|g| g.topology.has_open()).then(|| geos.iter().flat_map(|g| g.topology.closed_mask()).collect());
-    let mut out = Geometry { npoints, topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed }), ..Default::default() };
+    let mut out = Geometry { npoints, topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed , ..Default::default()}), ..Default::default() };
     out.point = concat_tables(geos.iter().map(|g| (&g.point, g.npoints)).collect(), "point")?;
     out.vertex = concat_tables(geos.iter().map(|g| (&g.vertex, g.nvertices())).collect(), "vertex")?;
     out.edge = concat_tables(geos.iter().map(|g| (&g.edge, g.topology.nedges())).collect(), "edge")?;

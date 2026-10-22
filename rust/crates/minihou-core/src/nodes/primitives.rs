@@ -79,7 +79,7 @@ pub(super) fn fuse_points(
             vertex_point: new_vp,
             prim_offsets: geo.topology.prim_offsets.clone(),
             closed: geo.topology.closed.clone(),
-        }),
+        ..Default::default()}),
         point: model::gather(&geo.point, &keep_idx),
         vertex: geo.vertex.clone(),
         prim: geo.prim.clone(),

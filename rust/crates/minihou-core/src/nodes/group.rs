@@ -76,7 +76,7 @@ pub(super) fn keep_prims(g: &Geometry, keep: &[bool], compact: bool) -> Result<G
         for i in &mut vp { *i = remap[*i as usize]; }
     }
     let closed = g.topology.has_open().then(|| prims.iter().map(|&i| g.topology.is_closed(i)).collect());
-    Ok(Geometry { packed: g.packed.clone(), npoints: rows.len(), topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed }),
+    Ok(Geometry { packed: g.packed.clone(), npoints: rows.len(), topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed , ..Default::default()}),
         point: gather_table(&g.point, &rows), vertex: gather_table(&g.vertex, &verts), edge: Default::default(),
         prim: gather_table(&g.prim, &prims), detail: g.detail.clone() })
 }
@@ -229,7 +229,7 @@ mod tests {
         let mut g=Geometry::points_only(pts).unwrap();
         let mut faces=vec![[0,3,2,1],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];if !drop_top{faces.push([4,5,6,7]);}
         let vp:Vec<i32>=faces.iter().flatten().copied().collect();let offs:Vec<i32>=(0..=faces.len() as i32).map(|i|i*4).collect();
-        g.topology=Arc::new(Topology{vertex_point:vp,prim_offsets:offs,closed:None});g
+        g.topology=Arc::new(Topology{vertex_point:vp,prim_offsets:offs,closed:None, ..Default::default()});g
     }
     fn edge_group(g:Geometry,j:serde_json::Value)->Geometry{
         let mut j=j;j["domain"]="edges".into();let p=Params::resolve(GROUP_CREATE.params,j.as_object()).unwrap();

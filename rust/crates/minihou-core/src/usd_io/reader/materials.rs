@@ -249,6 +249,7 @@ pub(super) fn transform(g: &mut Geometry, m: Matrix4d, unit: f64, mesh: bool, le
             }
         }
         let topo = Arc::make_mut(&mut g.topology);
+        topo.clear_edge_cache();
         topo.vertex_point = order.iter().map(|&i| topo.vertex_point[i]).collect();
         for a in g.vertex.values_mut() {
             *a = Arc::new(gather(a, &order)?);

@@ -424,7 +424,7 @@ mod python_oracles {
                 .map(|x| x.as_i64().unwrap() as i32)
                 .collect(),
             closed: Some(closed),
-        };
+        ..Default::default()};
         let g = Geometry { packed: Default::default(), edge: Default::default(),
             npoints: point["P"].rows(),
             topology: Arc::new(topo),

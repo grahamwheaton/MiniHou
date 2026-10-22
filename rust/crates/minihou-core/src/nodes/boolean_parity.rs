@@ -55,7 +55,7 @@ fn geometry(v: &Value) -> Geometry {
                     .map(|v| v.as_bool().unwrap())
                     .collect(),
             ),
-        }),
+        ..Default::default()}),
     };
     g.validate().unwrap();
     g

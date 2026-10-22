@@ -602,7 +602,7 @@ mod tests {
     fn errors_and_limits() {
         let g = cook(&GOAL_LENGTH, vec![quad()], json!({})).unwrap();
         let mut changed = g.clone();
-        changed.topology = Arc::new(crate::geometry::Topology { vertex_point: vec![0, 1, 2], prim_offsets: vec![0, 3], closed: None });
+        changed.topology = Arc::new(crate::geometry::Topology { vertex_point: vec![0, 1, 2], prim_offsets: vec![0, 3], closed: None , ..Default::default()});
         assert!(cook(&GOAL_SOLVE, vec![changed.clone()], json!({})).unwrap_err().0.contains("compatible"));
         assert!(cook(&GOAL_GRAVITY, vec![changed], json!({})).unwrap_err().0.contains("topology"));
         let a = cook(&GOAL_SOLVE, vec![cook(&GOAL_GRAVITY, vec![line(2)], json!({})).unwrap()], json!({"steps": 10})).unwrap();
