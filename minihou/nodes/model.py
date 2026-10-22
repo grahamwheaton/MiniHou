@@ -372,7 +372,7 @@ def boundary_loops(geo):
 ])
 def polyfill(geo, fill_group):
     """Close every hole with one n-gon facing the same way as its surroundings (Houdini's PolyFill, single polygon).
-    New faces get zero for primitive and vertex attributes."""
+    New faces get zero for primitive attributes; their corners inherit boundary attributes."""
     B.require_polygons(geo, "polyfill")
     loops = boundary_loops(geo)
     if not loops:
@@ -382,8 +382,21 @@ def polyfill(geo, fill_group):
     new_vp = np.concatenate([np.asarray(l, np.int64) for l in loops])
     offs = np.concatenate([t.prim_offsets.astype(np.int64), t.prim_offsets[-1] + np.cumsum(sizes)])
     pad = lambda table, k: {n: np.concatenate([a, np.zeros((k,) + a.shape[1:], a.dtype)]) for n, a in table.items()}  # noqa: E731
+    edges = topo.edges(geo)
+    vp = t.vertex_point.astype(np.int64)
+    nxt = topo.next_vertex(geo)
+    boundary = np.flatnonzero(edges.count[edges.of_vertex] == 1)
+    source_corner = np.full(geo.npoints, -1, np.int64)
+    source_corner[vp[nxt[boundary]]] = boundary
+    corner_src = source_corner[new_vp]
+    vertex = {}
+    for name, attr in geo.vertex.items():
+        # Source-less caps retain the existing neutral UV policy.
+        neutral_uv = attr.dtype.kind == 'f' and attr.ndim > 1 and attr.shape[1] in (2, 3) and name not in ('N', 'Cd', 'P')
+        appended = np.zeros_like(attr[corner_src]) if neutral_uv else attr[corner_src]
+        vertex[name] = np.concatenate([attr, appended])
     out = B.make(geo.P, np.concatenate([t.vertex_point, new_vp]), offs, dict(geo.point.items()),
-                 pad(geo.vertex, len(new_vp)), pad(geo.prim, len(loops)), geo.detail)
+                 vertex, pad(geo.prim, len(loops)), geo.detail)
     if fill_group:
         out = groups.write(out, "prim", fill_group, np.r_[np.zeros(t.nprims, bool), np.ones(len(loops), bool)])
     return out

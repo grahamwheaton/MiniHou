@@ -31,7 +31,7 @@ The linked SideFX pages describe Houdini 22.0. Exact parameter defaults, output 
 
 Local fixes and coverage:
 
-- PolyFill's single-polygon and four-sided quad caps now copy source corner attributes. New cap UVs remain subject to the neutral material/UV policy in `mesh_common::append`; Houdini's seam and interpolation values are unverified.
+- Rust PolyFill's single-polygon and four-sided quad caps now copy source corner attributes. Python's single-polygon cap now copies boundary corner attributes too. New cap UVs retain their neutral policies; Houdini's seam and interpolation values are unverified.
 - PolyFill ignores open curves when finding polygon boundaries, including curves sharing a mesh edge, and preserves those curves in the output. A curve-only input remains unchanged.
 - PolyFill reports a degenerate boundary loop instead of adding a zero-area cap. Exact Houdini behavior for degenerate input is unverified.
 - PolyFill rejects unknown fill modes instead of silently choosing quadrilaterals.
