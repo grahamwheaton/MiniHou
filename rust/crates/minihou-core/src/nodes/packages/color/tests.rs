@@ -24,7 +24,8 @@ fn run_color(geo: &Geometry, params: serde_json::Value) -> Result<Geometry> {
 fn package_registers_with_defaults() {
     let spec = crate::nodes::get("color").unwrap();
     assert_eq!(spec.name, NODE.name);
-    Params::resolve(NODE.params, None).unwrap();
+    let defaults = Params::resolve(NODE.params, None).unwrap();
+    assert_eq!(defaults.e("domain", &["points", "edges", "faces"]).unwrap(), "points");
 }
 
 #[test]
@@ -37,13 +38,8 @@ fn test_color_domain_options_meta() {
 }
 
 #[test]
-fn test_color_points_edges_faces() {
+fn test_color_points_domain() {
     let g = quad_geo();
-    assert_eq!(g.npoints, 4);
-    assert_eq!(g.nedges(), 4);
-    assert_eq!(g.nprims(), 1);
-
-    // Points domain
     let out_pts = run_color(&g, serde_json::json!({
         "domain": "points",
         "color": [1.0, 0.0, 0.0]
@@ -53,8 +49,11 @@ fn test_color_points_edges_faces() {
     assert_eq!(out_pts.point["Cd"].as_f32().unwrap(), &[1., 0., 0., 1., 0., 0., 1., 0., 0., 1., 0., 0.]);
     assert!(!out_pts.edge.contains_key("Cd"));
     assert!(!out_pts.prim.contains_key("Cd"));
+}
 
-    // Edges domain
+#[test]
+fn test_color_edges_domain() {
+    let g = quad_geo();
     let out_edges = run_color(&g, serde_json::json!({
         "domain": "edges",
         "color": [0.0, 1.0, 0.0]
@@ -64,8 +63,11 @@ fn test_color_points_edges_faces() {
     assert_eq!(out_edges.edge["Cd"].as_f32().unwrap(), &[0., 1., 0., 0., 1., 0., 0., 1., 0., 0., 1., 0.]);
     assert!(!out_edges.point.contains_key("Cd"));
     assert!(!out_edges.prim.contains_key("Cd"));
+}
 
-    // Faces domain
+#[test]
+fn test_color_faces_domain() {
+    let g = quad_geo();
     let out_faces = run_color(&g, serde_json::json!({
         "domain": "faces",
         "color": [0.0, 0.0, 1.0]
