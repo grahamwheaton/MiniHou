@@ -317,7 +317,7 @@ impl eframe::App for App {
                 let modal_pick=self.pushpull_pick || self.editor_state.selection!=ui::SelectionMode::Object;
                 let pick_set=if modal_pick {active_pick_set.clone()} else {node_pick_set.clone()};
                 let pick_visibility=if modal_pick {viewport::ObjectVisibility::HideOthers} else {self.editor_state.object_visibility};
-                let ignore_pick_occlusion=picking::ignores_surface_occlusion(self.mode,self.editor_state.overlays.enabled,self.editor_state.xray,self.editor_state.overlays.wireframe);
+                let ignore_pick_occlusion=picking::ignores_surface_occlusion(self.mode,self.editor_state.overlays.enabled,self.editor_state.xray);
 
                 let hover_elem = if hover_in_viewport {
                     if let (Some(pos), Some(scene)) = (hover_pos, &self.scene) {

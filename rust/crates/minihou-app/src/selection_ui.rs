@@ -44,7 +44,7 @@ impl App {
         let inside = |p| project(p).is_some_and(|q| shape.contains(q));
         let mode = self.editor_state.selection;
         let ignore_occlusion=picking::ignores_surface_occlusion(self.mode,self.editor_state.overlays.enabled,
-            self.editor_state.xray,self.editor_state.overlays.wireframe);
+            self.editor_state.xray);
         let active_pick_set=self.active_pick_set();
         let element_visible=|p| element_visible_at(scene,camera,self.last_viewport,p,
             viewport::ObjectVisibility::HideOthers,&self.display_ranges,&active_pick_set,ignore_occlusion);

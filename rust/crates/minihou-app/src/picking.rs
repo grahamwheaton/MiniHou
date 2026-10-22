@@ -19,10 +19,11 @@ pub fn pick_triangle_after(p:&[f32],tri:&[u32],origin:[f32;3],dir:[f32;3],after:
     pick_triangle_culled(p,tri,shifted,dir,false,visible).map(|mut hit|{hit.t+=start;hit})
 }
 
-/// Wireframe and X-ray expose elements on the far side of a surface.
-pub fn ignores_surface_occlusion(mode: crate::viewport::Mode, overlays_enabled: bool, xray: bool, wireframe: bool) -> bool {
+/// Wireframe display and X-ray expose elements on the far side of a surface.
+/// The wireframe overlay on a shaded display is depth-tested and does not.
+pub fn ignores_surface_occlusion(mode: crate::viewport::Mode, overlays_enabled: bool, xray: bool) -> bool {
     matches!(mode, crate::viewport::Mode::Wireframe | crate::viewport::Mode::WireframeGhost | crate::viewport::Mode::WireBoundingBox)
-        || (overlays_enabled && (xray || wireframe))
+        || (overlays_enabled && xray)
 }
 
 /// Test the element's depth against the nearest displayed surface along its screen ray.
@@ -38,12 +39,11 @@ pub fn element_in_front(bvh:&Bvh,positions:&[f32],triangles:&[u32],origin:[f32;3
 #[test]
 fn picking_occlusion_tracks_display_mode() {
     use crate::viewport::Mode;
-    assert!(!ignores_surface_occlusion(Mode::SmoothShaded, true, false, false));
-    assert!(ignores_surface_occlusion(Mode::SmoothShaded, true, true, false));
-    assert!(ignores_surface_occlusion(Mode::SmoothShaded, true, false, true));
-    assert!(ignores_surface_occlusion(Mode::Wireframe, false, false, false));
-    assert!(!ignores_surface_occlusion(Mode::HiddenLineInvisible, false, false, false));
-    assert!(!ignores_surface_occlusion(Mode::SmoothShaded, false, true, true));
+    assert!(!ignores_surface_occlusion(Mode::SmoothShaded, true, false));
+    assert!(ignores_surface_occlusion(Mode::SmoothShaded, true, true));
+    assert!(ignores_surface_occlusion(Mode::Wireframe, false, false));
+    assert!(!ignores_surface_occlusion(Mode::HiddenLineInvisible, false, false));
+    assert!(!ignores_surface_occlusion(Mode::SmoothShaded, false, true));
 }
 
 #[cfg(test)]
@@ -65,7 +65,7 @@ fn hidden_point_edge_and_face_are_selected_only_in_xray_or_wireframe() {
             assert!(shape.contains(pos2(target[0],target[1])));
             for (mode,xray,expected) in [(Mode::SmoothShaded,false,false),(Mode::SmoothShaded,true,true),
                                           (Mode::Wireframe,false,true)] {
-                let ignore=ignores_surface_occlusion(mode,true,xray,false);
+                let ignore=ignores_surface_occlusion(mode,true,xray);
                 assert_eq!(element_in_front(&bvh,&p,&tris,origin,dir,target,1e-4,ignore,|_|true),expected);
             }
         }

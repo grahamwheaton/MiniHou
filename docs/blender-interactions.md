@@ -16,7 +16,7 @@ Orientation choices are Global, Local, Normal, View, Cursor and Custom. Capture 
 
 **B** starts Box select outside a transform. **C** starts Circle select; Lasso is in the left strip. Box/lasso replace by default, Shift adds, and Ctrl or middle mouse subtracts. Circle paints additions while dragging; Ctrl/middle mouse subtracts, wheel changes brush radius, and Enter finishes. Escape/right-click restores the selection from before the selection session.
 
-Region selection uses projected points, edges with both endpoints inside, and face triangle centres. It selects through geometry rather than providing full visibility-aware Blender selection.
+Region selection uses projected points, edges with both endpoints inside, and face triangle centres. Solid display selects visible elements; X-ray and wireframe display modes permit through selection.
 
 Select a starting element, then **Ctrl-click** the destination to select a connected route. The **Ctrl-click path** selector chooses:
 
@@ -83,7 +83,7 @@ Counts are 1–10,000; grid total is also limited to 10,000. The existing Copy t
 | Blender-style transforms | G/R/S, gizmos, constraints, precision, confirmation/cancellation | No numeric modal entry, trackball, complete Blender pivot/keymap parity |
 | Pick snap base with B | Temporary base in mesh modal Move | Not curve controls, rotation/scale pivots or saved references |
 | Proportional editing | Seven falloffs, radius/wheel, connected/projected, weighted transforms | Radius guide only, no weight overlay; metric/rotation/normal differences above |
-| Viewport selection | Box/lasso/circle, direct and shortest route choices | Through-selection semantics; no full loop recognition |
+| Viewport selection | Box/lasso/circle, direct and shortest route choices | Through selection in X-ray or wireframe display; no full loop recognition |
 | Modeling interaction | Extrude/inset/bevel/push-pull scalar modal gestures | Limited operation options and topology-specific restrictions |
 | Curve editing | Bezier controls and tangent modes; drawing creates curves | Single-control editing; no NURBS/tilt/radius |
 | Houdini-style drag ghost | Five primitive outlines and XY drop placement | Other sources have no ghost; no scene-surface placement or drag sizing |

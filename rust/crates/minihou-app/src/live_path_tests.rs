@@ -4,6 +4,72 @@ use super::*;
 fn cook(doc: &Value, node: &str) -> std::sync::Arc<minihou_core::Geometry> {
     Graph::from_value(doc).unwrap().cook(Some(node)).unwrap()
 }
+
+#[test]
+fn solid_box_selection_does_not_reach_back_elements() {
+    use eframe::egui::{pos2, Rect};
+    let doc = json!({"version":1,"display":"box1","nodes":{"box1":{"type":"box"}}});
+    let scene = Scene::new(&cook(&doc, "box1"));
+    let mut camera = Camera::frame(scene.center, scene.radius);
+    camera.set_view(StandardView::Front);
+    let (yaw, pitch) = camera.angles();
+    let (projection, _) = camera.matrices(1.);
+    let (ray_origin, ray_forward) = camera.ray(0., 0., 1.);
+    let (rx, _) = camera.ray(1., 0., 1.);
+    let (ry, _) = camera.ray(0., 1., 1.);
+    let info = CameraInfo { yaw, pitch, ortho:true, projection, ray_origin, ray_forward,
+        ray_right:[0,1,2].map(|k|rx[k]-ray_origin[k]),
+        ray_up:[0,1,2].map(|k|ry[k]-ray_origin[k]) };
+    let rect=Rect::from_min_max(pos2(0.,0.),pos2(800.,800.));
+    let (lo,hi)=minihou_core::preview::bounds(scene.positions());
+    let front=(0..scene.positions().len()/3).find(|&i| {
+        let p=picking::at(scene.positions(),i as u32);
+        (p[0]-lo[0]).abs()<1e-5 && (p[1]-lo[1]).abs()<1e-5 && (p[2]-lo[2]).abs()<1e-5
+    }).unwrap() as u32;
+    let back=(0..scene.positions().len()/3).find(|&i| {
+        let p=picking::at(scene.positions(),i as u32);
+        (p[0]-lo[0]).abs()<1e-5 && (p[1]-hi[1]).abs()<1e-5 && (p[2]-lo[2]).abs()<1e-5
+    }).unwrap() as u32;
+    let front_pos=picking::at(scene.positions(),front);
+    let back_pos=picking::at(scene.positions(),back);
+    let pointer=ui::transform_gizmo::project(info,rect,front_pos).unwrap();
+    assert_eq!(pointer,ui::transform_gizmo::project(info,rect,back_pos).unwrap());
+    let range=vec![("box1".to_owned(),0..scene.positions().len() as u32/3)];
+    let selected=std::collections::BTreeSet::from(["box1".to_owned()]);
+    let editor=EditorState::default();
+    assert!(!editor.xray && editor.overlays.enabled && editor.overlays.wireframe);
+    let ignore=picking::ignores_surface_occlusion(Mode::Solid,editor.overlays.enabled,editor.xray);
+    assert!(!ignore);
+    assert!(element_pick_glue::element_visible_at(&scene,info,rect,front_pos,
+        viewport::ObjectVisibility::HideOthers,&range,&selected,ignore));
+    assert!(!element_pick_glue::element_visible_at(&scene,info,rect,back_pos,
+        viewport::ObjectVisibility::HideOthers,&range,&selected,ignore));
+    // The region path checks edge endpoints and triangle centres with the same visibility query.
+    let back_edge_end=[hi[0],hi[1],lo[2]];
+    let back_face_center=[(lo[0]+hi[0])*0.5,hi[1],(lo[2]+hi[2])*0.5];
+    for candidate in [back_edge_end,back_face_center] {
+        assert!(!element_pick_glue::element_visible_at(&scene,info,rect,candidate,
+            viewport::ObjectVisibility::HideOthers,&range,&selected,ignore));
+    }
+    for mode in [Mode::Wireframe,Mode::Solid] {
+        let through=picking::ignores_surface_occlusion(mode,true,mode==Mode::Solid);
+        assert!(element_pick_glue::element_visible_at(&scene,info,rect,back_face_center,
+            viewport::ObjectVisibility::HideOthers,&range,&selected,through));
+    }
+    let hit=pick_displayed(&scene,ui::transform_gizmo::ray(info,rect,pointer).0,
+        ui::transform_gizmo::ray(info,rect,pointer).1,viewport::ObjectVisibility::HideOthers,&range,&selected).unwrap();
+    assert!(scene.triangle_indices()[hit.tri*3..hit.tri*3+3].iter().all(|&id|
+        (picking::at(scene.positions(),id)[1]-lo[1]).abs()<1e-5));
+    let topo=element_select::Topology::new(scene.positions(),scene.triangle_indices(),scene.edge_indices());
+    let (o,d)=ui::transform_gizmo::ray(info,rect,pointer);
+    let point=[0,1,2].map(|k|o[k]+d[k]*hit.t);
+    for mode in [ui::SelectionMode::Points,ui::SelectionMode::Edges,ui::SelectionMode::Faces] {
+        let picked=topo.pick(scene.positions(),scene.triangle_indices(),hit,point,mode);
+        let ids=selected_point_ids(&picked,mode,scene.triangle_indices());
+        assert!(!ids.is_empty(),"{mode:?}");
+        assert!(ids.iter().all(|&id|(picking::at(scene.positions(),id)[1]-lo[1]).abs()<1e-5),"{mode:?}: {picked:?}");
+    }
+}
 #[test]
 fn loop_cut_confirm_selects_the_cooked_loop() {
     let base=stepped_doc();
