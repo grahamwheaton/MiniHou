@@ -46,6 +46,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | I | Inset | Viewport |
 | K | Knife | Viewport |
 | Escape | Select none | Viewport |
+| J | Join objects | Viewport |
 | Ctrl+B | Bevel (modal) | Viewport |
 | Alt+E | Push / pull (modal) | Viewport |
 | Ctrl+R | Loop cut | Viewport |
