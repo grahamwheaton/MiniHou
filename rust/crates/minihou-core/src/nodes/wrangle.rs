@@ -488,8 +488,6 @@ fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &s
                     return Err(Error::new(
                         "new component needs a declared vector attribute",
                     ));
-                } else if rhs.len() == 1 {
-                    return Err(Error::new("new scalar attributes require f@name or i@name"));
                 } else {
                     rhs.len()
                 }
@@ -690,5 +688,11 @@ mod tests {
 
         let err = cook(source, "points", "f@x = @opinput1_weight", "").unwrap_err();
         assert!(err.0.contains("input 'opinput1' is not connected"), "{err}");
+    }
+
+    #[test]
+    fn untyped_scalar_binding_creates_float_attribute() {
+        let out = cook(fixture(), "points", "@temperature = @ptnum + 1", "").unwrap();
+        assert_eq!(out.point["temperature"].as_f32().unwrap(), &[1., 2., 3.]);
     }
 }
