@@ -254,6 +254,7 @@ impl App {
             "duplicate_linked_selection" => self.duplicate_linked_nodes(),
             "duplicate_objects" => self.duplicate_viewport_objects(),
             "duplicate_viewport_selection" => self.duplicate_viewport_selection(),
+            "join_objects" => self.join_viewport_objects(),
             "dissolve_selection" => {
                 if self.remove_selected_wires(ctx, true) { return; }
                 if let Some(id) = self.selected_set.iter().next().cloned() {

@@ -60,6 +60,25 @@ impl App {
             self.last_operator = Some(LastOperator::Duplicate);
         }
     }
+    /// Join selected displayed objects into a single merge output, keeping scene order.
+    pub(super) fn join_viewport_objects(&mut self) {
+        if self.editor_state.selection != ui::SelectionMode::Object {
+            self.file_status = "Join objects in Object mode".into();
+            return;
+        }
+        let ids: Vec<_> = self.display_ranges.iter()
+            .filter(|(id, _)| self.selected_set.contains(id))
+            .map(|(id, _)| id.clone()).collect();
+        let Some((value, id)) = graph_edit::join_objects(self.editor.doc.value(), &ids) else {
+            self.file_status = "Select at least two displayed objects to join".into();
+            return;
+        };
+        if self.commit_document(value, "join viewport objects") {
+            self.selected = id.clone();
+            self.selected_set = [id.clone()].into();
+            self.display = id;
+        }
+    }
     pub(super) fn duplicate_viewport_selection(&mut self) {
         if self.editor_state.selection == ui::SelectionMode::Object {
             self.duplicate_viewport_objects();
