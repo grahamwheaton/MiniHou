@@ -695,4 +695,18 @@ mod tests {
         let out = cook(fixture(), "points", "@temperature = @ptnum + 1", "").unwrap();
         assert_eq!(out.point["temperature"].as_f32().unwrap(), &[1., 2., 3.]);
     }
+
+    #[test]
+    fn primitive_averages_use_each_primitive_size_and_handle_empty_and_open() {
+        let mut g = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 2., 0., 0., 3., 0., 0.],
+            vec![0, 1, 2, 0, 1, 2, 3, 0, 3],
+            vec![0, 3, 7, 7, 9],
+            Some(vec![true, true, true, false]),
+        ).unwrap();
+        g.point.insert("weight".into(), Arc::new(Attr::f32(1, vec![1., 2., 3., 4.])));
+        let out = cook(g, "primitives", "f@average = @weight; i@is_closed = @closed", "").unwrap();
+        assert_eq!(out.prim["average"].as_f32().unwrap(), &[2., 2.5, 0., 2.5]);
+        assert_eq!(out.prim["is_closed"].as_i32().unwrap(), &[1, 1, 1, 0]);
+    }
 }
