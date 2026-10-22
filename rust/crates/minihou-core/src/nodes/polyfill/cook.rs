@@ -150,9 +150,8 @@ pub(crate) fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
         match mode.as_str() {
             "single" | "single_polygon" => {
-                let cnt = active_pts.len();
                 patch_faces.push(active_pts.clone());
-                all_srcs.push(vec![vec![]; cnt]);
+                all_srcs.push(active_corners.iter().map(|&corner| vec![corner]).collect());
             }
             "triangles" => {
                 let tris = ear_clip_triangles(&active_pts, &pos, inner_norm);
@@ -329,7 +328,7 @@ pub(crate) fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 // Default: "quadrilaterals"
                 if m == 4 {
                     patch_faces.push(active_pts.clone());
-                    all_srcs.push(vec![vec![]; 4]);
+                    all_srcs.push(active_corners.iter().map(|&corner| vec![corner]).collect());
                 } else if m % 2 == 0 {
                     new_pts.push(NewPoint {
                         pos: active_center,

@@ -292,6 +292,20 @@ mod tests {
     }
 
     #[test]
+    fn single_polygon_and_quad_caps_copy_boundary_corner_attributes() {
+        let mut g = cube_missing_face();
+        g.vertex.insert("corner_id".into(), Arc::new(Attr::i32(1, (0..20).collect())));
+        for mode in ["single_polygon", "quadrilaterals"] {
+            let out = cook(g.clone(), json!({"mode": mode, "edge_loop": 0.0})).unwrap();
+            assert_eq!(out.nprims(), 6);
+            let cap_start = out.topology.prim_offsets[5] as usize;
+            let mut ids = out.vertex["corner_id"].as_i32().unwrap()[cap_start..].to_vec();
+            ids.sort_unstable();
+            assert_eq!(ids, [6, 10, 14, 18]);
+        }
+    }
+
+    #[test]
     fn test_fill_group_param_backward_compat() {
         let g = cube_missing_face();
         let out = cook(g, json!({"fill_group": "my_cap"})).unwrap();
