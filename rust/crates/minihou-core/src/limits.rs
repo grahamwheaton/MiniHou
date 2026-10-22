@@ -1,5 +1,10 @@
 //! Shared performance budgets. Project Cheetah routes cache, image, Python bridge,
-//! and loop defaults through this type; later steps will connect the remaining consumers.
+//! loop defaults, and Rayon chunk sizing through this type.
+
+/// Size a parallel run for the active Rayon pool, keeping tasks bounded at both extremes.
+pub(crate) fn rayon_chunk_size(len: usize) -> usize {
+    (len / rayon::current_num_threads().max(1)).clamp(1024, 65_536)
+}
 
 /// Budgets and the hardware measurements used to derive them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,7 +67,7 @@ impl Default for Limits {
             rbd_iterations: 500,
             uv_solver_iterations: 50_000,
             normal_lines: 60_000,
-            rayon_chunk_size: 16_384,
+            rayon_chunk_size: rayon_chunk_size(262_144),
         }
     }
 }
@@ -87,10 +92,6 @@ impl Limits {
             limits.image_decoded_bytes = limits.image_decoded_bytes.max(available / 16);
             limits.image_max_pixels = limits.image_max_pixels.max(limits.image_decoded_bytes / 4);
         }
-        // Reference workload for the future chunked kernels. Their current RUN stays 16,384.
-        limits.rayon_chunk_size = limits.rayon_chunk_size.max(
-            (262_144 / limits.rayon_threads.max(1)).clamp(1024, 65_536),
-        );
         limits
     }
 
@@ -103,7 +104,7 @@ impl Limits {
 
 #[cfg(test)]
 mod tests {
-    use super::Limits;
+    use super::{rayon_chunk_size, Limits};
 
     #[test]
     fn defaults_match_existing_budgets() {
@@ -118,7 +119,7 @@ mod tests {
         assert_eq!((d.rbd_bodies, d.rbd_collision_vertices, d.rbd_cache_bytes, d.rbd_substeps, d.rbd_iterations), (2000, 200_000, 1 << 30, 128, 500));
         assert_eq!(d.uv_solver_iterations, 50_000);
         assert_eq!(d.normal_lines, 60_000);
-        assert_eq!(d.rayon_chunk_size, 16_384);
+        assert_eq!(d.rayon_chunk_size, rayon_chunk_size(262_144));
         assert_eq!((d.max_buffer_size, d.max_storage_buffer_binding_size), (None, None));
     }
 
@@ -133,7 +134,7 @@ mod tests {
         assert!(found.image_decoded_bytes >= d.image_decoded_bytes);
         assert!(found.image_max_pixels >= d.image_max_pixels);
         assert!(found.material_cpu_bytes >= d.material_cpu_bytes);
-        assert!(found.rayon_chunk_size >= d.rayon_chunk_size);
+        assert_eq!(found.rayon_chunk_size, rayon_chunk_size(262_144));
         assert!(found.total_ram_bytes.is_none_or(|n| n > 0));
         assert!(found.available_ram_bytes.is_none_or(|n| n > 0));
         eprintln!("detected limits: {found:#?}");
@@ -145,5 +146,15 @@ mod tests {
         limits.set_gpu_limits(123_456, 7_890);
         assert_eq!(limits.max_buffer_size, Some(123_456));
         assert_eq!(limits.max_storage_buffer_binding_size, Some(7_890));
+    }
+
+    #[test]
+    fn rayon_chunks_scale_with_thread_count() {
+        let sizes: Vec<_> = [1, 8, 16].into_iter().map(|threads| {
+            rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap()
+                .install(|| rayon_chunk_size(262_144))
+        }).collect();
+        assert_eq!(sizes, [65_536, 32_768, 16_384]);
+        assert_eq!(rayon_chunk_size(1), 1024);
     }
 }
