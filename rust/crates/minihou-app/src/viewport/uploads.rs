@@ -153,6 +153,7 @@ impl Gpu {
     }
 
     pub fn upload(&mut self, device: &wgpu::Device, sc: &Scene) {
+        let started = std::time::Instant::now();
         let limit = self.chunk_limit();
         let oversized = chunked_scene(sc, limit);
         self.face_markers.invalidate();
@@ -185,6 +186,9 @@ impl Gpu {
         self.nl_count=(normal_floats/3) as u32; self.nl_selected=0;
         self.bb_chunks=box_chunks(device,sc,limit);
         self.bb_p=buf("bb_p",bytemuck::cast_slice(if self.bb_chunks.is_empty() {&sc.bbp[..]} else {&[0.;3][..]}),wgpu::BufferUsages::VERTEX);
+        if std::env::var_os("MINIHOU_VIEWPORT_TIMING").is_some() {
+            eprintln!("viewport Gpu::upload: points={} triangles={} ms={:.3}", sc.p.len()/3, sc.tri.len()/3, started.elapsed().as_secs_f64()*1000.0);
+        }
     }
     /// Use full-detail selected-object triangles for a stable silhouette at every proxy/LOD level.
     pub fn select_objects(&mut self, device: &wgpu::Device, scene: &Scene, ranges: Vec<std::ops::Range<u32>>) {

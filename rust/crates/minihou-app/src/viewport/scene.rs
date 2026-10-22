@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Instant;
 
 /// Longest overlay normal list kept: more points than this are thinned evenly.
 const NORMAL_LINES: usize = 60_000;
@@ -50,10 +51,24 @@ impl Scene {
     /// Polygon edges as point pairs (no fan diagonals): element selection rebuilds polygons from these.
     pub fn edge_indices(&self) -> &[u32] { &self.edge }
     pub fn new(g: &Geometry) -> Self {
+        let started = Instant::now();
+        let timing = std::env::var_os("MINIHOU_VIEWPORT_TIMING").is_some();
         // Packed primitives / native instances: drawn at their transforms, CPU-batched into this scene's one buffer.
-        if minihou_core::nodes::packed::instance_count(g) > 0 {
-            if let Ok(shown) = minihou_core::nodes::packed::display_geometry(g) { return Self::new(&shown); }
+        let instances = minihou_core::nodes::packed::instance_count(g);
+        let shown = if instances > 0 { minihou_core::nodes::packed::display_geometry(g).ok() } else { None };
+        let display_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let display = shown.as_deref().unwrap_or(g);
+        let source_triangles = if timing && instances > 0 {
+            g.packed.iter().map(|s| minihou_core::preview::triangulate_geometry(s).prim.len()).sum::<usize>()
+        } else { 0 };
+        let scene = Self::from_display_geometry(display, timing);
+        if timing {
+            eprintln!("viewport Scene::new: instances={instances} source_triangles={source_triangles} expanded_points={} expanded_triangles={} display_geometry_ms={display_ms:.3} total_ms={:.3}",
+                scene.p.len()/3, scene.tri.len()/3, started.elapsed().as_secs_f64()*1000.0);
         }
+        scene
+    }
+    fn from_display_geometry(g: &Geometry, timing: bool) -> Self {
         let (p,t) = (g.p(), &g.topology);
         let l = preview::layout(p, &t.vertex_point, &t.prim_offsets, t.closed.as_deref(), g.npoints, usize::MAX, usize::MAX, 100_000,8192);
         let n = match g.point.get("N").and_then(|a| a.as_f32()) {
@@ -99,7 +114,9 @@ impl Scene {
             let uv_sets=provenance.uv_sets.iter().map(|(name,values)| (name.clone(),std::array::from_fn(|k|[values[(ti*3+k)*2],values[(ti*3+k)*2+1]]))).collect();
             textured.push(SurfaceTri { vertices,points:[provenance.point[ti*3],provenance.point[ti*3+1],provenance.point[ti*3+2]],prim:provenance.prim[ti],slot:name,uv_sets });
         }
+        let bvh_started=Instant::now();
         let pick_bvh=std::sync::Arc::new(crate::picking::Bvh::new(p,&l.tri));
+        if timing { eprintln!("viewport BVH build: triangles={} ms={:.3}", l.tri.len()/3, bvh_started.elapsed().as_secs_f64()*1000.0); }
         Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,pick_bvh,nlp,nln,normal_points,bbp,center,radius,textured,cd:point_colors(g) }
     }
 }
@@ -133,6 +150,44 @@ fn instance_slot_name_resolves_to_manifest_binding() {
     registry.register_descriptor("peer3:blender:instance:0",materials::Descriptor::parse(
         &serde_json::json!({"version":1,"name":"imagepaste-261017-142014"})).unwrap());
     assert!(matches!(registry.resolve(&scene.textured[0].slot).state,State::Ok));
+}
+
+/// Run with `MINIHOU_VIEWPORT_TIMING=1 cargo test -p minihou-app packed_cube_viewport_measure -- --ignored --nocapture`.
+#[test]
+#[ignore = "manual viewport timing helper"]
+fn packed_cube_viewport_measure() {
+    use minihou_core::nodes::packed::instance_geometry;
+    use std::sync::Arc;
+    let cube = Arc::new(Geometry::from_arrays(
+        vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0., 0.,0.,1., 1.,0.,1., 1.,1.,1., 0.,1.,1.],
+        vec![0,3,2,1, 4,5,6,7, 0,1,5,4, 2,3,7,6, 0,4,7,3, 1,2,6,5],
+        vec![0,4,8,12,16,20,24], Some(vec![true;6])).unwrap());
+    let graph = minihou_core::Graph::from_json(include_str!("../test_data/textured_cube.minihou")).unwrap();
+    let textured = graph.cook(Some("output1")).unwrap();
+    let instance = wgpu::Instance::default();
+    let gpu = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()
+        .and_then(|adapter| pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok());
+    let mut system = sysinfo::System::new();
+    let pid = sysinfo::Pid::from_u32(std::process::id());
+    for (label, source) in [("plain_cube", cube), ("textured_cube", textured)] {
+    for count in [1, 1_000, 10_000] {
+        let positions = (0..count).flat_map(|i| [i as f32 * 2.0, 0., 0.]).collect();
+        let packed = instance_geometry(&[source.clone()], &vec![0;count], positions,
+            &vec![minihou_core::math::IDENTITY;count], Default::default()).unwrap();
+        let scene = Scene::new(&packed);
+        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        let rss_mb = system.process(pid).map_or(0., |process| process.memory() as f64 / 1_048_576.);
+        eprintln!("packed asset={label} count={count} cooked_points={} source_points={} source_triangles={} scene_points={} scene_triangles={} rss_after_scene_mib={rss_mb:.1}",
+            packed.npoints, source.npoints, minihou_core::preview::triangulate_geometry(&source).prim.len(), scene.p.len()/3, scene.tri.len()/3);
+        if let Some((device, _)) = &gpu {
+            let mut uploaded = Gpu::new(device, &scene);
+            uploaded.upload(device, &scene);
+            system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+            let rss_mb = system.process(pid).map_or(0., |process| process.memory() as f64 / 1_048_576.);
+            eprintln!("packed asset={label} count={count} rss_after_upload_mib={rss_mb:.1}");
+        }
+    }
+    }
 }
 /// Standalone points and non-surface primitive segments survive every proxy cut.
 pub(super) fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {

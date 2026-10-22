@@ -20,4 +20,5 @@ rfd = "=0.15.4"
 
 [dev-dependencies]
 pollster = "0.4"
+sysinfo = "0.32"
 
