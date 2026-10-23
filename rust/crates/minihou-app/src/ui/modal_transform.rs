@@ -163,6 +163,8 @@ impl Modal {
                     }
                     offset
                 }).unwrap_or(self.last),
+                // Rotate and scale wait for the second snap point: nothing moves until it is picked.
+                Kind::Rotate if self.base_target.is_none() => rotation_about_axis(self.rotation_axis(frame,camera),0.),
                 Kind::Rotate => {
                     let axis=self.rotation_axis(frame,camera);
                     let target=if self.base_stage==BaseStage::Done { self.target_direction }
@@ -174,7 +176,7 @@ impl Modal {
                     rotation_about_axis(axis,angle)
                 }
                 Kind::Scale => {
-                    if self.base_point.is_none() { self.last } else {
+                    if self.base_point.is_none() || self.base_target.is_none() { [1.; 3] } else {
                         let start_distance = (self.start - center).length();
                         let denominator = start_distance.max(12.);
                         let factor = self.typed(0).unwrap_or_else(|| q(1. +
@@ -482,6 +484,7 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let mut modal=Modal::new(Kind::Scale,pos2(40.,50.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::Target;
         modal.base_point=Some(base);
+        modal.base_target.get_or_insert([1.,0.,0.]);
         assert_eq!(modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),false,1.,false),([1.;3],base));
         modal.pointer=pos2(52.,50.);
         assert_eq!(modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),false,1.,false),([2.;3],base));
@@ -496,6 +499,7 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let camera=CameraInfo {ray_forward:[0.,0.,1.],..Default::default()};
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::Target; modal.base_point=Some([2.,3.,4.]);
+        modal.base_target.get_or_insert([1.,0.,0.]);
         modal.source_direction=Some([3.,3.,4.]);
         modal.pointer_direction=Some([2.,4.,4.]);
         let (values,pivot)=modal.desired(pos2(0.,0.),100.,frame,camera,false,1.,false);
@@ -507,6 +511,7 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::TargetDirection; modal.base_point=Some([0.;3]);
+        modal.base_target.get_or_insert([1.,0.,0.]);
         modal.source_direction=Some([1.,0.,0.]); modal.pointer_direction=Some([0.,1.,0.]);
         modal.numeric[0]="37.5".into();
         let values=modal.desired(pos2(0.,0.),100.,frame,CameraInfo::default(),true,1.,false).0;
@@ -517,6 +522,7 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let face=crate::picking::SnapFeature {point:[0.;3],triangle:[[0.,0.,0.],[0.,1.,0.],[0.,0.,1.]],kind:SnapTo::Face};
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::TargetDirection; modal.base_point=Some([0.;3]);
+        modal.base_target.get_or_insert([1.,0.,0.]);
         modal.base_axis=feature_rotation_axis(&face);
         assert_eq!(modal.rotation_axis(frame,CameraInfo::default()),[1.,0.,0.]);
         modal.source_direction=Some([0.,1.,0.]); modal.pointer_direction=Some([0.,0.,1.]);
@@ -529,6 +535,7 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::TargetDirection; modal.base_point=Some([0.;3]);
+        modal.base_target.get_or_insert([1.,0.,0.]);
         modal.source_direction=Some([1.,0.,0.]);
         let (sin,cos)=12_f32.to_radians().sin_cos(); modal.pointer_direction=Some([cos,sin,0.]);
         let camera=CameraInfo {ray_forward:[0.,0.,1.],..Default::default()};
@@ -541,6 +548,7 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let mut modal=Modal::new(Kind::Scale,pos2(40.,50.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::Target;
         modal.base_point=Some([2.,3.,4.]);
+        modal.base_target.get_or_insert([1.,0.,0.]);
         modal.pointer=pos2(52.,50.);
         modal.numeric[0]="2.75".into();
         modal.constraint=Constraint::Axis(1,false);
@@ -551,6 +559,7 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let mut modal=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::Done;
         modal.base_point=Some([2.,3.,4.]);
+        modal.base_target.get_or_insert([1.,0.,0.]);
         modal.base_target=Some([5.,7.,9.]);
         modal.constraint=Constraint::Axis(1,false);
         assert_eq!(modal.desired(pos2(0.,0.),100.,frame,CameraInfo::default(),false,1.,false).0,[0.,4.,0.]);
