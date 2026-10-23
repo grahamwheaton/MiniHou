@@ -46,8 +46,11 @@ impl App {
             p["output_group_name"] = json!(element_select::free_group_name_with_prefix(self.editor.doc.value(), "sharp_edges"));
             merge_params(&mut value, &id, p);
         } else if node_type == "group_create" && self.editor_state.selection != ui::SelectionMode::Object {
-            let Some(mut params) = params else { self.file_status = "Select points, edges or faces to create a group".into(); return; };
+            // Added from the node editor there is no viewport selection to copy: keep the node and its default
+            // pattern so the user can set it, instead of refusing to add it.
+            let mut params = params.unwrap_or_else(|| json!({}));
             params["name"] = json!(element_select::free_group_name(self.editor.doc.value()));
+            if !self.viewport_hover { self.file_status = "Group Create added: select elements in the viewport to fill its pattern".into(); }
             merge_params(&mut value, &id, params);
         } else if node_type == "blast" && self.editor_state.selection != ui::SelectionMode::Object {
             let Some(params) = params else { self.file_status = "Select points, edges or faces to blast".into(); return; };
