@@ -36,6 +36,11 @@ fn button(ui: &mut egui::Ui, label: &str, kind: &str, enabled: bool, outlined: b
     response.clicked()
 }
 
+/// File menu entries in display order (excluding Export USD).
+pub fn file_menu_entries() -> Vec<(&'static str, UiAction)> {
+    vec![("Open", UiAction::Open), ("Save", UiAction::Save), ("Save As", UiAction::SaveAs)]
+}
+
 pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::hover());
     ui.painter().rect_filled(bar, 0., v.theme.panel);
@@ -52,13 +57,15 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             ui.painter().text(name.left_center(), Align2::LEFT_CENTER, "MiniHou", FontId::proportional(13.), v.theme.text);
             separator(ui, v);
             ui.menu_button("File", |ui| {
+                for (label, action) in file_menu_entries() {
+                    if ui.button(label).clicked() { out.push(action); ui.close(); }
+                }
+                ui.separator();
                 if ui.button("Export USD…").clicked() { out.push(UiAction::Command("export_usd".into())); ui.close(); }
             });
             ui.menu_button("Edit", |ui| {
                 if ui.button("Clear all").clicked() { out.push(UiAction::ClearMeasurements); ui.close(); }
             });
-            if button(ui, "Open", "open", true, true, v, None) { out.push(UiAction::Open); }
-            if button(ui, "Save As", "save", true, true, v, None) { out.push(UiAction::SaveAs); }
             separator(ui, v);
             if button(ui, "Undo", "undo", v.can_undo, false, v, None) { out.push(UiAction::Undo); }
             if button(ui, "Redo", "redo", v.can_redo, false, v, None) { out.push(UiAction::Redo); }
@@ -82,6 +89,14 @@ fn separator(ui: &mut egui::Ui, v: &View) {
 mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
+
+    #[test]
+    fn file_menu_entries_are_open_save_save_as() {
+        let e = file_menu_entries();
+        let labels: Vec<_> = e.iter().map(|(l, _)| *l).collect();
+        assert_eq!(labels, ["Open", "Save", "Save As"]);
+        assert!(matches!(e[0].1, UiAction::Open) && matches!(e[1].1, UiAction::Save) && matches!(e[2].1, UiAction::SaveAs));
+    }
 
     #[test]
     fn edit_menu_contains_clear_all_action() {
