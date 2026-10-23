@@ -151,6 +151,19 @@ pub fn restore_positions(ctx: &egui::Context, path: &Path, doc: &serde_json::Val
     });
 }
 
+/// Re-key live canvas positions when a node is renamed so it stays put.
+pub fn rename_positions(ctx: &egui::Context, path: &Path, old: &str, new: &str) {
+    ctx.data_mut(|d| {
+        let id = state_id(path);
+        let mut state = d.get_persisted::<State>(id).unwrap_or_default();
+        if let Some(at) = state.moved.remove(old) { state.moved.insert(new.to_owned(), at); }
+        if let Some(at) = state.tidy_order.remove(old) { state.tidy_order.insert(new.to_owned(), at); }
+        if state.drag.as_ref().is_some_and(|(n, _)| n == old) { state.drag = None; }
+        state.springs = None;
+        d.insert_persisted(id, state);
+    });
+}
+
 pub(super) fn snap(pos: Pos2, grid: f32, enabled: bool, invert: bool) -> Pos2 {
     if !(enabled ^ invert) || grid <= 0.0 { return pos; }
     pos2((pos.x / grid).round() * grid, (pos.y / grid).round() * grid)

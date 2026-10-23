@@ -750,3 +750,17 @@
         assert_ne!(next_sel["nodes"][&id_sel]["pos"], serde_json::json!([120., 180.]));
         assert_eq!(next_sel["nodes"][&id_sel]["pos"], serde_json::json!([320., 224.]));
     }
+
+    #[test]
+    fn renaming_twice_keeps_live_positions() {
+        let ctx = egui::Context::default();
+        let path = Path::new("rename-pos-test.json");
+        place_connected(&ctx, path, "a", [10., 20.]);
+        ctx.data_mut(|d| { let id = state_id(path); let mut s = d.get_persisted::<State>(id).unwrap_or_default(); s.tidy_order.insert("a".into(), pos2(5., 6.)); d.insert_persisted(id, s); });
+        rename_positions(&ctx, path, "a", "b");
+        rename_positions(&ctx, path, "b", "c");
+        let s = ctx.data_mut(|d| d.get_persisted::<State>(state_id(path)).unwrap());
+        assert_eq!(s.moved.get("c"), Some(&pos2(10., 20.)));
+        assert_eq!(s.tidy_order.get("c"), Some(&pos2(5., 6.)));
+        assert!(!s.moved.contains_key("a") && !s.moved.contains_key("b"));
+    }

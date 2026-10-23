@@ -86,6 +86,13 @@
         assert_eq!(minihou_app::modifier_inputs::pickers(&twice),vec![("c".to_string(),"a".to_string())]);
         assert!(rename(&json!({"nodes":{"x":{"type":"box"}}}),"x","y").unwrap()["nodes"]["y"].get("picker_id").is_none());
     }
+    #[test] fn renaming_twice_keeps_position() {
+        let doc=json!({"nodes":{"a":{"type":"box","pos":[12.0,34.0]}},"display":"a"});
+        let once=rename(&doc,"a","b").unwrap();
+        assert_eq!(once["nodes"]["b"]["pos"],json!([12.0,34.0]));
+        let twice=rename(&once,"b","c").unwrap();
+        assert_eq!(twice["nodes"]["c"]["pos"],json!([12.0,34.0]));
+    }
     #[test] fn rename_and_paste_keep_reference_targets() {
         let doc=json!({"nodes":{"driver":{"type":"box","params":{"size":[2,3,4]}},"target":{"type":"box","channels":{"size.x":"ch('../driver/size.y')"}},"external":{"type":"box","channels":{"size.x":"ch('../target/size.x')"}}},"display":"target"});
         let renamed=rename(&doc,"driver","source").unwrap();

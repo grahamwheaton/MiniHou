@@ -21,7 +21,7 @@ mod wires;
 use wires::*;
 mod position;
 use position::*;
-pub use position::{insert_added, layout_changed, position_add, position_add_merge, restore_positions};
+pub use position::{rename_positions, insert_added, layout_changed, position_add, position_add_merge, restore_positions};
 
 use super::{Actions, UiAction, View};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Id, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};

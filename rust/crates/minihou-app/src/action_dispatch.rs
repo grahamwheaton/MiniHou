@@ -473,6 +473,7 @@ impl App {
                 UiAction::OpenRenameNode(id) => ui::network::open_rename_dialog(ctx, &id),
                 UiAction::RenameNode { old, new } => {
                     if let Some(value)=graph_edit::rename(self.editor.doc.value(),&old,&new) {
+                        ui::network::rename_positions(ctx,&self.editor.path,&old,&new);
                         if self.commit_document(value,"rename node") { self.selected=new.clone(); self.selected_set=std::collections::BTreeSet::from([new]); }
                     } else {self.file_status="Could not rename node: name is invalid or already in use".into();}
                 }
