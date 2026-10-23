@@ -28,6 +28,19 @@ fn viewport_point_size(size: f32, mode: crate::ui::SelectionMode) -> f32 {
     size * if mode == crate::ui::SelectionMode::Points { 2.0 } else { 1.0 }
 }
 
+/// Selected-element orange; must match `fs_element` / `fs_face_marker` in shader.wgsl.
+pub(super) const SELECTED_ELEMENT_COLOUR: [f32; 4] = [1.0, 0.627, 0.157, 1.0];
+/// Near-black for unselected edit-mode points, edges and face dots (Blender parity).
+pub(super) const EDIT_ELEMENT_COLOUR: [f32; 4] = [0.02, 0.02, 0.02, 1.0];
+
+/// Colour of a point/edge element. Edit mode: black unselected, orange selected.
+/// Object mode keeps the background-dependent overlay colour.
+pub(super) fn element_colour(selected: bool, in_edit_mode: bool, light_background: bool) -> [f32; 4] {
+    if selected { SELECTED_ELEMENT_COLOUR }
+    else if in_edit_mode { EDIT_ELEMENT_COLOUR }
+    else if light_background { [0.025, 0.03, 0.04, 1.] } else { [0.72, 0.75, 0.8, 1.] }
+}
+
 fn show_object_outline(selected: bool, mode: crate::ui::SelectionMode) -> bool {
     selected && mode == crate::ui::SelectionMode::Object
 }
@@ -47,6 +60,20 @@ fn edit_highlights_have_occluding_depth_when_faces_are_drawn() {
     assert!(needs_selection_depth(Mode::Wireframe, false, true, true));
     assert!(!needs_selection_depth(Mode::SmoothShaded, false, true, false));
     assert!(!needs_selection_depth(Mode::SmoothShaded, true, true, false));
+}
+
+#[cfg(test)]
+#[test]
+fn edit_mode_elements_are_black_unselected_and_orange_selected() {
+    for light in [false, true] {
+        let c = element_colour(false, true, light);
+        assert!(c[0] < 0.05 && c[1] < 0.05 && c[2] < 0.05 && c[3] == 1.0, "{c:?}");
+        assert_eq!(element_colour(true, true, light), [1.0, 0.627, 0.157, 1.0]);
+    }
+    assert_eq!(element_colour(false, false, false), [0.72, 0.75, 0.8, 1.]);
+    assert_eq!(element_colour(false, false, true), [0.025, 0.03, 0.04, 1.]);
+    let shader = include_str!("../shader.wgsl");
+    assert!(shader.contains("vec4(1.,0.627,0.157,1.)") && shader.contains("vec3(1.,0.627,0.157)"));
 }
 
 #[cfg(test)]
@@ -110,7 +137,7 @@ impl Gpu {
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
             element_size:[target.size[0] as f32,target.size[1] as f32,viewport_point_size(overlay.geometry.point_size, selection_mode),overlay.geometry.line_width],
             element_flags:[(overlay.geometry.points || selection_mode==crate::ui::SelectionMode::Points) as u32,overlay.geometry.lines as u32,points_visible(&overlay.geometry,selection_mode) as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
-            element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
+            element_color:element_colour(false,editing,overlay.light_background) };
         queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
         let matcap_id=overlay.matcap.texture_id();
         if self.matcap_loaded.swap(matcap_id,std::sync::atomic::Ordering::Relaxed)!=matcap_id {

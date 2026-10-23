@@ -273,7 +273,8 @@ fn fs_face_marker(i:FaceMarkerOut) -> @location(0) vec4<f32> {
     let radius=select(select(2.5,3.5,selected),4.,hovered);
     let d=length(i.uv);
     let orange=vec3(1.,0.627,0.157);
-    var color=select(vec3(0.188,0.220,0.282),vec3(0.502,0.565,0.659),d>1.5);
+    // Unselected face dot: black core with a slight grey rim so it reads on grey (Blender parity).
+    var color=select(vec3(0.02),vec3(0.30),d>radius-0.6);
     if (selected) { color=orange; }
     if (hovered) { color=select(vec3(1.),orange,d>3.); }
     return vec4(color,1.-smoothstep(radius-0.5,radius+0.5,d));
