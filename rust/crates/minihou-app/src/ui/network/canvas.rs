@@ -85,8 +85,9 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         }
     }
     let secondary_pressed = over && ctx.input(|i| i.pointer.button_pressed(PointerButton::Secondary));
-    let shift = ctx.input(|i| i.modifiers.shift);
-    if secondary_pressed && shift && state.menu.is_none() && state.wire.is_none() {
+    // Ctrl-RMB drag cuts noodles; Shift-RMB stays free for selection.
+    let cut_mod = ctx.input(|i| i.modifiers.ctrl);
+    if secondary_pressed && cut_mod && state.menu.is_none() && state.wire.is_none() {
         state.cut = pointer.map(Cut::new);
         state.box_start = None;
     }
@@ -94,13 +95,13 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         state.cut = None;
         state.box_start = None;
     }
-    // Only Shift-RMB is deferred until release so an ordinary RMB still opens
-    // its context menu immediately. A sub-threshold Shift-RMB is a normal click.
+    // Only Ctrl-RMB is deferred until release so an ordinary RMB still opens
+    // its context menu immediately. A sub-threshold Ctrl-RMB is a normal click.
     let mut shifted_click = None;
     let drawn_wires = wire_curves(r, state, v, &positions);
     if let Some(cut) = &mut state.cut {
         if let Some(at) = pointer {
-            if shift || cut.active { cut.update(at, &drawn_wires); }
+            if cut_mod || cut.active { cut.update(at, &drawn_wires); }
         }
         if ctx.input(|i| i.pointer.button_released(PointerButton::Secondary)) {
             let cut = state.cut.take().unwrap();
@@ -111,7 +112,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
             state.cut = None;
         }
     }
-    let right_click = ((secondary_pressed && !shift) || shifted_click.is_some()) && state.wire.is_none();
+    let right_click = ((secondary_pressed && !cut_mod) || shifted_click.is_some()) && state.wire.is_none();
     let tab = over && state.menu.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Tab));
     if !layout_frame && (right_click || tab) {
         let at = shifted_click.or(pointer).unwrap_or(r.center());

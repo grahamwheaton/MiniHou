@@ -132,31 +132,31 @@
         assert_eq!(value["display"],id.as_str());
     }
     #[test]
-    fn noodle_shift_rmb_cuts_on_release_and_plain_rmb_opens_menu() {
+    fn noodle_ctrl_rmb_cuts_on_release_and_plain_rmb_opens_menu() {
         let (f,mut state,wire)=fixture(); let ctx=egui::Context::default();
         let start=pos2(180.,278.); let end=pos2(240.,278.);
-        frame(&ctx,&f,&mut state,start,None,egui::Modifiers::SHIFT);
-        assert!(frame(&ctx,&f,&mut state,start,Some((PointerButton::Secondary,true)),egui::Modifiers::SHIFT).is_empty());
+        frame(&ctx,&f,&mut state,start,None,egui::Modifiers::CTRL);
+        assert!(frame(&ctx,&f,&mut state,start,Some((PointerButton::Secondary,true)),egui::Modifiers::CTRL).is_empty());
         assert!(state.menu.is_none());
-        assert!(frame(&ctx,&f,&mut state,end,None,egui::Modifiers::SHIFT).is_empty());
+        assert!(frame(&ctx,&f,&mut state,end,None,egui::Modifiers::CTRL).is_empty());
         assert!(state.cut.as_ref().unwrap().hits.contains(&wire));
-        let actions=frame(&ctx,&f,&mut state,end,Some((PointerButton::Secondary,false)),egui::Modifiers::SHIFT);
+        let actions=frame(&ctx,&f,&mut state,end,Some((PointerButton::Secondary,false)),egui::Modifiers::CTRL);
         assert!(matches!(actions.as_slice(),[UiAction::DisconnectWires(wires)] if wires==&BTreeSet::from([wire])));
         assert!(state.menu.is_none());
         frame(&ctx,&f,&mut state,start,Some((PointerButton::Secondary,true)),egui::Modifiers::NONE);
         assert!(state.menu.is_some());
     }
     #[test]
-    fn noodle_shift_rmb_subthreshold_is_a_context_click() {
+    fn noodle_ctrl_rmb_subthreshold_is_a_context_click() {
         let (f,mut state,_)=fixture(); let ctx=egui::Context::default(); let at=pos2(180.,278.);
-        frame(&ctx,&f,&mut state,at,None,egui::Modifiers::SHIFT);
-        frame(&ctx,&f,&mut state,at,Some((PointerButton::Secondary,true)),egui::Modifiers::SHIFT);
-        let actions=frame(&ctx,&f,&mut state,at+vec2(2.,0.),Some((PointerButton::Secondary,false)),egui::Modifiers::SHIFT);
+        frame(&ctx,&f,&mut state,at,None,egui::Modifiers::CTRL);
+        frame(&ctx,&f,&mut state,at,Some((PointerButton::Secondary,true)),egui::Modifiers::CTRL);
+        let actions=frame(&ctx,&f,&mut state,at+vec2(2.,0.),Some((PointerButton::Secondary,false)),egui::Modifiers::CTRL);
         assert!(actions.is_empty()); assert!(state.menu.is_some()); assert!(state.cut.is_none());
     }
     #[test]
     fn noodle_marquee_and_click_selection_modifiers() {
-        for modifiers in [egui::Modifiers::NONE,egui::Modifiers::SHIFT,egui::Modifiers::CTRL] {
+        for modifiers in [egui::Modifiers::NONE,egui::Modifiers::CTRL,egui::Modifiers::CTRL] {
             let (f,mut state,wire)=fixture(); let ctx=egui::Context::default();
             let other=WireRef { from:"other".into(),..wire.clone() };
             state.selected_wires=BTreeSet::from([wire.clone(),other.clone()]);
@@ -185,12 +185,12 @@
         for cancellation in 0..3 {
             let (f,mut state,_)=fixture(); let ctx=egui::Context::default();
             let start=pos2(180.,278.); let end=pos2(240.,278.);
-            frame(&ctx,&f,&mut state,start,None,egui::Modifiers::SHIFT);
-            frame(&ctx,&f,&mut state,start,Some((PointerButton::Secondary,true)),egui::Modifiers::SHIFT);
-            frame(&ctx,&f,&mut state,end,None,egui::Modifiers::SHIFT);
+            frame(&ctx,&f,&mut state,start,None,egui::Modifiers::CTRL);
+            frame(&ctx,&f,&mut state,start,Some((PointerButton::Secondary,true)),egui::Modifiers::CTRL);
+            frame(&ctx,&f,&mut state,end,None,egui::Modifiers::CTRL);
             assert!(state.cut.as_ref().unwrap().active);
             let event=if cancellation==0 { egui::Event::Key { key:egui::Key::Escape,
-                physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::SHIFT } }
+                physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::CTRL } }
                 else { egui::Event::PointerGone };
             let input=egui::RawInput { focused:cancellation!=1,events:vec![event],..Default::default() };
             let mut out=Actions::default();
