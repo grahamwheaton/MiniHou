@@ -394,4 +394,26 @@ mod tests {
         drop(server);
         assert_eq!(link_protocol::read_message(&mut peer, 1024 * 1024).unwrap().0["type"], "bye");
     }
+
+    #[test]
+    fn client_abort_is_a_quiet_disconnect() {
+        let doc = Document::parse(r#"{"nodes":{},"display":null}"#.into()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("graph.json")).unwrap();
+        let mut peer = TcpStream::connect(server.address()).unwrap();
+        send_frame(&mut peer, &json!({"type":"hello","protocol":link_protocol::PROTOCOL_VERSION,"mode":"instances"}), &Arrays::new()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while server.shared.peers.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "peer never registered");
+            thread::sleep(Duration::from_millis(5));
+        }
+        // Dropping with the welcome frame unread makes the OS abort (reset) the connection.
+        drop(peer);
+        while !server.shared.peers.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "aborted peer was not cleaned up");
+            thread::sleep(Duration::from_millis(5));
+        }
+        let started = Instant::now();
+        drop(server);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
 }
