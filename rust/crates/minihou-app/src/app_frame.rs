@@ -164,6 +164,7 @@ impl eframe::App for App {
             ui::network::set_links(ctx, &self.editor.path, self.prefs.show_parameter_links);
             let mut hidden = layout.hidden.clone();
             if !self.params_open { hidden.extend([ui::layout::PanelId::Parameters, ui::layout::PanelId::GeoInfo, ui::layout::PanelId::Spreadsheet]); }
+            let mut dock_edit = None;
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |dock_ui| {
                 use ui::layout::PanelId;
                 let (leaves, dividers) = ui::dock::place(&layout.root, dock_ui.max_rect(), &hidden);
@@ -197,6 +198,7 @@ impl eframe::App for App {
                     }
                 }
                 ui::dock::paint_dividers(dock_ui, &dividers);
+                if let Some(root) = ui::dock::interact(dock_ui, &layout.root, &leaves, &dividers) { dock_edit = Some(root); }
                 self.subnet_scope = ui::network::current_scope(ctx, &self.editor.path, self.editor.doc.value())
                     .map(|(path, inner, selected, _)| (path, if selected.is_empty() || inner["nodes"].get(&selected).is_none() {
                         let output = inner["output"].as_str().unwrap_or_default();
@@ -674,6 +676,7 @@ impl eframe::App for App {
                 }
                 });
             });
+            if let Some(root) = dock_edit { self.prefs.ui_layout.root = root; }
         }
         usd_export::show(self, ctx);
         self.python_confirm(ctx);
