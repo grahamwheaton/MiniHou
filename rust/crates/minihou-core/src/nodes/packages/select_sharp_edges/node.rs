@@ -49,20 +49,33 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
     let e = crate::topo::edges(&out.topology, out.npoints);
     let offs = &out.topology.prim_offsets;
-    let mut edge_faces = vec![Vec::new(); e.len()];
+    // Faces meeting along an edge are found by welded position, so meshes with split points (one point set per face) still
+    // see their neighbours; a cube with unshared points otherwise has one face per edge and tags nothing.
+    let pos = out.p();
+    let key = |pt: i64| {
+        let i = pt as usize * 3;
+        [0, 1, 2].map(|k| (pos[i + k] + 0.0).to_bits())
+    };
+    let mut by_key: std::collections::HashMap<([u32; 3], [u32; 3]), Vec<usize>> = std::collections::HashMap::new();
+    let ekey = |i: usize| {
+        let (a, b) = (key(e.points[i * 2]), key(e.points[i * 2 + 1]));
+        if a <= b { (a, b) } else { (b, a) }
+    };
     for prim in 0..out.nprims() {
         if !out.topology.is_closed(prim) || (offs[prim + 1] - offs[prim]) < 3 {
             continue;
         }
-        let s = offs[prim] as usize;
-        let end = offs[prim + 1] as usize;
-        for v in s..end {
+        for v in offs[prim] as usize..offs[prim + 1] as usize {
             let edge_id = e.of_vertex[v];
             if edge_id >= 0 {
-                edge_faces[edge_id as usize].push(prim);
+                let list = by_key.entry(ekey(edge_id as usize)).or_default();
+                if !list.contains(&prim) {
+                    list.push(prim);
+                }
             }
         }
     }
+    let edge_faces: Vec<Vec<usize>> = (0..e.len()).map(|i| by_key.get(&ekey(i)).cloned().unwrap_or_default()).collect();
 
     let mut sharp_mask = vec![false; e.len()];
     for (i, faces) in edge_faces.iter().enumerate() {
