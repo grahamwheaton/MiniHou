@@ -197,7 +197,9 @@ impl Modal {
                         // Follow the pointer: the amount is the pointer's motion along the axis' own screen direction,
                         // so the object moves with the mouse whichever way the camera faces.
                         let direction = projected_axis(basis[axis], camera);
-                        let amount = delta.dot(direction) / pixels_per_unit;
+                        // Divide by the axis' foreshortening so its screen motion matches the pointer; clamped so an
+                        // axis pointing into the screen does not fling the object off.
+                        let amount = delta.dot(direction) / (pixels_per_unit * axis_screen_scale(basis[axis], camera).max(0.2));
                         v = basis[axis].map(|c| c * amount);
                     }
                     Constraint::Plane(axis, _) => { v[axis] = 0.; }
@@ -272,7 +274,26 @@ impl Modal {
 /// plane in perspective and orthographic views alike. A camera without a basis (tests' default) falls back to world XY.
 pub fn view_plane_motion(motion: Vec2, camera: CameraInfo) -> [f32; 3] {
     if dot(camera.ray_right, camera.ray_right) < 1e-8 || dot(camera.ray_up, camera.ray_up) < 1e-8 { return [motion.x, -motion.y, 0.]; }
-    [0, 1, 2].map(|i| camera.ray_right[i] * motion.x - camera.ray_up[i] * motion.y)
+    // Ortho cameras carry right/up scaled by the view half-height (perspective by tan(fov/2)); only the direction matters here,
+    // the scale already lives in pixels_per_unit.
+    let n = |v: [f32; 3]| { let l = dot(v, v).sqrt(); v.map(|c| c / l) };
+    let (right, up) = (n(camera.ray_right), n(camera.ray_up));
+    [0, 1, 2].map(|i| right[i] * motion.x - up[i] * motion.y)
+}
+/// How many view-plane units the axis covers on screen per world unit (1 when it lies in the view plane, 0 along the view).
+fn axis_screen_scale(axis: [f32; 3], camera: CameraInfo) -> f32 {
+    let n = |v: [f32; 3]| { let l = dot(v, v).sqrt(); if l > 1e-8 { v.map(|c| c / l) } else { v } };
+    let (right, up) = (n(camera.ray_right), n(camera.ray_up));
+    if dot(right, right) < 0.5 || dot(up, up) < 0.5 { return 1.; }
+    Vec2::new(dot(axis, right), dot(axis, up)).length() / dot(axis, axis).sqrt().max(1e-8)
+}
+/// Screen pixels per world unit at `pivot`, measured along the view plane (the camera's right vector). World +X can point
+/// into the screen (side views), which made the old measure collapse to one pixel and fling the object off.
+pub fn view_unit_pixels(camera: CameraInfo, project: impl Fn([f32; 3]) -> Option<Pos2>, pivot: [f32; 3]) -> f32 {
+    let center = project(pivot);
+    let r = camera.ray_right; let l = dot(r, r).sqrt();
+    let r = if l > 1e-6 { r.map(|c| c / l) } else { [1., 0., 0.] };
+    center.zip(project([0, 1, 2].map(|i| pivot[i] + r[i]))).map(|(c, p)| (p - c).length()).unwrap_or(80.).max(1.)
 }
 /// The frame axis most aligned with the view direction (Blender: middle-click during G locks to it).
 pub fn view_axis(frame: [[f32; 3]; 3], camera: CameraInfo) -> usize {
@@ -563,6 +584,39 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         m.toggle_axis(0,false);m.pointer=pos2(50.,-100.);
         assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0,[0.5,0.,0.], "X still locks");
     }
+    /// An orthographic CameraInfo as camera_info() builds it: right and up are world offsets scaled by the view half-height.
+    fn ortho(forward: [f32; 3], right: [f32; 3], half_height: f32) -> CameraInfo {
+        let n = |v: [f32; 3]| { let l = dot(v, v).sqrt(); v.map(|c| c / l) };
+        let (f, r) = (n(forward), n(right));
+        let u = [r[1]*f[2]-r[2]*f[1], r[2]*f[0]-r[0]*f[2], r[0]*f[1]-r[1]*f[0]];
+        CameraInfo { ortho:true, ray_forward:f, ray_right:r.map(|c| c*half_height), ray_up:u.map(|c| c*half_height), ..Default::default() }
+    }
+    #[test] fn g_follows_the_pointer_in_ortho_views() {
+        let views = [([0.,1.,0.],[1.,0.,0.]), ([0.,0.,-1.],[1.,0.,0.]), ([-1.,0.,0.],[0.,1.,0.]), ([-1.,-1.,-1.],[1.,-1.,0.])];
+        let frame = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        for (forward, right) in views { for half_height in [0.5, 4., 40.] {
+            let camera = ortho(forward, right, half_height);
+            let n = |v: [f32; 3]| { let l = dot(v, v).sqrt(); v.map(|c| c / l) };
+            let ppu = 37.; // pixels per world unit in the view plane
+            let screen = |p: [f32; 3]| Vec2::new(dot(p, n(camera.ray_right)), -dot(p, n(camera.ray_up))) * ppu;
+            let unit = view_unit_pixels(camera, |p| Some(pos2(0.,0.) + screen(p)), [0.;3]);
+            assert!((unit - ppu).abs() < 1e-3, "unit {unit} for {forward:?}");
+            let mut m = Modal::new(Kind::Move, pos2(0.,0.), [0.;3], ([0.;3],[1.;3]), SnapTo::Increment, false, 1.);
+            m.pointer = pos2(23., -41.);
+            let v = m.desired(pos2(0.,0.), unit, frame, camera, false, 1., false).0;
+            let moved = screen(v);
+            assert!((moved - Vec2::new(23., -41.)).length() < 1e-2, "free {forward:?} h {half_height}: {moved:?}");
+            for axis in 0..3 {
+                let d = projected_axis(frame[axis], camera);
+                if Vec2::new(dot(frame[axis], camera.ray_right), dot(frame[axis], camera.ray_up)).length() < 1e-3 { continue; }
+                m.constraint = Constraint::Axis(axis, false);
+                m.pointer = pos2(0.,0.) + d * 30.;
+                let moved = screen(m.desired(pos2(0.,0.), unit, frame, camera, false, 1., false).0);
+                assert!((moved - d * 30.).length() < 1e-2, "axis {axis} {forward:?} h {half_height}: {moved:?}");
+            }
+            m.constraint = Constraint::Free;
+        } }
+    }
     #[test] fn axis_move_is_positive_when_the_mouse_moves_right_in_any_view() {
         let mut camera = perspective();
         for sign in [1.0_f32, -1.0] {
@@ -831,8 +885,7 @@ impl App {
             });
         }
         let center=ui::transform_gizmo::project(camera,self.last_viewport,modal.pivot).unwrap_or(self.last_viewport.center());
-        let unit=ui::transform_gizmo::project(camera,self.last_viewport,[modal.pivot[0]+1.,modal.pivot[1],modal.pivot[2]])
-            .map(|p|(p-center).length()).unwrap_or(80.).max(1.);
+        let unit=ui::modal_transform::view_unit_pixels(camera,|p|ui::transform_gizmo::project(camera,self.last_viewport,p),modal.pivot);
         let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
             { ui::Orientation::Local } else { self.editor_state.orientation };
         let frame=if orientation == ui::Orientation::Cursor {
