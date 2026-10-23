@@ -38,6 +38,27 @@ def candidates():
     return [(host, port) for _, host, port in sorted(records, reverse=True)[:16]]
 
 
+RETRY_MIN = 2.0
+RETRY_MAX = 30.0
+CONNECT_TIMEOUT = 0.15  # per candidate; a live loopback engine accepts in milliseconds
+CONNECT_BUDGET = 0.35   # total main-thread time one reconnect attempt may spend
+
+
+def next_retry_delay(previous):
+    """Backoff for main-thread reconnects: 2 s, 4 s, 8 s ... capped at 30 s."""
+    if not previous or previous < RETRY_MIN:
+        return RETRY_MIN
+    return min(RETRY_MAX, previous * 2.0)
+
+
+def rotate(choices, start):
+    """Try a different candidate first each attempt so a budget-limited attempt still reaches all of them."""
+    if not choices:
+        return []
+    start %= len(choices)
+    return choices[start:] + choices[:start]
+
+
 def forget_failed(host, port):
     """Remove our own discovery records after a connection attempt fails."""
     for path in directory().glob("*.json"):

@@ -41,6 +41,8 @@ _registered = False
 _rendering = False
 _busy = False
 _retry_at = 0.0
+_retry_delay = 0.0  # grows 2 s -> 30 s while MiniHou is unreachable
+_rotation = 0
 _last_error = ""
 
 
@@ -351,10 +353,19 @@ def _connection(host=None, port=None):
     if _client is None or endpoint != _endpoint or _client.sock is None:
         disconnect()
         from .instance_client import InstanceClient
-        from .discovery import candidates, forget_failed
+        from .discovery import candidates, forget_failed, rotate, CONNECT_TIMEOUT, CONNECT_BUDGET
+        global _rotation
         choices = list(dict.fromkeys([("127.0.0.1", 8765)] + candidates() + [endpoint])) if automatic else [endpoint]
+        # This runs on Blender's main thread: bound the whole attempt, not just each candidate,
+        # so a closed MiniHou never freezes the UI (Windows refuses loopback connects slowly).
+        choices = rotate(choices, _rotation)
+        _rotation += 1
+        budget_end = time.monotonic() + (CONNECT_BUDGET if automatic else 2.0)
         for address in choices:
-            client = InstanceClient(*address, timeout=0.4 if automatic else 30.0)
+            remaining = budget_end - time.monotonic()
+            if remaining <= 0:
+                break
+            client = InstanceClient(*address, timeout=min(CONNECT_TIMEOUT if automatic else 2.0, remaining))
             connected = False
             try:
                 header = client.connect()
@@ -728,7 +739,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
     All Blender access occurs here on the main thread. Content hashes suppress engine feedback.
     A failure retains the last successful cache and exposes the error through status(mod).
     """
-    global _busy, _last_error, _retry_at
+    global _busy, _last_error, _retry_at, _retry_delay
     if mesh_writer.modal_ui_active():
         return 0
     if _only is None:
@@ -896,9 +907,12 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                                                    selected_source.as_pointer() if selected_source else 0)
         _last_error = "; ".join(dict.fromkeys(errors))
         _retry_at = 0.0
+        _retry_delay = 0.0
     except Exception as exc:
+        from .discovery import next_retry_delay
         _last_error = str(exc)
-        _retry_at = time.monotonic() + 2.0
+        _retry_delay = next_retry_delay(_retry_delay)
+        _retry_at = time.monotonic() + _retry_delay
         disconnect()
         for obj, mod in locals().get("entries", []):
             if status(mod) == "Ready" or status(mod).startswith("Waiting"):
