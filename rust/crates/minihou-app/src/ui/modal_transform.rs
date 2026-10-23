@@ -23,6 +23,10 @@ impl Constraint {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchStage { Off, Pivot, Reference, Angle }
+/// Every geometric inference kind (all `SnapTo` except Increment), used for base snap picking and hover.
+pub fn base_snap_targets() -> SnapTargets {
+    SnapTargets::from_bits(SnapTo::ALL.iter().filter(|to| **to != SnapTo::Increment).fold(0u8, |bits, to| bits | (1 << *to as u8)))
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BaseStage { Off, Base, Target, SourceDirection, TargetDirection, Done }
 impl BaseStage {
@@ -126,7 +130,7 @@ impl Modal {
             } else if snap { self.snap_to.label() } else { "Off".into() },
             if self.proportional { "  Proportional" } else { "" },
             if self.base_stage != BaseStage::Off { match self.base_stage {
-                BaseStage::Base => "  Base snap: pick base", BaseStage::Target => "  Base snap: pick target",
+                BaseStage::Base => "", BaseStage::Target => "  Base snap: pick target",
                 BaseStage::SourceDirection => "  Base snap: pick source edge direction",
                 BaseStage::TargetDirection => "  Base snap: pick target direction", BaseStage::Done => "  Base snap", BaseStage::Off => "" } }
             else if self.cage { "  Cage" } else if self.sketch != SketchStage::Off { "  Two-point" }
@@ -141,7 +145,7 @@ impl Modal {
         if self.base_stage != BaseStage::Off {
             let pivot = self.base_point.unwrap_or(self.pivot);
             let values = match self.kind {
-                Kind::Move => self.base_point.zip(self.base_target).map(|(a,b)| {
+                Kind::Move => self.base_point.zip(self.base_target.or(self.target.filter(|_| self.base_stage==BaseStage::Target))).map(|(a,b)| {
                     let mut offset = base_snap_offset(a,b);
                     match self.constraint {
                         Constraint::Axis(axis, _) => {
@@ -434,6 +438,17 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
             assert_eq!(modal.base_stage,BaseStage::Base);
         }
     }
+    #[test] fn base_snap_targets_cover_every_inference_kind() {
+        let targets=base_snap_targets();
+        for to in [SnapTo::Vertex,SnapTo::Edge,SnapTo::Face,SnapTo::Volume,SnapTo::EdgeCenter] { assert!(targets.contains(to),"{to:?}"); }
+        assert!(!targets.contains(SnapTo::Increment));
+    }
+    #[test] fn b_from_move_starts_base_snap_without_prompt() {
+        let mut modal=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Vertex,false,1.);
+        modal.base_stage=BaseStage::enter(base_snap_shortcut(Key::B,true));
+        assert_eq!(modal.base_stage,BaseStage::Base);
+        for snap in [false,true] { assert!(!modal.status(snap).contains("Base snap"),"{}",modal.status(snap)); }
+    }
     #[test] fn base_snap_scale_follows_pointer_from_base() {
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let base=[2.,3.,4.];
@@ -707,7 +722,7 @@ impl App {
                 egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, .. } => {
                     if modal.base_stage!=BaseStage::Off {
                         // Point and surface features work even when incremental snapping is the current preference.
-                        let geometry=ui::SnapTargets::from_bits(0b101110);
+                        let geometry=base_snap_targets();
                         let feature=self.modal_snap_feature(pos,geometry);
                         let picked=feature.map(|feature|feature.point);
                         let plane_point=modal.base_point.unwrap_or(modal.pivot);
@@ -785,7 +800,13 @@ impl App {
         self.editor_state.proportional.enabled=modal.proportional;
         self.editor_state.proportional.radius=modal.radius;
         let snap=self.editor_state.snap.enabled ^ modifiers.ctrl;
-        if modal.base_stage==BaseStage::Off && modal.kind==ModalKind::Move && snap && modal.snap_to.geometry() {
+        if matches!(modal.base_stage,BaseStage::Base|BaseStage::Target) {
+            // Base snap hover: the indicator follows the nearest inference point before any click.
+            let feature=self.modal_snap_feature(modal.pointer,base_snap_targets());
+            modal.target=feature.map(|f|f.point);
+            modal.target_kind=feature.map(|f|f.kind);
+            modal.target_shape=feature.map(|f|f.triangle);
+        } else if modal.base_stage==BaseStage::Off && modal.kind==ModalKind::Move && snap && modal.snap_to.geometry() {
             let feature=self.modal_snap_feature(modal.pointer,modal.snap_to);
             modal.target=feature.map(|f|f.point);
             modal.target_kind=feature.map(|f|f.kind);
@@ -796,7 +817,7 @@ impl App {
                 let axis=modal.rotation_axis(frame,camera);
                 let offset=modal.base_target.map(|target|base_snap_offset(base,target)).unwrap_or([0.;3]);
                 let plane=[0,1,2].map(|i|base[i]+offset[i]);
-                let feature=self.modal_snap_feature(modal.pointer,ui::SnapTargets::from_bits(0b101110));
+                let feature=self.modal_snap_feature(modal.pointer,base_snap_targets());
                 let point=feature.map(|feature|feature.point).or_else(|| {
                     let (origin,direction)=ui::transform_gizmo::ray(camera,self.last_viewport,modal.pointer);
                     ray_plane_point(origin,direction,plane,axis)
