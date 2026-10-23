@@ -6,21 +6,47 @@
     0.0,
     0.0
    ],
-   "doc": "Offset between copies in scene units, added to the relative offset (Blender Constant Offset).",
+   "doc": "Fixed translation added to each step.",
    "kind": "vec3"
   },
   "count": {
    "default": 2,
-   "doc": "Number of copies, including the original (1 leaves the input unchanged).",
+   "doc": "Total number of copies, including the first.",
    "kind": "int",
    "max": 10000,
    "min": 1
   },
-  "merge_distance": {
-   "default": 0.0,
-   "doc": "Weld points of each copy onto the previous copy within this distance (0: no merge). Object offset is not supported.",
+  "fit_length": {
+   "default": 1.0,
+   "doc": "Distance used to calculate copies in Fit Length mode.",
    "kind": "float",
    "min": 0.0
+  },
+  "fit_type": {
+   "default": "fixed_count",
+   "doc": "Fixed Count or Fit Length. Fit Curve is reserved and reports an error.",
+   "kind": "enum",
+   "options": [
+    "fixed_count",
+    "fit_length",
+    "fit_curve"
+   ]
+  },
+  "merge_distance": {
+   "default": 0.0,
+   "doc": "Maximum distance for welding. Zero disables welding for legacy graph compatibility.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "merge_first_last": {
+   "default": false,
+   "doc": "Also weld the last regular copy with the first.",
+   "kind": "bool"
+  },
+  "merge_vertices": {
+   "default": true,
+   "doc": "Weld adjacent copies and touching caps within Merge Distance.",
+   "kind": "bool"
   },
   "relative_offset": {
    "default": [
@@ -28,8 +54,18 @@
     0.0,
     0.0
    ],
-   "doc": "Offset between copies as a fraction of the input bounds size per axis (Blender Relative Offset).",
+   "doc": "Per-axis multiple of the input geometry bounds.",
    "kind": "vec3"
+  },
+  "uv_offset_u": {
+   "default": 0.0,
+   "doc": "Shift U on each regular copy.",
+   "kind": "float"
+  },
+  "uv_offset_v": {
+   "default": 0.0,
+   "doc": "Shift V on each regular copy.",
+   "kind": "float"
   }
  },
  "assemble": {
@@ -8986,8 +9022,8 @@
    "default": "",
    "doc": "Ordered elements to route through: ids (edges also p<a>-<b>) keep their order; group names add members in element order",
    "kind": "str",
-   "pick_domain_param": "domain",
-   "pick_domain_default": "points"
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   }
  },
  "select_ring": {

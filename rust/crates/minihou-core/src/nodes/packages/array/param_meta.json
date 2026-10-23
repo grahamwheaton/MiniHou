@@ -1,0 +1,12 @@
+{
+  "fit_type": {"kind": "enum", "default": "fixed_count", "options": ["fixed_count", "fit_length", "fit_curve"], "doc": "Fixed Count or Fit Length. Fit Curve is reserved and reports an error."},
+  "count": {"kind": "int", "default": 2, "min": 1, "max": 10000, "doc": "Total number of copies, including the first."},
+  "fit_length": {"kind": "float", "default": 1.0, "min": 0.0, "doc": "Distance used to calculate copies in Fit Length mode."},
+  "relative_offset": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Per-axis multiple of the input geometry bounds."},
+  "constant_offset": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Fixed translation added to each step."},
+  "merge_vertices": {"kind": "bool", "default": true, "doc": "Weld adjacent copies and touching caps within Merge Distance."},
+  "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "doc": "Maximum distance for welding. Zero disables welding for legacy graph compatibility."},
+  "merge_first_last": {"kind": "bool", "default": false, "doc": "Also weld the last regular copy with the first."},
+  "uv_offset_u": {"kind": "float", "default": 0.0, "doc": "Shift U on each regular copy."},
+  "uv_offset_v": {"kind": "float", "default": 0.0, "doc": "Shift V on each regular copy."}
+}
