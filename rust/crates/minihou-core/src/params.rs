@@ -21,6 +21,14 @@ pub struct Params {
 impl Params {
     pub fn resolve_node(node_type: &str, specs: &[ParamSpec], given: Option<&Map<String, Value>>) -> Result<Params> {
         if node_type == "controller" { return Ok(Params { values: given.cloned().unwrap_or_default() }); }
+        if node_type == "split" {
+            if let Some(g) = given.filter(|g| g.contains_key("extract_elements")) {
+                // Older graphs stored this checkbox; the group domain now determines extraction.
+                let mut g = g.clone();
+                g.remove("extract_elements");
+                return Self::resolve(specs, Some(&g));
+            }
+        }
         if node_type == "boundary_select" {
             if let Some(g) = given.filter(|g| g.contains_key("output_group")) {
                 // Legacy alias: the removed "output_group" feeds "output_group_name" when that is still at its default.
