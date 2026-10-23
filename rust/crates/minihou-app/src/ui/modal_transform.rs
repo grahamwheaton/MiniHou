@@ -218,8 +218,11 @@ impl Modal {
                 let angle = if self.sketch == SketchStage::Angle {
                     self.sketch_reference.map(|reference| angle_between(reference, self.pointer, center)).unwrap_or(0.)
                 } else { angle_between(self.start, self.pointer, center) };
-                let angle = self.typed(0).unwrap_or_else(|| q(angle * speed));
                 let axis = match self.constraint { Constraint::Axis(a, _) => a, _ => dominant_axis(camera.ray_forward) };
+                // Follow the pointer: the screen angle turns the geometry the same way on screen, so its sign depends on
+                // whether the rotation axis points toward the viewer or away from it.
+                let angle = angle * screen_rotation_sign(frame[axis], camera);
+                let angle = self.typed(0).unwrap_or_else(|| q(angle * speed));
                 let mut v = [0.; 3]; v[axis] = angle; v
             }
             Kind::Scale => {
@@ -296,6 +299,12 @@ pub fn closest_axis(motion: Vec2, frame: [[f32; 3]; 3], camera: CameraInfo) -> u
         if direction.length_sq()<1e-8 { -1. } else { motion.dot(direction.normalized()).abs() }
     };
     (0..3).max_by(|&a,&b|score(a).total_cmp(&score(b))).unwrap_or(0)
+}
+/// Multiplier turning a screen angle (from `angle_between`, clockwise-positive on a y-down screen) into a right-handed
+/// rotation about `axis`. Seen from the axis tip (axis toward the viewer) a positive rotation is counter-clockwise on screen.
+/// A camera without a forward vector (tests' default) keeps the screen sign.
+pub fn screen_rotation_sign(axis: [f32; 3], camera: CameraInfo) -> f32 {
+    if dot(axis, camera.ray_forward) < 0. { -1. } else { 1. }
 }
 pub fn angle_between(start: Pos2, end: Pos2, pivot: Pos2) -> f32 {
     let a = start - pivot; let b = end - pivot;
@@ -535,6 +544,32 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
             camera.ray_right = [sign, 0., 0.];
             let d = rightward_axis([1., 0., 0.], camera);
             assert!(d.x > 0., "mouse right must be +X for right={sign}");
+        }
+    }
+    #[test] fn rotation_follows_the_pointer_whichever_way_the_camera_faces() {
+        // (forward, right, up, constrained axis or None for free rotation)
+        let views: [([f32;3],[f32;3],[f32;3],Option<usize>);6] = [
+            ([0.,0.,-1.],[1.,0.,0.],[0.,1.,0.],Some(2)), ([0.,0.,1.],[-1.,0.,0.],[0.,1.,0.],Some(2)),
+            ([-1.,0.,0.],[0.,1.,0.],[0.,0.,1.],Some(0)), ([1.,0.,0.],[0.,-1.,0.],[0.,0.,1.],Some(0)),
+            ([0.,0.,1.],[-1.,0.,0.],[0.,1.,0.],None), ([0.,1.,0.],[1.,0.,0.],[0.,0.,1.],None)];
+        let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        for (forward,right,up,axis) in views {
+            let mut camera=perspective(); camera.ray_forward=forward; camera.ray_right=right; camera.ray_up=up;
+            let a=axis.unwrap_or_else(|| dominant_axis(forward));
+            // A point on the screen plane through the pivot, perpendicular to the rotation axis.
+            let point=right; let screen=|p:[f32;3]| Vec2::new(dot(p,camera.ray_right),-dot(p,camera.ray_up))*100.;
+            let start=pos2(0.,0.)+screen(point);
+            let mut m=Modal::new(Kind::Rotate,start,[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+            if let Some(a)=axis { m.toggle_axis(a,false); }
+            m.pointer=start+Vec2::new(0.,20.); // drag down the screen
+            let angle=m.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0[a].to_radians();
+            // Right-handed rotation of the point about the axis.
+            let k=frame[a]; let c=angle.cos(); let s=angle.sin();
+            let cross=[k[1]*point[2]-k[2]*point[1],k[2]*point[0]-k[0]*point[2],k[0]*point[1]-k[1]*point[0]];
+            let kd=dot(k,point);
+            let rotated=[0,1,2].map(|i|point[i]*c+cross[i]*s+k[i]*kd*(1.-c));
+            let motion=screen(rotated)-screen(point);
+            assert!(angle.abs()>1e-3 && motion.y>0., "forward {forward:?} axis {a}: geometry moved {motion:?}, pointer moved down");
         }
     }
     #[test] fn middle_click_locks_the_axis_closest_to_the_view() {
