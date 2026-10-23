@@ -344,6 +344,7 @@ impl App {
                         }
                     }
                 }
+                UiAction::SetAttributeDomain { node, domain } => self.set_attribute_domain(&node, &domain),
                 UiAction::PickParameter { node, name, mode, pairs } => {
                     if let Some(active) = &self.param_pick {
                         let same = active.node == node && active.name == name;

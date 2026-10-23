@@ -126,20 +126,23 @@ fn create(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         };
         let raw_name = string("name")?;
         let name = sanitize_name(raw_name, encode_invalid)?;
-        let class = string("class")?;
+        // "domain" is the current key; stored graphs still use "class".
+        let class = if a.get("domain").is_some() { string("domain")? } else { string("class")? };
         let raw_type = string("type")?;
         let guess_from_name = a.get("guess_from_name").and_then(|v| v.as_bool()).unwrap_or(false);
         let kind = if guess_from_name { infer_type_from_name(&name) } else { raw_type };
         let existing = a.get("existing").and_then(|v| v.as_str()).unwrap_or("overwrite");
         let write_values = a.get("write_values").and_then(|v| v.as_bool()).unwrap_or(true);
         let item_group_type = a.get("group_type").and_then(|v| v.as_str()).unwrap_or(&group_type);
+        // Size and Default are optional: the channel count follows the type, the default is zero.
+        let natural = json!(natural_width(kind));
         out = create_one(
             &out,
             &name,
             class,
             kind,
-            Some(field("size")?),
-            Some(field("default")?),
+            Some(a.get("size").filter(|v| !v.is_null()).unwrap_or(&natural)),
+            a.get("default").filter(|v| !v.is_null()),
             field("value")?,
             &group,
             item_group_type,
@@ -150,6 +153,10 @@ fn create(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         )?;
     }
     Ok(out)
+}
+
+fn natural_width(kind: &str) -> usize {
+    match kind { "vector2" => 2, "vector4" => 4, "vector" | "color" | "array" => 3, _ => 1 }
 }
 
 fn components(value: &Value, w: usize, label: &str) -> Result<Vec<f64>> {
@@ -200,7 +207,7 @@ fn create_one(
     if !["overwrite", "keep", "never"].contains(&existing) {
         return Err(Error::new(format!("invalid Existing Name mode {existing:?}")));
     }
-    if !["points", "primitives", "vertices", "detail"].contains(&class) {
+    if !["points", "edges", "primitives", "vertices", "detail"].contains(&class) {
         return Err(Error::new(format!("invalid attribute class {class:?}")));
     }
     let dom = domain(class);
@@ -278,7 +285,9 @@ fn create_one(
     } else {
         domain(group_type)
     };
-    let sel = if !group.trim().is_empty() && (eval_dom == "point" || eval_dom == "prim") {
+    let sel = if dom == "edge" {
+        if group.trim().is_empty() { vec![true; n] } else { crate::nodes::edge_tools::edge_mask(g, group)? }
+    } else if !group.trim().is_empty() && (eval_dom == "point" || eval_dom == "prim") {
         if eval_dom == dom {
             crate::nodes::group::mask(g, dom, group)?
         } else {

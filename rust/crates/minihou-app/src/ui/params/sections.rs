@@ -551,75 +551,119 @@ pub fn redo_param(out: &mut Actions, id: &str, name: &str, value: Value, continu
     out.push(UiAction::Edit { edit: Edit::Param { node: id.into(), name: name.into(), value }, continuous });
 }
 
-pub fn attribute_create_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, locked: bool) {
-    let params=&v.doc["nodes"][id]["params"];
-    let mut attrs=params["attributes"].as_array().cloned().unwrap_or_else(||vec![json!({
-        "name":params["name"].as_str().unwrap_or("attrib1"),
-        "class":params["domain"].as_str().unwrap_or("points"),
-        "type":params["type"].as_str().unwrap_or("float"),
-        "size":match params["type"].as_str().unwrap_or("float") {"vector2"=>2,"vector"|"color"=>3,"vector4"=>4,_=>1},
-        "default":[0.0,0.0,0.0,0.0],
-        "value":params["value"].as_array().map_or(vec![json!(0.0),json!(0.0),json!(0.0),json!(1.0)],|a|{let mut a=a.clone();a.push(json!(1.0));a})
-    })]);
-    let before=attrs.clone();
-    ui.add_enabled_ui(!locked,|ui|{
-        ui.horizontal(|ui|{
-            ui.label("Number of Attributes");
-            let mut count=attrs.len() as u32;
-            if ui.add(egui::DragValue::new(&mut count).range(0..=64)).changed(){
-                while attrs.len() < count as usize { attrs.push(json!({"name":format!("attrib{}",attrs.len()+1),"class":"points","type":"float","size":1,"default":[0.,0.,0.,0.],"value":[0.,0.,0.,0.]})); }
-                attrs.truncate(count as usize);
-            }
-            if ui.button("+").clicked(){attrs.push(json!({"name":format!("attrib{}",attrs.len()+1),"class":"points","type":"float","size":1,"default":[0.,0.,0.,0.],"value":[0.,0.,0.,0.]}));}
-            if ui.button("Clear").clicked(){attrs.clear();}
+/// Selection Domain dropdown of Attribute Create. A change converts the node's selection group to the new domain.
+pub fn attribute_domain_row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, locked: bool) {
+    use super::attribute_model::{domain_label, DOMAINS};
+    let current = v.doc["nodes"][id]["params"]["domain"].as_str().unwrap_or("points").to_owned();
+    let mut next = current.clone();
+    ui.add_enabled_ui(!locked, |ui| {
+        ui.horizontal(|ui| {
+            ui.add_space(12.);
+            ui.label("Domain");
+            egui::ComboBox::from_id_salt((id, "attribute_create_domain")).selected_text(domain_label(&current))
+                .show_ui(ui, |ui| {
+                    for (value, label) in DOMAINS { ui.selectable_value(&mut next, value.to_owned(), label); }
+                });
         });
-        let mut remove=None;
-        for (i,a) in attrs.iter_mut().enumerate(){
-            ui.push_id(i,|ui|{
-                ui.separator();
-                ui.horizontal(|ui|{ui.strong(format!("Attribute {}",i+1));if ui.button("Remove").clicked(){remove=Some(i);}});
-                let mut name=a["name"].as_str().unwrap_or("").to_owned();
-                ui.horizontal(|ui|{
+    });
+    if next != current { out.push(UiAction::SetAttributeDomain { node: id.into(), domain: next }); }
+}
+
+pub fn attribute_create_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, locked: bool) {
+    use super::attribute_model::{blank_entry, channels, domain_label, entry_domain, set_alpha, set_type, resolve, DOMAINS, TYPES};
+    let mut attrs = resolve(&v.doc["nodes"][id]["params"]);
+    let before = attrs.clone();
+    ui.add_space(5.);
+    ui.label(egui::RichText::new("Attributes").strong().color(v.theme.accent));
+    ui.add_enabled_ui(!locked, |ui| {
+        let mut remove = None;
+        for (i, a) in attrs.iter_mut().enumerate() {
+            ui.push_id(i, |ui| {
+                if i > 0 { ui.separator(); }
+                ui.horizontal(|ui| { ui.strong(format!("Attribute {}", i + 1)); if ui.button("Remove").clicked() { remove = Some(i); } });
+                let mut name = a["name"].as_str().unwrap_or("").to_owned();
+                ui.horizontal(|ui| {
                     ui.label("Name");
-                    if ui.text_edit_singleline(&mut name).changed(){a["name"]=json!(name);}
+                    if ui.text_edit_singleline(&mut name).changed() { a["name"] = json!(name); }
                     // The attribute name stays a name; picking beside it fills the node's input group.
                     if let Some(mode) = super::pick_domain_for("attribute_create", "group",
                         param_meta("attribute_create", "group"), &json!({"attributes":[a.clone()]})) {
-                        let active = ui.ctx().data(|d| d.get_temp::<(String,String)>(egui::Id::new("param_pick_active")))
-                            .is_some_and(|(node,field)| node == id && field == "group");
+                        let active = ui.ctx().data(|d| d.get_temp::<(String, String)>(egui::Id::new("param_pick_active")))
+                            .is_some_and(|(node, field)| node == id && field == "group");
                         let arrow = super::pick::pick_button(ui, active, !locked);
                         if arrow.clicked() {
-                            out.push(UiAction::PickParameter { node:id.to_owned(), name:"group".into(), mode, pairs:false });
+                            out.push(UiAction::PickParameter { node: id.to_owned(), name: "group".into(), mode, pairs: false });
                         }
                     }
                 });
-                for (key,label,options) in [("class","Class",&["points","vertices","primitives","detail"][..]),("type","Type",&["float","int","string","vector2","vector","color","vector4"][..])]{
-                    let mut current=a[key].as_str().unwrap_or(options[0]).to_owned();
-                    ui.horizontal(|ui|{ui.label(label);egui::ComboBox::from_id_salt(key).selected_text(&current).show_ui(ui,|ui|{for option in options{ui.selectable_value(&mut current,(*option).to_owned(),*option);}});});
-                    if key=="type" && a[key]!=current {
-                        a["size"]=json!(match current.as_str(){"vector2"=>2,"vector"|"color"=>3,"vector4"=>4,_=>1});
-                        if current=="string" { a["value"]=json!(""); a["default"]=json!(""); }
-                        else if a["value"].is_string() { a["value"]=json!([0.,0.,0.,0.]); a["default"]=json!([0.,0.,0.,0.]); }
-                    }
-                    a[key]=json!(current);
+                let domain = entry_domain(a).to_owned();
+                let mut next_domain = domain.clone();
+                ui.horizontal(|ui| {
+                    ui.label("Domain");
+                    egui::ComboBox::from_id_salt("domain").selected_text(domain_label(&domain)).show_ui(ui, |ui| {
+                        for (value, label) in DOMAINS { ui.selectable_value(&mut next_domain, value.to_owned(), label); }
+                        // Stored graphs may hold vertices or detail; keep showing them.
+                        if !DOMAINS.iter().any(|(value, _)| *value == domain) { ui.selectable_value(&mut next_domain, domain.clone(), &domain); }
+                    });
+                });
+                if next_domain != domain {
+                    if let Some(object) = a.as_object_mut() { object.remove("class"); }
+                    a["domain"] = json!(next_domain);
                 }
-                let mut size=a["size"].as_u64().unwrap_or(1) as u32;
-                ui.horizontal(|ui|{ui.label("Size");ui.add(egui::DragValue::new(&mut size).range(1..=4));});a["size"]=json!(size);
-                if a["type"]=="string"{
-                    let mut value=a["value"].as_str().unwrap_or("").to_owned();
-                    ui.horizontal(|ui|{ui.label("Value");if ui.text_edit_singleline(&mut value).changed(){a["value"]=json!(value);}});
-                }else{
-                    for key in ["default","value"]{
-                        let mut values=a[key].as_array().cloned().unwrap_or_default();values.resize(4,json!(0.0));
-                        ui.horizontal(|ui|{ui.label(if key=="default"{"Default"}else{"Value"});for component in values.iter_mut().take(size as usize){let mut x=component.as_f64().unwrap_or(0.);if ui.add(egui::DragValue::new(&mut x).speed(0.1)).changed(){*component=json!(x);}}});
-                        a[key]=json!(values);
-                    }
+                let ty = a["type"].as_str().unwrap_or("float").to_owned();
+                let mut next_ty = ty.clone();
+                ui.horizontal(|ui| {
+                    ui.label("Type");
+                    egui::ComboBox::from_id_salt("type").selected_text(&ty).show_ui(ui, |ui| {
+                        for option in TYPES { ui.selectable_value(&mut next_ty, option.to_owned(), option); }
+                        if !TYPES.contains(&ty.as_str()) { ui.selectable_value(&mut next_ty, ty.clone(), &ty); }
+                    });
+                });
+                if next_ty != ty { set_type(a, &next_ty); }
+                let channel_count = channels(a);
+                if a["type"] == "string" {
+                    let mut value = a["value"].as_str().unwrap_or("").to_owned();
+                    ui.horizontal(|ui| { ui.label("Value"); if ui.text_edit_singleline(&mut value).changed() { a["value"] = json!(value); } });
+                } else {
+                    let mut values = a["value"].as_array().cloned().unwrap_or_default();
+                    values.resize(channel_count.max(values.len()), json!(0.0));
+                    let mut touched = false;
+                    let mut alpha = channel_count == 4;
+                    ui.horizontal(|ui| {
+                        ui.label("Value");
+                        let is_colour = a["type"] == "color";
+                        if is_colour {
+                            // The chip opens the colour selector; the channel boxes stay for exact numbers.
+                            let c: Vec<f32> = values.iter().map(|x| x.as_f64().unwrap_or(0.) as f32).collect();
+                            let _changed = if alpha {
+                                let mut rgba = [c[0], c[1], c[2], c[3]];
+                                let r = ui.color_edit_button_rgba_unmultiplied(&mut rgba).changed();
+                                if r { touched = true; for (k, x) in rgba.iter().enumerate() { values[k] = json!(*x as f64); } }
+                                r
+                            } else {
+                                let mut rgb = [c[0], c[1], c[2]];
+                                let r = ui.color_edit_button_rgb(&mut rgb).changed();
+                                if r { touched = true; for (k, x) in rgb.iter().enumerate() { values[k] = json!(*x as f64); } }
+                                r
+                            };
+                        }
+                        let int = a["type"] == "int";
+                        for component in values.iter_mut().take(channel_count) {
+                            let mut x = component.as_f64().unwrap_or(0.);
+                            let drag = if int { egui::DragValue::new(&mut x).speed(0.1).max_decimals(0) } else { egui::DragValue::new(&mut x).speed(0.1) };
+                            if ui.add(drag).changed() { touched = true; *component = json!(if int { x.round() } else { x }); }
+                        }
+                        if is_colour && ui.checkbox(&mut alpha, "A").changed() { set_alpha(a, alpha); values = a["value"].as_array().cloned().unwrap_or_default(); touched = false; }
+                    });
+                    if touched { values.truncate(channel_count.max(1)); a["value"] = json!(values); }
                 }
             });
         }
-        if let Some(i)=remove{attrs.remove(i);}
+        if let Some(i) = remove { attrs.remove(i); }
+        if !attrs.is_empty() { ui.separator(); }
+        if ui.button("Add attribute").clicked() { attrs.push(blank_entry(attrs.len() + 1)); }
     });
-    if attrs!=before{redo_param(out,id,"attributes",json!(attrs),false);}
+    if attrs != before { redo_param(out, id, "attributes", json!(attrs), false); }
 }
 
 #[cfg(test)]

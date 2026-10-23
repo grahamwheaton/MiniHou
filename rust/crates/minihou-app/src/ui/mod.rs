@@ -41,6 +41,8 @@ use std::collections::BTreeSet;
 /// What a panel asks the app to do.
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    /// Attribute Create Domain dropdown: set the node's domain and convert its selection group to it.
+    SetAttributeDomain { node: String, domain: String },
     PickParameter { node: String, name: String, mode: SelectionMode, pairs: bool },
     /// Output group target button clicked: select that group's elements on the node's own output.
     SelectOutputGroup { node: String, name: String },

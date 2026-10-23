@@ -441,6 +441,20 @@
     }
 
     #[test]
+    fn convert_group_follows_the_domain_change() {
+        let t = topo(&grid(4, 3));
+        let faces = t.convert_group("0 1", Faces, Points);
+        let points = t.parse_group(&faces, Points).points;
+        assert!(points.len() >= 4 && points.contains(&0));
+        // points back up to the faces they fully contain
+        assert_eq!(t.convert_group(&faces, Points, Faces), "0 1");
+        let edges = t.convert_group("0 1", Faces, Edges);
+        assert!(edges.starts_with('p'));
+        assert_eq!(t.convert_group("", Points, Faces), "");
+        assert_eq!(t.convert_group("1 2", Points, Points), "1 2");
+    }
+
+    #[test]
     fn attribute_create_tab_add_uses_selected_elements_as_context() {
         let t = topo(&grid(4, 3));
         assert_eq!(find_input_group_field("attribute_create"), Some(("group", Some("domain"))));
@@ -448,8 +462,9 @@
         assert_eq!(t.node_params("attribute_create", &points), Some(serde_json::json!({
             "group":"2 5", "domain":"points", "group_type":"points"})));
         let edges = Selection { edges: vec![(6, 7), (7, 8)], ..sel(Edges) };
+        let edge_ids = t.ids(&edges);
         assert_eq!(t.node_params("attribute_create", &edges), Some(serde_json::json!({
-            "group":"6 7 8", "domain":"points", "group_type":"points"})));
+            "group":t.tokens(Edges, &edge_ids).join(" "), "domain":"edges", "group_type":"edges"})));
         let faces = Selection { tris: vec![0, 1, 2, 3], ..sel(Faces) };
         assert_eq!(t.node_params("attribute_create", &faces), Some(serde_json::json!({
             "group":"0 1", "domain":"primitives", "group_type":"primitives"})));

@@ -202,7 +202,7 @@
   },
   "attributes": {
    "default": null,
-   "doc": "Repeatable attribute entries with Name, Class, Type, Size, Default, and Value.",
+   "doc": "Attribute entries with Name, Domain, Type, and Value; the value channels follow the type.",
    "kind": "json"
   },
   "class": {
@@ -223,10 +223,11 @@
   },
   "domain": {
    "default": "points",
-   "doc": "Geometry domain receiving the new attribute.",
+   "doc": "Domain of the selection group: points, edges or faces. Changing it converts the selection.",
    "kind": "enum",
    "options": [
     "points",
+    "edges",
     "primitives",
     "vertices",
     "detail"

@@ -93,6 +93,23 @@ impl App {
             self.editor.doc = original;
         }
     }
+    /// Change an Attribute Create node's selection Domain, converting its group to the new domain.
+    pub(crate) fn set_attribute_domain(&mut self, id: &str, domain: &str) {
+        let topology = self.active_topology();
+        let Some(value) = attribute_domain_doc(self.editor.doc.value(), id, domain, topology.as_ref()) else { return; };
+        self.finish_history();
+        self.commit_document(value, "set attribute domain");
+    }
+    fn active_topology(&self) -> Option<element_select::Topology> {
+        let range=active_range(self.active_object()?,&self.display_ranges)?;
+        let global=self.scene.as_ref()?;
+        let positions=global.positions().get(range.start as usize*3..range.end as usize*3)?;
+        let triangles=global.triangle_indices().chunks_exact(3).filter(|tri|tri.iter().all(|p|range.contains(p)))
+            .flat_map(|tri|tri.iter().map(|p|*p-range.start)).collect::<Vec<_>>();
+        let edges=global.edge_indices().chunks_exact(2).filter(|edge|edge.iter().all(|p|range.contains(p)))
+            .flat_map(|edge|edge.iter().map(|p|*p-range.start)).collect::<Vec<_>>();
+        Some(element_select::Topology::new(positions,&triangles,&edges))
+    }
     pub(crate) fn selection_node_params(&self, node_type: &str) -> Option<Value> {
         if self.editor_state.selection == ui::SelectionMode::Object || self.selection.mode != self.editor_state.selection { return None; }
         let range=active_range(self.active_object()?,&self.display_ranges)?;
@@ -119,6 +136,22 @@ fn lattice_grid_fit_params(positions: &[f32]) -> Option<Value> {
         "center": ([0, 1, 2].map(|axis| (lo[axis] + hi[axis]) * 0.5)),
         "size": ([0, 1, 2].map(|axis| hi[axis] - lo[axis])),
     }))
+}
+
+/// The document with the node's Domain set and its group re-expressed in that domain. `None` when nothing changes.
+pub(crate) fn attribute_domain_doc(doc: &Value, id: &str, domain: &str, topology: Option<&element_select::Topology>) -> Option<Value> {
+    let params = &doc["nodes"][id]["params"];
+    let old = params["domain"].as_str().unwrap_or("points");
+    let group = params["group"].as_str().unwrap_or("");
+    let converted = match (topology, element_select::domain_mode(old), element_select::domain_mode(domain)) {
+        (Some(t), Some(from), Some(to)) => t.convert_group(group, from, to),
+        // No geometry to convert on: a group written for another domain would mean other elements, so drop it.
+        _ if old != domain => String::new(),
+        _ => group.to_owned(),
+    };
+    let mut value = doc.clone();
+    merge_params(&mut value, id, json!({"domain": domain, "group_type": domain, "group": converted}));
+    (value != *doc).then_some(value)
 }
 
 fn selection_autofill_doc(doc: &Value, id: &str, params: Value) -> Option<Value> {
@@ -176,5 +209,27 @@ mod autofill_tests {
             assert_eq!(center - size * 0.5, lo[axis]);
             assert_eq!(center + size * 0.5, hi[axis]);
         }
+    }
+}
+
+#[cfg(test)]
+mod attribute_domain_tests {
+    use super::*;
+
+    #[test]
+    fn domain_change_converts_the_selection_group() {
+        let t = element_select::Topology::new(
+            &[0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.],
+            &[0,1,2, 0,2,3], &[0,1, 1,2, 2,3, 3,0, 0,2]);
+        let doc = json!({"nodes":{"a":{"type":"attribute_create","params":{"group":"0","domain":"primitives","group_type":"primitives"}}}});
+        let to_points = attribute_domain_doc(&doc, "a", "points", Some(&t)).unwrap();
+        assert_eq!(to_points["nodes"]["a"]["params"]["domain"], "points");
+        assert_eq!(to_points["nodes"]["a"]["params"]["group_type"], "points");
+        assert_eq!(to_points["nodes"]["a"]["params"]["group"], "0 1 2");
+        let back = attribute_domain_doc(&to_points, "a", "primitives", Some(&t)).unwrap();
+        assert_eq!(back["nodes"]["a"]["params"]["group"], "0");
+        // without geometry a group of another domain is dropped; the same domain changes nothing
+        assert_eq!(attribute_domain_doc(&doc, "a", "edges", None).unwrap()["nodes"]["a"]["params"]["group"], "");
+        assert!(attribute_domain_doc(&doc, "a", "primitives", Some(&t)).is_none());
     }
 }
