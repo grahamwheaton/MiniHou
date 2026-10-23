@@ -422,12 +422,6 @@ def meta() -> dict:
         "output_group": {"kind": "bool", "default": False, "doc": "Write the faces that were flipped to a primitive group."},
         "output_group_name": {"kind": "str", "default": "flipped", "enabled_if": {"output_group": True}, "doc": "Name of the flipped faces' group."},
     }
-    out["array"] = {
-        "count": {"kind": "int", "default": 2, "min": 1, "max": 10000, "doc": "Number of copies, including the original (1 leaves the input unchanged)."},
-        "relative_offset": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Offset between copies as a fraction of the input bounds size per axis (Blender Relative Offset)."},
-        "constant_offset": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Offset between copies in scene units, added to the relative offset (Blender Constant Offset)."},
-        "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "doc": "Weld points of each copy onto the previous copy within this distance (0: no merge). Object offset is not supported."},
-    }
     out["tris_to_quads"] = {
         "group": {"kind": "str", "default": "", "doc": "Faces to merge (empty: all triangles)."},
         "face_threshold": {"kind": "float", "default": 40.0, "min": 0.0, "max": 180.0, "doc": "Maximum angle between the two triangle normals, in degrees (Blender Max Face Angle)."},
@@ -509,9 +503,19 @@ def meta() -> dict:
     # Rust-only native instances for Copy to Points (nodes/packed.rs); off keeps the Python-identical copy.
     out["copy_to_points"]["pack_instances"] = {"kind": "bool", "default": True, "doc": "Output native instances (one point per copy referencing the shared source, with its transform) instead of copying the source geometry; Unpack converts them to real geometry."}
     for node_id, params in package_meta().items():
-        if node_id in out:
-            raise ValueError(f"package node id conflicts with existing metadata: {node_id}")
+        # A package takes over metadata when a legacy node moves into it.
         out[node_id] = params
+    out["grow"]["use_flow"] = {
+        "kind": "bool", "default": False, "enabled_if": {"mode": "grow"},
+        "doc": "Grow along the selection's direction (a line of edges keeps running the way it points) instead of in all directions; grow only, ignored when the selection has no clear direction",
+    }
+    out["boundary_select"]["output_group"] = {
+        "kind": "str", "default": "",
+        "doc": "Output edge group name. When set, it overrides output_group_name; when empty, output_group_name is used.",
+    }
+    out["select_loop"]["seeds"]["pick_domain"] = "edges"
+    out["select_ring"]["seeds"]["pick_domain"] = "edges"
+    out["select_path"]["waypoints"].update({"pick_domain_param": "domain", "pick_domain_default": "points"})
     # Noise gained a Blend strength (mix between the input and the noisy value, 0 to 1).
     out.setdefault("noise", {})["blend"] = {"kind": "float", "default": 1.0, "soft_min": 0.0, "soft_max": 1.0, "doc": "Mix between the input value (0) and the noisy value (1)."}
     # Noise and Mountain: every NodeSpec parameter gets its declared kind/default and a specific help line.
@@ -564,7 +568,7 @@ def meta() -> dict:
             continue
         _block = _src[_src.index('name: "%s"' % _node):]
         _block = _block[_block.index('params: crate::params!('):]
-        _block = _block[:_block.index(");")]
+        _block = _block[:_block.index("),")]
         for _key, _val in _re.findall(r'"([a-z_0-9]+)"\s*:\s*([^;\n]+?)\s*[;\n]', _block):
             _v = _val.strip().rstrip(";").strip()
             if _v in ("true", "false"):
