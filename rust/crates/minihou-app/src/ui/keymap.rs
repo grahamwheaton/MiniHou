@@ -167,6 +167,8 @@ impl Command {
 pub struct Binding { pub chord: Chord, pub command: Command, pub context: Context }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KeyContext<'a> { pub viewport_hovered: bool, pub network_hovered: bool, pub in_edit_mode: bool, pub selected: Option<&'a str> }
+/// A viewport draw tool owns the keyboard only while the mouse is not over the node editor, so X and Delete work there.
+pub fn draw_tool_blocks_keymap(tool_drawing: bool, network_hovered: bool) -> bool { tool_drawing && !network_hovered }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Conflict { pub command: Command, pub chord: Chord, pub context: Context }
 #[derive(Clone, Debug)]
@@ -395,6 +397,13 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
 ];
 
 #[cfg(test)] mod tests {
+    #[test] fn draw_tool_only_blocks_keymap_outside_the_node_editor() {
+        use super::draw_tool_blocks_keymap as blocks;
+        assert!(blocks(true, false));
+        assert!(!blocks(true, true));
+        assert!(!blocks(false, false));
+        assert!(!blocks(false, true));
+    }
     use super::*;
     #[test] fn f2_renames_the_selected_network_node_only() {
         for (network, selected, expected) in [(true, Some("box1"), Some("box1")),
