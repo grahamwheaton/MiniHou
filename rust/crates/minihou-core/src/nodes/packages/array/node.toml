@@ -1,5 +1,5 @@
 id = "array"
 name = "Array"
 category = "Model"
-description = "Repeat geometry with Blender Array Legacy offsets, fit, welding and caps."
-keywords = "array repeat duplicate fit cap merge offset uv"
+description = "Repeat geometry in a line, grid or circle, as Blender's Array node, with welding and UV offsets."
+keywords = "array repeat duplicate line grid radial circle endpoint merge offset uv"

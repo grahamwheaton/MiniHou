@@ -1,12 +1,14 @@
 {
-  "fit_type": {"kind": "enum", "default": "fixed_count", "options": ["fixed_count", "fit_length", "fit_curve"], "doc": "Fixed Count or Fit Length. Fit Curve is reserved and reports an error."},
+  "mode": {"kind": "enum", "default": "line", "options": ["line", "grid", "radial"], "doc": "Arrangement of the copies: Line, Grid or Radial."},
+  "spacing": {"kind": "enum", "default": "relative", "options": ["relative", "offset", "endpoint"], "doc": "Line spacing: Relative steps by the input bounds, Offset by a fixed translation, Endpoint spreads the copies up to a point."},
   "count": {"kind": "int", "default": 2, "min": 1, "max": 10000, "doc": "Total number of copies, including the first."},
-  "fit_length": {"kind": "float", "default": 1.0, "min": 0.0, "doc": "Distance used to calculate copies in Fit Length mode."},
-  "relative_offset": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Per-axis multiple of the input geometry bounds."},
-  "constant_offset": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Fixed translation added to each step."},
-  "merge_vertices": {"kind": "bool", "default": true, "doc": "Weld adjacent copies and touching caps within Merge Distance."},
+  "relative_offset": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Per-axis step as a multiple of the input bounds (Relative spacing)."},
+  "constant_offset": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Fixed translation per step (Offset spacing); also added in Relative spacing."},
+  "endpoint": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Position of the last copy (Endpoint spacing)."},
+  "legacy_fit_length": {"kind": "float", "default": -1.0, "doc": "Set by migration from the old Fit Length: the count comes from this length and the step. Negative disables it."},
+  "merge_vertices": {"kind": "bool", "default": true, "doc": "Weld adjacent copies within Merge Distance."},
   "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "doc": "Maximum distance for welding. Zero disables welding for legacy graph compatibility."},
-  "merge_first_last": {"kind": "bool", "default": false, "doc": "Also weld the last regular copy with the first."},
-  "uv_offset_u": {"kind": "float", "default": 0.0, "doc": "Shift U on each regular copy."},
-  "uv_offset_v": {"kind": "float", "default": 0.0, "doc": "Shift V on each regular copy."}
+  "merge_first_last": {"kind": "bool", "default": false, "doc": "Also weld the last copy with the first."},
+  "uv_offset_u": {"kind": "float", "default": 0.0, "doc": "Shift U on each copy by its copy number."},
+  "uv_offset_v": {"kind": "float", "default": 0.0, "doc": "Shift V on each copy by its copy number."}
 }

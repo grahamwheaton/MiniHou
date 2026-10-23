@@ -6,7 +6,7 @@
     0.0,
     0.0
    ],
-   "doc": "Fixed translation added to each step.",
+   "doc": "Fixed translation per step (Offset spacing); also added in Relative spacing.",
    "kind": "vec3"
   },
   "count": {
@@ -16,21 +16,19 @@
    "max": 10000,
    "min": 1
   },
-  "fit_length": {
-   "default": 1.0,
-   "doc": "Distance used to calculate copies in Fit Length mode.",
-   "kind": "float",
-   "min": 0.0
+  "endpoint": {
+   "default": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Position of the last copy (Endpoint spacing).",
+   "kind": "vec3"
   },
-  "fit_type": {
-   "default": "fixed_count",
-   "doc": "Fixed Count or Fit Length. Fit Curve is reserved and reports an error.",
-   "kind": "enum",
-   "options": [
-    "fixed_count",
-    "fit_length",
-    "fit_curve"
-   ]
+  "legacy_fit_length": {
+   "default": -1.0,
+   "doc": "Set by migration from the old Fit Length: the count comes from this length and the step. Negative disables it.",
+   "kind": "float"
   },
   "merge_distance": {
    "default": 0.0,
@@ -40,13 +38,23 @@
   },
   "merge_first_last": {
    "default": false,
-   "doc": "Also weld the last regular copy with the first.",
+   "doc": "Also weld the last copy with the first.",
    "kind": "bool"
   },
   "merge_vertices": {
    "default": true,
-   "doc": "Weld adjacent copies and touching caps within Merge Distance.",
+   "doc": "Weld adjacent copies within Merge Distance.",
    "kind": "bool"
+  },
+  "mode": {
+   "default": "line",
+   "doc": "Arrangement of the copies: Line, Grid or Radial.",
+   "kind": "enum",
+   "options": [
+    "line",
+    "grid",
+    "radial"
+   ]
   },
   "relative_offset": {
    "default": [
@@ -54,17 +62,27 @@
     0.0,
     0.0
    ],
-   "doc": "Per-axis multiple of the input geometry bounds.",
+   "doc": "Per-axis step as a multiple of the input bounds (Relative spacing).",
    "kind": "vec3"
+  },
+  "spacing": {
+   "default": "relative",
+   "doc": "Line spacing: Relative steps by the input bounds, Offset by a fixed translation, Endpoint spreads the copies up to a point.",
+   "kind": "enum",
+   "options": [
+    "relative",
+    "offset",
+    "endpoint"
+   ]
   },
   "uv_offset_u": {
    "default": 0.0,
-   "doc": "Shift U on each regular copy.",
+   "doc": "Shift U on each copy by its copy number.",
    "kind": "float"
   },
   "uv_offset_v": {
    "default": 0.0,
-   "doc": "Shift V on each regular copy.",
+   "doc": "Shift V on each copy by its copy number.",
    "kind": "float"
   }
  },
@@ -238,7 +256,7 @@
   },
   "attributes": {
    "default": null,
-   "doc": "Attribute entries with Name, Domain, Type, and Value; the value channels follow the type.",
+   "doc": "Repeatable attribute entries with Name, Class, Type, Size, Default, and Value.",
    "kind": "json"
   },
   "class": {
@@ -259,11 +277,10 @@
   },
   "domain": {
    "default": "points",
-   "doc": "Domain of the selection group: points, edges or faces. Changing it converts the selection.",
+   "doc": "Geometry domain receiving the new attribute.",
    "kind": "enum",
    "options": [
     "points",
-    "edges",
     "primitives",
     "vertices",
     "detail"
@@ -6223,7 +6240,11 @@
    "default": "points",
    "doc": "Element domain used to select points to relax",
    "kind": "enum",
-   "options": ["points", "edges", "primitives"]
+   "options": [
+    "points",
+    "edges",
+    "primitives"
+   ]
   },
   "group": {
    "default": "",
@@ -6251,6 +6272,38 @@
    "default": true,
    "doc": "Take N from the surface where each point lands",
    "kind": "bool"
+  }
+ },
+ "points_attract": {
+  "domain": {
+   "default": "points",
+   "doc": "Domain of the target group",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Target group or pattern; empty uses every other point as a target",
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
+  },
+  "iterations": {
+   "default": 1,
+   "doc": "Number of attraction passes",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 100
+  },
+  "strength": {
+   "default": 0.5,
+   "doc": "Fraction of the distance to the nearest target moved on each pass",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
   }
  },
  "points_to_surface": {
@@ -10930,7 +10983,6 @@
   "snippet": {
    "default": "@P.z += sin(@P.x)",
    "doc": "VEX-like expression run over every element, e.g. '@P.z += sin(@P.x * 2) * 0.5'. See the wrangle reference.",
-   "label": "code",
    "kind": "str"
   }
  }

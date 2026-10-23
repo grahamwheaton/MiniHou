@@ -41,6 +41,11 @@ impl Params {
                 return Self::resolve(specs, Some(&g));
             }
         }
+        if node_type == "array" {
+            if let Some(g) = given.map(crate::nodes::array_migrate).transpose()?.flatten() {
+                return Self::resolve(specs, Some(&g));
+            }
+        }
         if node_type == "switch" {
             if let Some(g) = given.filter(|g| g.contains_key("select")) {
                 // Legacy: the removed "select" slider is ignored so older graphs still load.
