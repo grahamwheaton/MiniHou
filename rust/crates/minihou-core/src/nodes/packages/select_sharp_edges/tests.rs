@@ -134,3 +134,22 @@ fn test_flat_grid_has_no_sharp_edges() {
         assert_eq!(edge_group_count(&out, "sharp_edges"), 0, "angle {angle}");
     }
 }
+
+#[test]
+fn test_cube_with_split_points_tags_all_edges() {
+    // every face owns its own 4 points (24 points), so no edge is shared in the topology
+    let c = cube();
+    let (mut p, mut vp, mut offs) = (Vec::new(), Vec::new(), vec![0]);
+    let src = c.p().to_vec();
+    for (n, &v) in c.topology.vertex_point.iter().enumerate() {
+        p.extend_from_slice(&src[v as usize * 3..v as usize * 3 + 3]);
+        vp.push(n as i32);
+        if (n + 1) % 4 == 0 {
+            offs.push(n as i32 + 1);
+        }
+    }
+    let g = Geometry::from_arrays(p, vp, offs, None).unwrap();
+    let out = run(&g, serde_json::json!({})).unwrap();
+    // 24 topological edges, each cube edge appears twice
+    assert_eq!(edge_group_count(&out, "sharp_edges"), 24);
+}
