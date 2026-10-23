@@ -54,7 +54,10 @@ impl eframe::App for App {
         let busy = self.modal.is_some() || self.model_modal.is_some() || self.mirror.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx) || ui::curve_tool::active(ctx);
         let fly_frame = viewport_input::fly(ctx, self.last_viewport, &mut self.camera,
             self.prefs.viewport.fly_navigation && !busy && !ui::selection_region::active(ctx) && !ctx.wants_keyboard_input());
-        if busy && !fly_frame && !ui::sketch::active(ctx) && !self.editor_state.tool.drawing() {
+        // B during a G/R/S modal is base snap (handled in update_modal), not the box select interrupt.
+        let selection_interrupt = ui::modal_transform::selection_may_interrupt(self.modal.is_some(),
+            ctx.input(|i| i.key_pressed(egui::Key::B)));
+        if busy && selection_interrupt && !fly_frame && !ui::sketch::active(ctx) && !self.editor_state.tool.drawing() {
             let selection_actions = self.keymap.poll_selection(ctx, &KeyContext {
                 viewport_hovered: self.viewport_hover, network_hovered: false,
                 in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) });

@@ -31,6 +31,11 @@ impl BaseStage {
 pub fn base_snap_shortcut(key: Key, transform_active: bool) -> bool {
     key==Key::B && transform_active
 }
+/// Selection shortcuts may interrupt a busy viewport, except B during a keyboard (G/R/S) transform: the modal owns B
+/// there and turns it into base snap instead of box select.
+pub fn selection_may_interrupt(keyboard_modal_active: bool, b_pressed: bool) -> bool {
+    !(keyboard_modal_active && b_pressed)
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CageHandle { Face(usize, bool), Corner([bool; 3]) }
 
@@ -413,6 +418,11 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         assert!((rotate_alignment_angle(base,source,target,[0.,0.,1.]).unwrap()-90.).abs()<1e-5);
         assert!((rotate_alignment_angle(base,target,source,[0.,0.,1.]).unwrap()+90.).abs()<1e-5);
         assert_eq!(rotate_alignment_angle(base,[1.,2.,4.],target,[0.,0.,1.]),None);
+    }
+    #[test] fn b_during_a_keyboard_transform_is_not_a_selection_interrupt() {
+        assert!(!selection_may_interrupt(true,true), "B in a G/R/S modal belongs to base snap");
+        assert!(selection_may_interrupt(true,false));
+        assert!(selection_may_interrupt(false,true), "B outside a keyboard modal still box-selects");
     }
     #[test] fn b_enters_base_snap_only_during_modal_transform() {
         assert!(!base_snap_shortcut(Key::B,false));
