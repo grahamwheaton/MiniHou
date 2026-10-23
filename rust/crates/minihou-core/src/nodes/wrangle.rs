@@ -526,9 +526,7 @@ fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &s
     };
     if let Some(c) = component {
         if c >= width {
-            return Err(Error::new(
-                "destination component is outside attribute width",
-            ));
+            return Err(Error::new(format!("@{name} has width {width}; requested component {} needs width {}", c + 1, c + 1)));
         }
     }
     if prefix == "f" && width != 1
@@ -536,16 +534,12 @@ fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &s
         || prefix == "u" && width != 2
         || prefix == "p" && width != 4
     {
-        return Err(Error::new(
-            "declared attribute width differs from existing attribute",
-        ));
+        let requested = match prefix { "f" => 1, "u" => 2, "v" => 3, _ => 4 };
+        return Err(Error::new(format!("@{name} has existing width {width}; requested width {requested}")));
     }
     let expected = if component.is_some() { 1 } else { width };
     if rhs.len() != expected {
-        return Err(Error::new(format!(
-            "assignment needs {expected} component(s), got {}",
-            rhs.len()
-        )));
+        return Err(Error::new(format!("@{name} has existing width {expected}; requested width {}", rhs.len())));
     }
     let integer = d
         .table(g)
@@ -615,12 +609,14 @@ fn wrangle(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let snippet = p.s("snippet")?;
     let selected = mask(&source, d, &p.s("group")?)?;
     let mut out = (*source).clone();
+    let mut statement_number = 0;
     for (line, text) in snippet.lines().enumerate() {
         let text = text.split("//").next().unwrap_or("");
         for statement in text.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            statement_number += 1;
             let (left, right) = statement
                 .split_once('=')
-                .ok_or_else(|| Error::new(format!("line {}: expected assignment", line + 1)))?;
+                .ok_or_else(|| Error::new(format!("line {}, statement {statement_number}: expected assignment; source: {statement}", line + 1)))?;
             let left = left.trim();
             let (target, op) = match left.as_bytes().last() {
                 Some(b'+') => (&left[..left.len() - 1], "+"),
@@ -632,7 +628,7 @@ fn wrangle(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             for (i, &choose) in selected.iter().enumerate() {
                 if choose {
                     assign(&mut out, d, i, target.trim(), op, right.trim(), inputs).map_err(|e| {
-                        Error::new(format!("{} {i}, line {}: {e}", d.label(), line + 1))
+                        Error::new(format!("{} {i}, line {}, statement {statement_number}: {e}; source: {statement}", d.label(), line + 1))
                     })?;
                 }
             }
