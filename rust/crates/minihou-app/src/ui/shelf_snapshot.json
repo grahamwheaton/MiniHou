@@ -803,6 +803,11 @@
         "code"
       ],
       [
+        "Ambient Occlusion",
+        "ambient_occlusion",
+        "ambient_occlusion"
+      ],
+      [
         "Attribute Delete",
         "attribute_delete",
         "attribute_delete"
