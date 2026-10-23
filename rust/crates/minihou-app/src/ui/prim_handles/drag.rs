@@ -93,8 +93,8 @@ pub fn compute_edits_for_drag(
             let new_r = (start_r + local_delta).max(0.0);
             out.push(("radius", json!(new_r)));
         }
-        GripAction::IntStep { param, min, max, step_scale } => {
-            let start_val = get_i64(&drag.start_params, param, min);
+        GripAction::IntStep { param, default, min, max, step_scale } => {
+            let start_val = get_i64(&drag.start_params, param, default);
             let steps = (pixels / (10.0 * step_scale)).round() as i64;
             let new_val = (start_val + steps).clamp(min, max);
             out.push((param, json!(new_val)));

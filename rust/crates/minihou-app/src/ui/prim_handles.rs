@@ -78,7 +78,7 @@ pub enum GripAction {
     BoxFace { axis: usize, sign: f64 },
     BoxCorner,
     SphereRadius,
-    IntStep { param: &'static str, min: i64, max: i64, step_scale: f32 },
+    IntStep { param: &'static str, default: i64, min: i64, max: i64, step_scale: f32 },
     TubeRadiusTop,
     TubeRadiusBottom,
     TubeHeight,
@@ -297,7 +297,7 @@ mod tests {
             screen_dir: Vec2::new(0.0, 10.0),
             span: 10.0,
             start_params,
-            action: GripAction::IntStep { param: "columns", min: 3, max: 4096, step_scale: 1.0 },
+            action: GripAction::IntStep { param: "columns", default: 32, min: 3, max: 4096, step_scale: 1.0 },
             world_dir: [0.0, 1.0, 0.0],
             camera: CameraInfo::default(),
             rect: Rect::NOTHING,
@@ -322,6 +322,7 @@ mod tests {
             for (param, start) in [("rows", rows), ("columns", columns)] {
                 let grip = grips.iter().find(|grip| matches!(grip.action,
                     GripAction::IntStep { param: name, .. } if name == param)).unwrap();
+                let GripAction::IntStep { min, .. } = &grip.action else { unreachable!() };
                 let drag = PrimDrag {
                     node: "primitive".into(),
                     start_pointer: pos2(100.0, 100.0),
@@ -333,7 +334,7 @@ mod tests {
                     camera: CameraInfo::default(),
                     rect: Rect::NOTHING,
                 };
-                for (delta, expected) in [(0.0, start), (20.0, start + 2)] {
+                for (delta, expected) in [(0.0, start), (20.0, start + 2), (-20.0, (start - 2).max(*min))] {
                     let edits = compute_edits_for_drag(&drag, pos2(100.0 + delta, 100.0), false);
                     assert_eq!(edits, vec![(param, json!(expected))], "{node_type} {param} at {delta}px");
                 }
