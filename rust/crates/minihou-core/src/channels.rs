@@ -75,6 +75,29 @@ pub fn resolve_graph(graph: &Graph) -> ResolvedChannels {
     r.result
 }
 
+/// Parameters of the nodes inside the subnet at `path` (outer ids from the root), resolved with the
+/// enclosing subnets' promoted values applied, keyed by inner id. `overridden` holds the
+/// (inner id, param) pairs whose value comes from a promotion on the subnet at `path`.
+pub struct ScopeResolved { pub resolved: ResolvedChannels, pub overridden: HashSet<(String, String)> }
+
+pub fn resolve_scope(root: &Value, path: &[String]) -> Option<ScopeResolved> {
+    if path.is_empty() { return None; }
+    let mut expanded = root.clone();
+    expanded["nodes"] = Value::Object(crate::graph::expand_subnets(root["nodes"].as_object()?).ok()??);
+    let all = resolve_graph(&Graph::from_value(&expanded).ok()?);
+    let prefix = format!("{}/", path.join("/"));
+    let inner_id = |id: &str| id.strip_prefix(&prefix).filter(|rest| !rest.contains('/')).map(str::to_owned);
+    let mut resolved = ResolvedChannels::default();
+    for (id, values) in all.params { if let Some(inner) = inner_id(&id) { resolved.params.insert(inner, values); } }
+    for mut diag in all.diagnostics { if let Some(inner) = inner_id(&diag.node) { diag.node = inner; resolved.diagnostics.push(diag); } }
+    for id in all.time_dependent { if let Some(inner) = inner_id(&id) { resolved.time_dependent.insert(inner); } }
+    let mut subnet = &root["nodes"][&path[0]];
+    for id in &path[1..] { subnet = &subnet["inner"]["nodes"][id]; }
+    let overridden = nodes::subnet_public_params(subnet).into_iter()
+        .filter_map(|p| Some((p["node"].as_str()?.to_owned(), split_component(p["param"].as_str()?).0.to_owned()))).collect();
+    Some(ScopeResolved { resolved, overridden })
+}
+
 fn valid_address(specs:&[crate::params::ParamSpec],name:&str)->bool {
     let (base,component)=split_component(name);
     specs.iter().any(|s|s.name==base && (component.is_none() || (s.default)().as_array().is_some_and(|a|a.len()==3)))

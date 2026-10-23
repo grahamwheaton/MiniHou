@@ -35,8 +35,30 @@ pub mod row;
 pub use row::ParamRowLayout;
 pub(crate) use row::*;
 
+const SCOPE_KEY: &str = "param_panel_scope";
+
+/// Set (or clear with `None`) the subnet scope the next `show` call resolves against.
+pub fn set_scope(ctx: &egui::Context, root: Option<(&serde_json::Value, &[String])>) {
+    let scope = root.and_then(|(doc, path)| minihou_core::channels::resolve_scope(doc, path));
+    ctx.data_mut(|d| match scope {
+        Some(scope) => d.insert_temp(egui::Id::new(SCOPE_KEY), std::sync::Arc::new(scope)),
+        None => d.remove::<std::sync::Arc<minihou_core::channels::ScopeResolved>>(egui::Id::new(SCOPE_KEY)),
+    });
+}
+
+pub(crate) fn promoted_override(ctx: &egui::Context, id: &str, param: &str) -> bool {
+    ctx.data(|d| d.get_temp::<std::sync::Arc<minihou_core::channels::ScopeResolved>>(egui::Id::new(SCOPE_KEY)))
+        .is_some_and(|scope| scope.overridden.contains(&(id.to_owned(), param.to_owned())))
+}
+
 pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
-    if let Ok(graph)=minihou_core::Graph::from_value(v.doc) {
+    // Inside a subnet the caller stores values resolved against the whole document, so promoted
+    // overrides from the subnet show on the inner nodes; see `set_scope`.
+    let scope = ui.ctx().data(|d| d.get_temp::<std::sync::Arc<minihou_core::channels::ScopeResolved>>(egui::Id::new(SCOPE_KEY)));
+    if let Some(scope) = scope {
+        let resolved = minihou_core::channels::ResolvedChannels { params: scope.resolved.params.clone(), diagnostics: scope.resolved.diagnostics.clone(), time_dependent: scope.resolved.time_dependent.clone() };
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("param_panel_resolved"),std::sync::Arc::new(resolved)));
+    } else if let Ok(graph)=minihou_core::Graph::from_value(v.doc) {
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("param_panel_resolved"),std::sync::Arc::new(minihou_core::channels::resolve_graph(&graph))));
     }
     expression_dialog(ui.ctx(), v, out);

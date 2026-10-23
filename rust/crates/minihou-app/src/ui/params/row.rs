@@ -177,12 +177,18 @@ pub(crate) fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, 
             .map(|p| (p.default)()).unwrap_or(Value::Bool(false));
         value_of(v, id, name, &fallback).as_bool().unwrap_or(false)
     });
+    // Driven by a promoted parameter on the enclosing subnet: show it blue and read-only here.
+    let overridden = super::promoted_override(ui.ctx(), id, param.name);
+    let linked = linked || overridden;
     let enabled = param.supported && !locked && !param_locked && !linked && condition_enabled;
     let checkbox_enabled = param.supported && !locked && !param_locked && !linked && group_toggle.is_none_or(|name| {
         !v.doc["nodes"][id]["locked_params"].as_array().is_some_and(|a| a.iter().any(|value| value == name))
             && !channels.is_some_and(|c| c.contains_key(name))
     });
-    if linked {
+    if overridden {
+        ui.painter().rect_filled(layout.control_rect, 4., v.theme.accent_bg);
+        ui.painter().rect_stroke(layout.control_rect, 4., Stroke::new(1., v.theme.accent), StrokeKind::Inside);
+    } else if linked {
         ui.painter().rect_filled(layout.control_rect, 4., Color32::from_rgba_unmultiplied(48, 164, 102, 42));
         ui.painter().rect_stroke(layout.control_rect, 4., Stroke::new(1., Color32::from_rgb(62, 190, 110)), StrokeKind::Inside);
         paint_text(ui, Pos2::new(layout.label_rect.left()+4., r.center().y), "↗", 12., false, Color32::from_rgb(62, 190, 110), Align2::LEFT_CENTER);
@@ -390,7 +396,9 @@ pub(crate) fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, 
             }
         }).response;
         response.clone().context_menu(|ui| parameter_menu(ui,v,out,id,param.name,&default));
-        if linked {
+        if overridden {
+            response.clone().on_hover_text(format!("Set by the subnet's promoted parameter\nValue: {value}"));
+        } else if linked {
             let expressions = channels.into_iter().flat_map(|c| c.iter()).filter(|(key,_)| *key == param.name || key.starts_with(&format!("{}.",param.name)))
                 .map(|(key,value)| format!("{key} = {}", value.as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
             response.clone().on_hover_text(format!("{expressions}\nValue: {value}"));
