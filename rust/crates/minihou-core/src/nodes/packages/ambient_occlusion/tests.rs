@@ -84,3 +84,15 @@ fn isolated_point_uses_fallback_normal() {
         &[1.]
     );
 }
+
+#[test]
+fn missing_point_normals_use_up_axis_even_on_meshed_points() {
+    let with_normals = cube_with_sample(0.);
+    let mut without_normals = with_normals.clone();
+    without_normals.point.remove("N");
+    let params = json!({"samples": 16, "max_distance": 2.0});
+    assert_eq!(
+        run(&without_normals, params.clone()).point["ao"],
+        run(&with_normals, params).point["ao"]
+    );
+}

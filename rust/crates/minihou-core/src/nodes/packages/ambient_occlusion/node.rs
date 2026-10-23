@@ -68,7 +68,6 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
     let positions = geo.p();
     let (centres, normals): (Vec<V>, Vec<V>) = if domain == "points" {
-        let derived = crate::normals::point_normals(positions, &geo.topology, geo.npoints);
         let authored = geo
             .point
             .get("N")
@@ -77,7 +76,7 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         (
             (0..geo.npoints).map(|i| point(positions, i)).collect(),
             (0..geo.npoints)
-                .map(|i| unit(point(authored.unwrap_or(&derived), i)))
+                .map(|i| authored.map_or([0., 0., 1.], |n| unit(point(n, i))))
                 .collect(),
         )
     } else {
