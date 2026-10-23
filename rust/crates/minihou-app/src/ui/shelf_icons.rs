@@ -111,6 +111,7 @@ pub fn draw(p: &egui::Painter, o: Pos2, kind: &str, ink: Color32, accent: Color3
         "attribute_transfer" => { rect(p,o,2.,5.,7.,14.,c,false); rect(p,o,15.,5.,7.,14.,c,false); line(p,o,&[(9.,12.),(15.,12.),(12.,9.)],a); line(p,o,&[(15.,12.),(12.,15.)],a); }
         "attribute_blur" => { dot(p,o,6.,12.,3.,c); dot(p,o,12.,12.,2.5,a); dot(p,o,18.,12.,2.,a); line(p,o,&[(3.,18.),(21.,18.)],c); }
         "ambient_occlusion" => { line(p,o,&[(3.,19.),(21.,19.)],c); dot(p,o,12.,17.,2.,a); for x in [5.,9.,15.,19.] { line(p,o,&[(12.,16.),(x,5.)],a); } }
+        "curvature" => { line(p,o,&[(2.,18.),(7.,12.),(12.,8.),(17.,12.),(22.,18.)],c); line(p,o,&[(5.,20.),(9.,15.),(12.,13.),(15.,15.),(19.,20.)],a); dot(p,o,12.,8.,2.,a); }
         "set_material" => { rect(p,o,3.,4.,18.,16.,c,false); polygon(p,o,&[(3.,20.),(12.,7.),(21.,20.)],a); }
         "image_density" => { rect(p,o,3.,3.,18.,18.,c,false); for (x,y) in [(7.,8.),(13.,6.),(17.,11.),(8.,17.),(14.,16.)] { dot(p,o,x,y,1.8,a); } }
         "measure_area" => { polygon(p,o,&[(4.,19.),(10.,4.),(20.,9.),(19.,19.)],c); line(p,o,&[(4.,19.),(20.,9.)],a); }

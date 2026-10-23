@@ -823,6 +823,11 @@
         "color"
       ],
       [
+        "Curvature",
+        "curvature",
+        "curvature"
+      ],
+      [
         "Set Material",
         "set_material",
         "set_material"

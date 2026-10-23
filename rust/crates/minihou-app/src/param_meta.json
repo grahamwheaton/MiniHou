@@ -28,6 +28,23 @@
     "min": 1
    }
   },
+ "curvature": {
+  "mode": {
+   "default": "signed",
+   "doc": "Signed curvature, positive convex curvature only, or positive magnitude of concave curvature only.",
+   "kind": "enum",
+   "options": [
+    "signed",
+    "convex",
+    "concave"
+   ]
+  },
+  "name": {
+   "default": "curvature",
+   "doc": "Name of the float point attribute to write.",
+   "kind": "str"
+  }
+ },
  "array": {
   "constant_offset": {
    "default": [
