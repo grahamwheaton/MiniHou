@@ -113,6 +113,10 @@ pub(crate) fn truncate_with_ellipsis(ui: &egui::Ui, text: &str, font: &FontId, m
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, param: &ParamSpec, locked: bool, errors: &mut Vec<String>) {
+    if typ == "wrangle" && param.name == "snippet" {
+        wrangle_code_row(ui, v, out, id, param, locked, errors);
+        return;
+    }
     let default = (param.default)();
     let old = value_of(v, id, param.name, &default);
     let mut value = old.clone();
@@ -451,4 +455,53 @@ pub(crate) fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, 
             });
         });
     }
+}
+
+fn wrangle_code_row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, param: &ParamSpec, locked: bool, errors: &mut Vec<String>) {
+    let default = (param.default)();
+    let old = value_of(v, id, param.name, &default);
+    let meta = param_meta("wrangle", param.name);
+    let label = meta.and_then(|m| m["label"].as_str()).unwrap_or("code");
+    let param_locked = v.doc["nodes"][id]["locked_params"].as_array().is_some_and(|a| a.iter().any(|x| x == param.name));
+    let linked = v.doc["nodes"][id]["channels"].as_object().is_some_and(|c| c.contains_key(param.name));
+    let enabled = param.supported && !locked && !param_locked && !linked;
+    let modified = old != default;
+    let width = ui.available_width().max(100.);
+    let height_id = egui::Id::new(("wrangle_code_height", id));
+    let mut height = ui.ctx().data_mut(|d| d.get_persisted::<f32>(height_id).unwrap_or(200.));
+    ui.add_space(5.);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(label).strong().color(v.theme.text))
+            .on_hover_text(meta.and_then(|m| m["doc"].as_str()).unwrap_or(""))
+            .context_menu(|ui| parameter_menu(ui, v, out, id, param.name, &default));
+        if modified && ui.add_enabled(enabled, egui::Button::new("Reset")).clicked() {
+            out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value: default.clone() }, continuous: false });
+        }
+        let exposed = minihou_app::is_exposed(v.doc, id, param.name);
+        if ui.add_enabled(!locked, egui::Button::new(if exposed { "Unexpose" } else { "Expose" })).clicked() {
+            out.push(UiAction::Edit { edit: minihou_app::toggle_exposed(v.doc, id, param.name), continuous: false });
+        }
+    });
+    let mut code = old.as_str().unwrap_or_default().to_owned();
+    let response = ui.add_enabled_ui(enabled, |ui| ui.add_sized([width, height],
+        egui::TextEdit::multiline(&mut code).font(egui::TextStyle::Monospace).desired_rows(10).desired_width(width)))
+        .inner;
+    response.clone().context_menu(|ui| parameter_menu(ui, v, out, id, param.name, &default));
+    if response.changed() {
+        out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value: json!(code) }, continuous: response.has_focus() });
+    }
+    let drag = ui.allocate_response(Vec2::new(width, 12.), Sense::drag());
+    if drag.hovered() || drag.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical); }
+    if drag.dragged() {
+        height = (height + ui.ctx().input(|i| i.pointer.delta().y)).clamp(200., 1000.);
+        ui.ctx().data_mut(|d| d.insert_persisted(height_id, height));
+    }
+    let center = drag.rect.center();
+    for offset in [-3., 0., 3.] {
+        ui.painter().line_segment([Pos2::new(center.x - 12., center.y + offset), Pos2::new(center.x + 12., center.y + offset)], Stroke::new(1., v.theme.dim));
+    }
+    if let Some(reason) = invalid_reason(meta, &old).or_else(|| node_error(v, id).map(str::to_owned)) {
+        errors.push(format!("{label}: {reason}"));
+    }
+    ui.add_space(6.);
 }

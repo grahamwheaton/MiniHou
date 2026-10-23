@@ -1,7 +1,8 @@
 //! UI-thread adapter: the HTTP service uses the same history/worker/link path as UI edits.
 use crate::*;
 use minihou_app::{
-    http_api::{error_detail, HttpServer, Request, Response},
+    display_nodes,
+    http_api::{edit_status, error_detail, HttpServer, Request, Response},
     http_geometry::{Query, QueryKind},
     http_ops,
 };
@@ -125,8 +126,38 @@ fn files(root: &Path) -> Vec<String> {
 }
 fn library(root: &Path) -> Value {
     let dir = root.join("nodes");
-    let files=std::fs::read_dir(&dir).ok().into_iter().flatten().flatten().filter(|e|e.path().extension().is_some_and(|e|e=="py"||e=="json")).map(|e|json!({"file":e.path(),"nodes":[],"error":"Python node-library loading is not available in the Rust core"})).collect::<Vec<_>>();
-    json!({"dirs":[dir],"files":files,"backend":"rust","supported":false})
+    let mut python = Vec::new();
+    let mut systems = Vec::new();
+    for entry in std::fs::read_dir(&dir).ok().into_iter().flatten().flatten() {
+        let path = entry.path();
+        match path.extension().and_then(|ext| ext.to_str()) {
+            Some("py") => python.push(path),
+            Some("json") => systems.push(path),
+            _ => {}
+        }
+    }
+    python.sort();
+    systems.sort();
+    let files = python.iter().chain(&systems).map(|path| json!({"file":path,"nodes":[],"error":null})).collect::<Vec<_>>();
+    json!({"dirs":[dir],"files":files,"backend":"rust","supported":false,
+        "python":{"count":python.len(),"files":python,"supported":false,"summary":"Python node libraries are not loaded by the Rust core"},
+        "json":{"count":systems.len(),"files":systems,"supported":false,"summary":"JSON system libraries are not loaded by the Rust core"}})
+}
+fn wrangle_capabilities() -> Value {
+    json!({"backend":"rust","local_variables":false,"temp_attributes":true,
+        "prefixes":["f","i","u","v","p"],"vector_constructors":["set","{}"],
+        "functions":["sin","cos","atan2","abs","round","sqrt","min","max","clamp","smoothstep","fit","rand","noise"],
+        "constants":["PI","E"]})
+}
+fn validate_edit_cook(value: &Value, frame: f64, fps: f64) -> Result<()> {
+    let graph = Graph::from_value(value)?;
+    if graph.nodes.is_empty() { return Ok(()); }
+    let targets = display_nodes(value);
+    let targets = if targets.is_empty() { vec![graph.main_output()?] } else { targets };
+    let mut session = minihou_core::session::Session::new(graph);
+    session.set_time(frame, fps)?;
+    for target in targets { session.cook(Some(&target))?; }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -149,15 +180,33 @@ mod tests {
         .is_err());
     }
     #[test]
-    fn http_library_explicitly_reports_unavailable_python_files() {
+    fn http_library_summarises_python_and_json_separately() {
         let listing = library(&workspace());
         assert_eq!(listing["supported"], false);
+        assert!(listing["python"]["summary"].as_str().unwrap().contains("Python"));
+        assert!(listing["json"]["summary"].as_str().unwrap().contains("JSON"));
         for entry in listing["files"].as_array().unwrap() {
-            assert!(entry["error"]
-                .as_str()
-                .unwrap()
-                .contains("not available in the Rust core"));
+            assert!(entry["error"].is_null());
         }
+    }
+    #[test]
+    fn rust_state_reports_actual_wrangle_capabilities() {
+        let caps = wrangle_capabilities();
+        assert_eq!(caps["backend"], "rust");
+        assert_eq!(caps["local_variables"], false);
+        assert_eq!(caps["temp_attributes"], true);
+        assert!(caps["functions"].as_array().unwrap().contains(&json!("atan2")));
+        assert!(!caps["functions"].as_array().unwrap().contains(&json!("dot")));
+    }
+    #[test]
+    fn opt_in_cook_validation_rejects_bad_wrangle() {
+        let graph = json!({"version":1,"nodes":{
+            "box1":{"type":"box"},
+            "w":{"type":"wrangle","inputs":{"geo":"box1"},"params":{"snippet":"f@ok = 1; v@bad = set(1, 2)"}}
+        },"display":"w"});
+        let error = validate_edit_cook(&graph, 1., 24.).unwrap_err().to_string();
+        assert!(error.contains("statement 2"), "{error}");
+        assert!(error.contains("v@bad = set(1, 2)"), "{error}");
     }
 }
 impl App {
@@ -213,6 +262,7 @@ impl App {
                         let mut body = body.unwrap_or_else(|| self.http_status());
                         if body.get("results").is_some() {
                             body["status"] = self.http_status();
+                            edit_status(&mut body);
                             if let Err(e) = self.editor.save_to(self.editor.path.clone()) {
                                 body["save_error"] = json!(e.to_string());
                             }
@@ -390,7 +440,7 @@ impl App {
                 s["root"] = json!(root);
                 s["ops"] = json!(http_ops::OPS);
                 s["link"] = json!({"port":if self.link.is_some(){Some(8765)}else{None},"clients":self.blender.clients});
-                s["engine"] = json!({"engine":"rust","backend":"rust","pid":std::process::id(),"version":"0.1.0 (rust)","python_nodes":false,"capabilities":["instances_v1","scene_objects_v1"]});
+                s["engine"] = json!({"engine":"rust","backend":"rust","pid":std::process::id(),"version":"0.1.0 (rust)","python_nodes":false,"capabilities":["instances_v1","scene_objects_v1"],"wrangle":wrangle_capabilities()});
                 s
             }
             ("GET", "/api/files") => {
@@ -423,13 +473,28 @@ impl App {
                 let before = self.editor.doc.value();
                 let (value, results) = http_ops::apply_ops(before, &b["ops"])?;
                 let changed = before != &value;
+                let rollback = match b.get("rollback_on_cook_error") {
+                    None | Some(Value::Bool(false)) => false,
+                    Some(Value::Bool(true)) => true,
+                    _ => return Err("rollback_on_cook_error must be boolean".into()),
+                };
+                if changed && rollback {
+                    let (frame, fps) = self.link.as_ref().map(|l| (l.frame, l.fps)).unwrap_or(self.http_time);
+                    if let Err(e) = validate_edit_cook(&value, frame, fps) {
+                        let error = error_detail(&e.to_string());
+                        return Ok(Some(Response::ok(json!({"changed":false,"edit_applied":false,"cook_ok":false,
+                            "failed_node":error["node"],"error":error,"rolled_back":true,"rev":self.cooking.requested,
+                            "results":results,"graph":self.http_snapshot(),"status":self.http_status()}))));
+                    }
+                }
                 if changed && !self.commit_document(value, "apply MCP edits") {
                     return Err(self.file_status.clone().into());
                 }
                 if changed {
                     self.http_sync_selection();
                 }
-                let out = json!({"changed":changed,"rev":self.cooking.requested,"results":results,"graph":self.http_snapshot(),"status":self.http_status()});
+                let mut out = json!({"changed":changed,"rev":self.cooking.requested,"results":results,"graph":self.http_snapshot(),"status":self.http_status()});
+                edit_status(&mut out);
                 if b["wait"] == true {
                     self.http_wait(r, Some(out));
                     return Ok(None);

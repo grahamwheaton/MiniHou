@@ -29,7 +29,7 @@ pub const WRANGLE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: Non
             optional: true,
         },
     ],
-    params: crate::params!("snippet":"@P.z += sin(@P.x)";"run_over":"points";"group":""),
+    params: crate::params!("run_over":"points";"group":"";"snippet":"@P.z += sin(@P.x)"),
     cook: wrangle,
 };
 
@@ -292,8 +292,70 @@ fn split_top(s: &str, delim: char) -> Option<Vec<&str>> {
         Some(parts)
     }
 }
+fn top_operator(s: &str, operators: &[char]) -> Result<Option<(usize, char)>> {
+    let mut stack = Vec::new();
+    let mut found = None;
+    let mut previous = None;
+    for (at, ch) in s.char_indices() {
+        match ch {
+            '(' | '{' => stack.push(ch),
+            ')' | '}' => {
+                let expected = if ch == ')' { '(' } else { '{' };
+                if stack.pop() != Some(expected) {
+                    return Err(Error::new("unbalanced expression delimiters"));
+                }
+            }
+            _ if stack.is_empty() && operators.contains(&ch) => {
+                let unary = matches!(previous, None | Some('(' | '{' | ',' | '+' | '-' | '*' | '/'));
+                let exponent = matches!(ch, '+' | '-') && matches!(previous, Some('e' | 'E'))
+                    && s[..at].chars().rev().nth(1).is_some_and(|c| c.is_ascii_digit());
+                let power = ch == '*' && (s[at + 1..].starts_with('*') || s[..at].ends_with('*'));
+                if !unary && !exponent && !power {
+                    found = Some((at, ch));
+                }
+            }
+            _ => {}
+        }
+        if !ch.is_whitespace() {
+            previous = Some(ch);
+        }
+    }
+    if !stack.is_empty() {
+        return Err(Error::new("unbalanced expression delimiters"));
+    }
+    Ok(found)
+}
+fn wrapped(s: &str, open: char, close: char) -> bool {
+    if !s.starts_with(open) || !s.ends_with(close) { return false; }
+    let mut depth = 0;
+    for (at, ch) in s.char_indices() {
+        if ch == open { depth += 1; }
+        if ch == close {
+            depth -= 1;
+            if depth == 0 { return at + ch.len_utf8() == s.len(); }
+        }
+    }
+    false
+}
 fn eval(s: &str, g: &Geometry, d: Domain, i: usize, inputs: &Inputs) -> Result<Vec<f64>> {
     let s = s.trim();
+    let binary = top_operator(s, &['+', '-'])?.or(top_operator(s, &['*', '/'])?);
+    if let Some((at, op)) = binary {
+        let a = eval(&s[..at], g, d, i, inputs)?;
+        let b = eval(&s[at + 1..], g, d, i, inputs)?;
+        let width = a.len().max(b.len());
+        if a.len() != 1 && a.len() != width || b.len() != 1 && b.len() != width {
+            return Err(Error::new("vector widths differ"));
+        }
+        return (0..width).map(|k| {
+            let x = a[if a.len() == 1 { 0 } else { k }];
+            let y = b[if b.len() == 1 { 0 } else { k }];
+            Ok(match op { '+' => x + y, '-' => x - y, '*' => x * y, _ => x / y })
+        }).collect();
+    }
+    if wrapped(s, '(', ')') {
+        return eval(&s[1..s.len() - 1], g, d, i, inputs);
+    }
     if s == "rand()" {
         return eval(&format!("rand({i})"), g, d, i, inputs);
     }
@@ -311,7 +373,7 @@ fn eval(s: &str, g: &Geometry, d: Domain, i: usize, inputs: &Inputs) -> Result<V
             }
         }
     }
-    let vec_inner = if s.starts_with('{') && s.ends_with('}') {
+    let vec_inner = if wrapped(s, '{', '}') {
         Some(&s[1..s.len() - 1])
     } else if s.starts_with("set(") && s.ends_with(')') {
         Some(&s[4..s.len() - 1])
@@ -338,32 +400,6 @@ fn eval(s: &str, g: &Geometry, d: Domain, i: usize, inputs: &Inputs) -> Result<V
     }
     if s.starts_with('@') && reference(s).is_ok() {
         return read(g, d, i, s, inputs);
-    }
-    for op in ['+', '-', '*', '/'] {
-        if let Some(parts) = split_top(s, op) {
-            if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                let a = eval(parts[0], g, d, i, inputs)?;
-                let b = eval(parts[1], g, d, i, inputs)?;
-                if a.len() > 1 || b.len() > 1 {
-                    let w = a.len().max(b.len());
-                    if a.len() != 1 && a.len() != w || b.len() != 1 && b.len() != w {
-                        return Err(Error::new("vector widths differ"));
-                    }
-                    return (0..w)
-                        .map(|k| {
-                            let x = a[if a.len() == 1 { 0 } else { k }];
-                            let y = b[if b.len() == 1 { 0 } else { k }];
-                            Ok(match op {
-                                '+' => x + y,
-                                '-' => x - y,
-                                '*' => x * y,
-                                _ => x / y,
-                            })
-                        })
-                        .collect();
-                }
-            }
-        }
     }
     let expr = Expr::parse(s)?;
     let result = expr.eval(&mut |name| {
@@ -490,9 +526,7 @@ fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &s
     };
     if let Some(c) = component {
         if c >= width {
-            return Err(Error::new(
-                "destination component is outside attribute width",
-            ));
+            return Err(Error::new(format!("@{name} has width {width}; requested component {} needs width {}", c + 1, c + 1)));
         }
     }
     if prefix == "f" && width != 1
@@ -500,16 +534,12 @@ fn assign(g: &mut Geometry, d: Domain, i: usize, left: &str, op: &str, right: &s
         || prefix == "u" && width != 2
         || prefix == "p" && width != 4
     {
-        return Err(Error::new(
-            "declared attribute width differs from existing attribute",
-        ));
+        let requested = match prefix { "f" => 1, "u" => 2, "v" => 3, _ => 4 };
+        return Err(Error::new(format!("@{name} has existing width {width}; requested width {requested}")));
     }
     let expected = if component.is_some() { 1 } else { width };
     if rhs.len() != expected {
-        return Err(Error::new(format!(
-            "assignment needs {expected} component(s), got {}",
-            rhs.len()
-        )));
+        return Err(Error::new(format!("@{name} has existing width {expected}; requested width {}", rhs.len())));
     }
     let integer = d
         .table(g)
@@ -579,12 +609,14 @@ fn wrangle(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let snippet = p.s("snippet")?;
     let selected = mask(&source, d, &p.s("group")?)?;
     let mut out = (*source).clone();
+    let mut statement_number = 0;
     for (line, text) in snippet.lines().enumerate() {
         let text = text.split("//").next().unwrap_or("");
         for statement in text.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            statement_number += 1;
             let (left, right) = statement
                 .split_once('=')
-                .ok_or_else(|| Error::new(format!("line {}: expected assignment", line + 1)))?;
+                .ok_or_else(|| Error::new(format!("line {}, statement {statement_number}: expected assignment; source: {statement}", line + 1)))?;
             let left = left.trim();
             let (target, op) = match left.as_bytes().last() {
                 Some(b'+') => (&left[..left.len() - 1], "+"),
@@ -596,7 +628,7 @@ fn wrangle(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             for (i, &choose) in selected.iter().enumerate() {
                 if choose {
                     assign(&mut out, d, i, target.trim(), op, right.trim(), inputs).map_err(|e| {
-                        Error::new(format!("{} {i}, line {}: {e}", d.label(), line + 1))
+                        Error::new(format!("{} {i}, line {}, statement {statement_number}: {e}; source: {statement}", d.label(), line + 1))
                     })?;
                 }
             }
@@ -622,6 +654,12 @@ mod tests {
         g.prim
             .insert("group_first".into(), Arc::new(Attr::i32(1, vec![1, 0])));
         g
+    }
+    #[test]
+    fn stored_snippet_value_still_resolves() {
+        let graph_params = json!({"snippet":"f@legacy = 7"});
+        let params = Params::resolve_node("wrangle", WRANGLE.params, graph_params.as_object()).unwrap();
+        assert_eq!(params.s("snippet").unwrap(), "f@legacy = 7");
     }
     fn cook(g: Geometry, run_over: &str, snippet: &str, group: &str) -> Result<Geometry> {
         let p = Params::resolve(
@@ -666,6 +704,45 @@ mod tests {
     fn errors_name_element_and_line() {
         let e = cook(fixture(), "points", "f@x = 1;\nf@y = @missing", "").unwrap_err();
         assert!(e.0.contains("point 0, line 2"), "{e}");
+    }
+    #[test]
+    fn vector_constructor_scales_by_parenthesized_weight() {
+        let out = cook(fixture(), "points", "v@Cd = set(0.24, 0.115, 0.045) * (0.8 + 0.2 * @weight)", "").unwrap();
+        let colors = out.point["Cd"].as_f32().unwrap();
+        for (row, weight) in colors.chunks_exact(3).zip([1., 2., 3.]) {
+            let scale = 0.8 + 0.2 * weight;
+            for (actual, base) in row.iter().zip([0.24, 0.115, 0.045]) {
+                assert!((actual - base * scale).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn vector_constructors_add_componentwise() {
+        let out = cook(fixture(), "points", "v@sum = set(1, 2, 3) + set(4, 5, 6)", "").unwrap();
+        assert_eq!(out.point["sum"].as_f32().unwrap(), &[5., 7., 9., 5., 7., 9., 5., 7., 9.]);
+    }
+
+    #[test]
+    fn atan2_accepts_two_scalar_arguments() {
+        let out = cook(fixture(), "points", "f@angle = atan2(@P.y, @P.x)", "").unwrap();
+        assert_eq!(out.point["angle"].as_f32().unwrap(), &[0., 0., 0.]);
+    }
+
+    #[test]
+    fn existing_uv_width_error_names_attribute_and_widths() {
+        let mut g = fixture();
+        g.point.insert("uv".into(), Arc::new(Attr::f32(2, vec![0.; 6])));
+        let err = cook(g, "points", "v@uv = set(1, 2, 3)", "").unwrap_err().to_string();
+        assert!(err.contains("@uv"), "{err}");
+        assert!(err.contains("2") && err.contains("3"), "{err}");
+    }
+
+    #[test]
+    fn multi_statement_error_identifies_statement_and_excerpt() {
+        let err = cook(fixture(), "points", "f@ok = 1; v@bad = set(1, 2)", "").unwrap_err().to_string();
+        assert!(err.contains("statement 2"), "{err}");
+        assert!(err.contains("v@bad = set(1, 2)"), "{err}");
     }
 
     #[test]

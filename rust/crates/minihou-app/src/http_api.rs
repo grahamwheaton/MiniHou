@@ -241,5 +241,33 @@ pub fn error_detail(message: &str) -> Value {
         .split("node '")
         .nth(1)
         .and_then(|s| s.split('\'').next());
-    json!({"node":node,"message":message})
+    let statement = message.split("statement ").nth(1)
+        .and_then(|s| s.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|s| s.parse::<usize>().ok());
+    let excerpt = message.split("; source: ").nth(1).map(str::trim);
+    json!({"node":node,"message":message,"statement":statement,"excerpt":excerpt})
+}
+pub fn edit_status(body: &mut Value) {
+    let status = body["status"].clone();
+    body["edit_applied"] = body["changed"].clone();
+    body["cook_ok"] = if status["busy"] == true { Value::Null } else { status["ok"].clone() };
+    body["failed_node"] = status["error"]["node"].clone();
+    body["error"] = status["error"].clone();
+}
+
+#[cfg(test)]
+mod edit_status_tests {
+    use super::*;
+    #[test]
+    fn edit_reply_exposes_wrangle_error_fields() {
+        let detail = error_detail("node 'w' (wrangle): point 0, line 1, statement 2: @uv has existing width 2; requested width 3; source: v@uv = set(1, 2, 3)");
+        assert_eq!(detail["node"], "w");
+        assert_eq!(detail["statement"], 2);
+        assert_eq!(detail["excerpt"], "v@uv = set(1, 2, 3)");
+        let mut reply = json!({"changed":true,"status":{"busy":false,"ok":false,"error":detail}});
+        edit_status(&mut reply);
+        assert_eq!(reply["edit_applied"], true);
+        assert_eq!(reply["cook_ok"], false);
+        assert_eq!(reply["failed_node"], "w");
+    }
 }

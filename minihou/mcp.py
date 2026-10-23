@@ -104,9 +104,12 @@ TOOLS: List[dict] = [
          "include_layout": {"type": "boolean", "description": "Include node positions (default false)."}},
          "additionalProperties": False}},
     {"name": "edit_graph",
-     "description": "Apply a batch of edit operations atomically (all or nothing), wait for the cook, and report the "
-                    "result: created ids, cook success or the failing node and message, point/prim counts.\n" + OPS_DOC,
+     "description": "Apply a structurally atomic batch of edit operations and wait for the cook. By default the edit stays "
+                    "in the graph if cooking fails. On the Rust backend, rollback_on_cook_error=true cooks a private "
+                    "candidate first and leaves the original graph intact if that cook fails. The reply reports "
+                    "edit_applied, cook_ok, failed_node and the structured error.\n" + OPS_DOC,
      "inputSchema": {"type": "object", "required": ["ops"], "additionalProperties": False, "properties": {
+         "rollback_on_cook_error": {"type": "boolean", "description": "Rust backend: validate a private cook before committing; retain the original graph if it fails."},
          "ops": {"type": "array", "minItems": 1, "description": "Edit operations, applied in order.",
                  "items": {"type": "object", "required": ["op"], "properties": {
                      "op": {"type": "string", "enum": ["add", "insert", "remove", "rename", "connect", "disconnect", "set",
@@ -159,10 +162,8 @@ TOOLS: List[dict] = [
      "inputSchema": {"type": "object", "required": ["path"], "additionalProperties": False, "properties": {
          "path": {"type": "string"}, "create": {"type": "boolean"}}}},
     {"name": "node_library",
-     "description": "Node libraries: Python files of @node functions the engine hot-loads as new node types (for "
-                    "anything a wrangle can't do: new topology, multi-input logic, simulations). Lists the node "
-                    "folder, loaded files, their node types and any load errors (file and line), plus a guide to "
-                    "writing a node. Write the file with your own file tools; it is live within a second.",
+     "description": "Show the running engine's node libraries. Python backends report loaded files, node types and errors; "
+                    "the Rust backend summarises .py and .json libraries separately because it cannot load them.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "wrangle_reference",
      "description": "The wrangle snippet language (VEX-like expressions over points, primitives or vertices): syntax, "
@@ -423,10 +424,21 @@ class McpServer:
         return (f"File: {snap.get('path')}  rev {snap['rev']}\n{format_status(st, snap['graph'])}\n\n"
                 + json.dumps(graph, indent=1))
 
-    def tool_edit_graph(self, ops: List[dict]) -> str:
+    def tool_edit_graph(self, ops: List[dict], rollback_on_cook_error: bool = False) -> str:
         if not isinstance(ops, list) or not ops:
             raise ToolError("ops must be a non-empty list of edit operations")
-        r = self.engine.post("/api/edit", {"ops": ops, "wait": True, "timeout": 60, "origin": "mcp"})
+        if rollback_on_cook_error and self.engine.get("/api/state")["engine"].get("backend") != "rust":
+            raise ToolError("rollback_on_cook_error requires the Rust backend")
+        r = self.engine.post("/api/edit", {"ops": ops, "wait": True, "timeout": 60, "origin": "mcp",
+                                            "rollback_on_cook_error": rollback_on_cook_error})
+        status = r.get("status") or {}
+        r.setdefault("edit_applied", bool(r.get("changed")))
+        r.setdefault("cook_ok", status.get("ok"))
+        r.setdefault("failed_node", (status.get("error") or {}).get("node"))
+        r.setdefault("error", status.get("error"))
+        if r.get("rolled_back"):
+            return ("Edit rolled back after cook failure.\n" +
+                    json.dumps({k: r.get(k) for k in ("edit_applied", "cook_ok", "failed_node", "error")}, indent=1))
         created = [res["id"] for res, op in zip(r["results"], ops) if op.get("op") in ("add", "rename") and "id" in res]
         exposed = [res["name"] for res, op in zip(r["results"], ops) if op.get("op") == "expose"]
         head = f"Applied {len(ops)} op(s), graph rev {r['rev']}." if r["changed"] else "No change (graph already like that)."
@@ -437,7 +449,8 @@ class McpServer:
         tail = ""
         if r["status"].get("ok") is False:
             tail = "\nThe edit was kept; fix it with another edit_graph call, or call undo."
-        return head + "\n" + format_status(r["status"], r["graph"]["graph"]) + tail
+        fields = {k: r.get(k) for k in ("edit_applied", "cook_ok", "failed_node", "error")}
+        return head + "\n" + format_status(r["status"], r["graph"]["graph"]) + tail + "\n" + json.dumps(fields)
 
     def tool_inspect_node(self, node: str, detail: bool = True) -> str:
         r = self.engine.post("/api/inspect", {"node": node, "detail": detail})
@@ -542,17 +555,41 @@ class McpServer:
             lib = None
         if lib:
             lines = [f"Node folder(s): {', '.join(lib['dirs'])}"]
-            for f in lib["files"]:
-                lines.append(f"  {f['file']}: " + (f"ERROR {f['error']}" if f["error"] else ", ".join(f["nodes"])))
-            if not lib["files"]:
-                lines.append("  (no node files yet)")
+            if lib.get("backend") == "rust":
+                for key, label in (("python", "Python .py"), ("json", "JSON .json")):
+                    group = lib[key]
+                    lines.append(f"{label}: {group['count']} file(s). {group['summary']}.")
+                    lines.extend(f"  {path}" for path in group["files"])
+            else:
+                for f in lib["files"]:
+                    lines.append(f"  {f['file']}: " + (f"ERROR {f['error']}" if f["error"] else ", ".join(f["nodes"])))
+                if not lib["files"]:
+                    lines.append("  (no node files yet)")
         else:
             lines = [f"Engine not running; its node folder will be {self.workspace / 'nodes'}"]
-        return "\n".join(lines) + "\n\n" + AUTHORING_GUIDE
+        return "\n".join(lines) + ("" if lib and lib.get("backend") == "rust" else "\n\n" + AUTHORING_GUIDE)
 
     def tool_wrangle_reference(self) -> str:
         from .wrangle import reference
-        return reference()
+        try:
+            engine = self.engine.get("/api/state").get("engine") or {}
+        except EngineDown:
+            return "Engine not running; local Python reference follows.\n\n" + reference()
+        if engine.get("backend") != "rust":
+            return reference()
+        caps = engine.get("wrangle") or {}
+        if not caps:
+            raise ToolError("running Rust backend did not report wrangle capabilities")
+        return ("Rust wrangle reference (running backend):\n"
+                "Assignments to @attributes; statements separated by newlines or semicolons. "
+                "Read components with .x/.y/.z/.w or .r/.g/.b/.a. "
+                "Arithmetic: +, -, *, /; scalar expressions also support % and **.\n"
+                f"Local variables: {'yes' if caps['local_variables'] else 'no'}; "
+                f"new attributes: {'yes' if caps['temp_attributes'] else 'no'}.\n"
+                f"Attribute prefixes: {', '.join(caps['prefixes'])}.\n"
+                f"Vector constructors: {', '.join(caps['vector_constructors'])}.\n"
+                f"Functions: {', '.join(caps['functions'])}.\n"
+                f"Constants: {', '.join(caps['constants'])}.")
 
     # -- engine process --------------------------------------------------------
     def _start_engine(self, graph: Path) -> str:
