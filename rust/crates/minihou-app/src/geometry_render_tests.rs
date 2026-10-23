@@ -2,6 +2,35 @@ use super::*;
 use super::display_render_tests::{adapter,render,changed};
 
 #[test]
+fn packed_display_ranges_pick_and_outline_the_correct_object() {
+    use minihou_app::{Document,Edit,cook_worker::{cook_batch,CookRequest}};
+    let value=serde_json::json!({"display":["packed","moved"],"nodes":{
+        "box":{"type":"box"},
+        "packed":{"type":"pack","inputs":{"geo":"box"}},
+        "other":{"type":"box"},
+        "moved":{"type":"transform","inputs":{"geo":"other"},"params":{"translate":[10.,0.,0.]}}
+    }});
+    let mut session=Document::parse(value.to_string()).unwrap().session().unwrap();
+    let mut target=session.graph().main_output().unwrap();
+    let response=cook_batch(&mut session,&mut target,
+        vec![CookRequest{revision:1,edit:Edit::Replace(value)}],|g|Scene::new(g));
+    assert!(response.error.is_none(),"{:?}",response.error);
+    let scene=response.prepared.unwrap();
+    let ranges=response.display_ranges;
+    assert_eq!(ranges.len(),2);
+    assert_eq!(ranges[0],("moved".into(),0..8));
+    assert_eq!(ranges[1],("packed".into(),8..16));
+    for (origin, expected) in [([0.,0.,10.],"packed"),([10.,0.,10.],"moved")] {
+        let hit=crate::pick_displayed(&scene,origin,[0.,0.,-1.],ObjectVisibility::ShowAll,&ranges,&Default::default()).unwrap();
+        assert_eq!(crate::picked_object(&ranges,scene.triangle_indices(),hit),Some(expected));
+        let range=&ranges.iter().find(|(id,_)|id==expected).unwrap().1;
+        let outline=object_mask_indices(scene.triangle_indices(),std::slice::from_ref(range));
+        assert!(!outline.is_empty());
+        assert!(outline.iter().all(|id|range.contains(id)));
+    }
+}
+
+#[test]
 fn grid_spacing_transition_is_continuous_at_far_zoom() {
     let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping grid render test"); return; };
     let scene=Scene::new(&Geometry::points_only(Vec::new()).unwrap());
