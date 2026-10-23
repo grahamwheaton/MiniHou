@@ -64,6 +64,10 @@ pub fn resolve_object<'a>(id: &str, p: &Params, store: &'a ExternalInputs) -> Re
         return match feed {
             ExternalInput::Object{..}=>Ok(feed),
             ExternalInput::Missing(m) if m.is_empty() && name.is_empty() && store.contains_key("object:@target") => Ok(&store["object:@target"]),
+            // An empty picker (a fresh socket, or a feed left over from a live editor) must not hide the
+            // object the node names when the link already delivered it by name.
+            ExternalInput::Missing(m) if m.is_empty() && !name.is_empty()
+                && matches!(store.get(&format!("object:{name}")), Some(ExternalInput::Object{..})) => Ok(&store[&format!("object:{name}")]),
             ExternalInput::Missing(m) if m.is_empty() => Err(Error::waiting(format!("no object picked. {PICK_HINT}"))),
             ExternalInput::Missing(m)=>Err(Error::new(m.clone())),
             _=>Err(Error::new("invalid picker input")),
@@ -253,7 +257,11 @@ fn join_edges(g: &Geometry) -> Result<Geometry> {
         assert_eq!(session.cook(None).unwrap().p()[0],1.);
         session.set_external(picker_external("src"),ExternalInput::Object{geo:Arc::new(Geometry::points_only(vec![5.,0.,0.]).unwrap()),matrix:None,info:Value::Null});
         assert_eq!(session.cook(None).unwrap().p()[0],5.);
+        // An empty picker with the named object delivered by the link still cooks that object.
         session.set_external(picker_external("src"),ExternalInput::Missing(String::new()));
+        assert_eq!(session.cook(None).unwrap().p()[0],1.);
+        // Clearing the picker in Blender also clears the node's object name: then it waits.
+        session.replace_graph(Graph::from_value(&json!({"display":"src","nodes":{"src":{"type":"blender_object","params":{"object":""}}}})).unwrap());
         assert_eq!(session.cook(None).unwrap().npoints,0);
         assert_eq!(session.last_stats().waiting,vec![("src".into(),format!("no object picked. {PICK_HINT}"))]);
         // Still reported when served from cache.

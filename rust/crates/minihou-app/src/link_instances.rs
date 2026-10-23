@@ -716,6 +716,45 @@ mod tests {
     }
 
     #[test]
+    fn blender_attributes_of_every_domain_and_type_reach_the_cooked_geometry() {
+        use minihou_core::Attr;
+        let graph = json!({"nodes":{"input":{"type":"modifier_input"},"o":{"type":"output","inputs":{"geo":"input"}}},"display":"o"});
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("attrs.json")).unwrap();
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let mut manager = InstanceManager::new(1, server.shared.clone(), sender);
+        // one triangle: 3 points, 3 corners, 1 face, 3 edges
+        let tri = Geometry::from_arrays(vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2], vec![0,3], None).unwrap();
+        let mut input = link_protocol::geometry_arrays(&tri);
+        let put = |a: &mut Arrays, k: &str, attr: Attr| { a.insert(k.into(), link_protocol::attr_array(&attr)); };
+        put(&mut input, "point/myfloat", Attr::f32(1, vec![1.,2.,3.]));
+        put(&mut input, "point/myvec", Attr::f32(3, vec![1.;9]));
+        put(&mut input, "point/myint", Attr::i32(1, vec![4,5,6]));
+        put(&mut input, "point/grp", Attr::f32(1, vec![0.5,0.,0.]));
+        put(&mut input, "vertex/Cd", Attr::f32(3, vec![0.25;9]));
+        put(&mut input, "vertex/uv", Attr::f32(2, vec![0.,0., 1.,0., 0.,1.]));
+        put(&mut input, "vertex/UV2", Attr::f32(2, vec![0.5;6]));
+        put(&mut input, "prim/myface", Attr::i32(1, vec![7]));
+        put(&mut input, "prim/sharp_face", Attr::i32(1, vec![1]));
+        put(&mut input, "prim/quat", Attr::f32(4, vec![1.,0.,0.,0.]));
+        put(&mut input, "edge/edgef", Attr::f32(1, vec![0.1,0.2,0.3]));
+        let pairs: Vec<i32> = tri.topology.edge_pairs().iter().flat_map(|&(a, b)| [a, b]).collect();
+        let mut wire = link_protocol::attr_array(&Attr::i32(2, pairs));
+        wire.shape = vec![3, 2];
+        input.insert("topo/edge_pairs".into(), wire);
+        let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":1,
+            "instance_id":"attrs","graph":graph,"params":{}}), &input);
+        assert_eq!(header["type"], "instance_result", "{header}");
+        let out = link_protocol::decode_object(&header, &arrays).unwrap();
+        for name in ["myfloat", "myvec", "myint", "grp"] { assert!(out.point.contains_key(name), "point {name}: {:?}", out.point.keys().collect::<Vec<_>>()); }
+        for name in ["Cd", "uv", "UV2"] { assert!(out.vertex.contains_key(name), "vertex {name}: {:?}", out.vertex.keys().collect::<Vec<_>>()); }
+        for name in ["myface", "sharp_face", "quat"] { assert!(out.prim.contains_key(name), "prim {name}"); }
+        assert!(out.edge.contains_key("edgef"), "edge attribute");
+        assert_eq!(out.point["myint"].as_i32().unwrap(), &[4,5,6]);
+        assert_eq!(out.vertex["uv"].as_f32().unwrap(), &[0.,0., 1.,0., 0.,1.]);
+    }
+
+    #[test]
     fn asset_target_uses_instance_geometry_without_watching_source() {
         let graph = json!({"nodes":{"source":{"type":"blender_object","params":{"object":"@target","space":"object"}},
             "out":{"type":"output","inputs":{"geo":"source"}}},"display":"out"});
@@ -741,5 +780,36 @@ mod tests {
             "instance_id":"B","graph":object_input,"params":{}}), &link_protocol::geometry_arrays(&target));
         assert_eq!(header["type"], "instance_result", "{header}");
         assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().p(), &[7., 0., 0.]);
+    }
+
+    #[test]
+    fn fresh_blender_object_node_cooks_the_picked_object() {
+        let graph = json!({"nodes":{"blender_object1":{"type":"blender_object"},
+            "out":{"type":"output","inputs":{"geo":"blender_object1"}}},"display":"out"});
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("picker.json")).unwrap();
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let mut manager = InstanceManager::new(1, server.shared.clone(), sender);
+        let target = Geometry::points_only(vec![7., 0., 0.]).unwrap();
+        let target_arrays = link_protocol::geometry_arrays(&target);
+        let cook = |manager: &mut InstanceManager, rid: u64, params: Value| {
+            let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":rid,
+                "instance_id":"P","graph":graph,"params":params}), &target_arrays);
+            assert_eq!(header["type"], "instance_result", "{header}");
+            (header.clone(), link_protocol::decode_object(&header, &arrays).unwrap())
+        };
+        // Fresh node: the interface offers its picker.
+        let (header, _) = cook(&mut manager, 1, json!({}));
+        assert!(header["interface"].as_array().unwrap().iter().any(|p| p["name"] == "blender_object1" && p["kind"] == "object"), "{header}");
+        // The user picks Cube in Blender: the add-on sends its mesh under the picker key, then cooks.
+        let cube = Geometry::points_only(vec![1., 2., 3., 4., 5., 6.]).unwrap();
+        let mut source_arrays = Arrays::new();
+        for (k, a) in link_protocol::geometry_arrays(&cube) { source_arrays.insert(format!("0/{k}"), a); }
+        let (set, _) = manager.handle(&json!({"type":"instance_sources","request_id":2,"instance_id":"P",
+            "sources":[minihou_app::modifier_inputs::picker_key("blender_object1")]}), &source_arrays);
+        assert_eq!(set["type"], "instance_sources_set", "{set}");
+        let (_, out) = cook(&mut manager, 3, json!({"blender_object1":"Cube"}));
+        assert_eq!(out.npoints, 2, "the picked object must come back as the node's output");
+        assert_eq!(out.p(), &[1., 2., 3., 4., 5., 6.]);
     }
 }

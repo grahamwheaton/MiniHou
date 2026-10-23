@@ -25,6 +25,7 @@ _digests = {}
 _busy = False
 _last_error = ""
 _retry_at = 0.0
+_retry_delay = 0.0
 _known = set()
 _live = set()
 _source_sent = {}
@@ -858,7 +859,7 @@ def _waiting_after(obj, mod):
 
 def pump(host=None, port=None, *, force=False):
     """Cook GN placements and legacy MiniHou modifiers in object stack order."""
-    global _busy, _last_error, _retry_at
+    global _busy, _last_error, _retry_at, _retry_delay
     if mesh_writer.modal_ui_active():
         return 0
     if _busy or modifiers._rendering or (not force and time.monotonic() < _retry_at):
@@ -910,11 +911,14 @@ def pump(host=None, port=None, *, force=False):
                         if isinstance(exc, (OSError, ConnectionError)):
                             modifiers.disconnect()
                             _digests.clear()
-                            _retry_at = time.monotonic() + 2
+                            from .discovery import next_retry_delay
+                            _retry_delay = next_retry_delay(_retry_delay)
+                            _retry_at = time.monotonic() + _retry_delay
                         break
         _last_error = "; ".join(dict.fromkeys(errors))
         if not errors:
             _retry_at = 0
+            _retry_delay = 0.0
     except Exception as exc:
         _last_error = str(exc)
     finally:
@@ -928,7 +932,8 @@ def last_error():
 
 @persistent
 def _reset(_dummy=None):
-    global _retry_at, _last_error
+    global _retry_at, _last_error, _retry_delay
+    _retry_delay = 0.0
     _digests.clear()
     _live.clear()
     _source_sent.clear()
