@@ -2,7 +2,11 @@
   "domain": {
     "kind": "enum",
     "default": "edges",
-    "options": ["edges", "faces", "points"],
+    "options": [
+      "edges",
+      "faces",
+      "points"
+    ],
     "doc": "Element domain of the input selection (edges, faces, or points); outputs boundary edges."
   },
   "group": {
@@ -11,11 +15,6 @@
     "doc": "Input selection group name or pattern; empty selects all elements in domain.",
     "pick_domain_param": "domain",
     "pick_domain_default": "edges"
-  },
-  "output_group": {
-    "default": "",
-    "doc": "Output edge group name. When set, it overrides output_group_name; when empty, output_group_name is used.",
-    "kind": "str"
   },
   "output_group_name": {
     "kind": "str",

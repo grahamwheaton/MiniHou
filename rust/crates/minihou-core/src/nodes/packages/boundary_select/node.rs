@@ -11,7 +11,7 @@ use crate::{
 pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "boundary_select",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
-    params: crate::params!("domain": "edges"; "group": ""; "output_group_name": "boundary"; "output_group": ""),
+    params: crate::params!("domain": "edges"; "group": ""; "output_group_name": "boundary"),
     cook,
 };
 
@@ -19,14 +19,7 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let source = inputs.first().and_then(|v| v.first()).ok_or_else(|| Error::new("geo is not connected"))?;
     let domain = p.e("domain", &["edges", "faces", "points", "primitives"])?;
     let group_pattern = p.s("group")?;
-    let output_group_name = {
-        let og = p.s("output_group").unwrap_or_default();
-        if !og.trim().is_empty() {
-            og
-        } else {
-            p.s("output_group_name").unwrap_or_else(|_| "boundary".into())
-        }
-    };
+    let output_group_name = p.s("output_group_name").unwrap_or_else(|_| "boundary".into());
     let output_group_name = if output_group_name.trim().is_empty() { "boundary" } else { output_group_name.trim() };
     crate::nodes::group::valid_name(output_group_name)?;
 
@@ -118,9 +111,6 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let edge_attr = Arc::new(Attr::i32(1, edge_mask.iter().map(|&b| b as i32).collect()));
     let vertex_values: Vec<f32> = edge_mask.iter().map(|&b| b as u8 as f32).collect();
     store_group(&mut out, output_group_name, &edge_attr, &vertex_values)?;
-    if output_group_name != "boundary" {
-        store_group(&mut out, "boundary", &edge_attr, &vertex_values)?;
-    }
 
     Ok(out)
 }

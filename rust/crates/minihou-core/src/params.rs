@@ -21,6 +21,18 @@ pub struct Params {
 impl Params {
     pub fn resolve_node(node_type: &str, specs: &[ParamSpec], given: Option<&Map<String, Value>>) -> Result<Params> {
         if node_type == "controller" { return Ok(Params { values: given.cloned().unwrap_or_default() }); }
+        if node_type == "boundary_select" {
+            if let Some(g) = given.filter(|g| g.contains_key("output_group")) {
+                // Legacy alias: the removed "output_group" feeds "output_group_name" when that is still at its default.
+                let mut g = g.clone();
+                let legacy = g.remove("output_group").and_then(|v| v.as_str().map(|s| s.trim().to_string())).unwrap_or_default();
+                let at_default = g.get("output_group_name").and_then(|v| v.as_str()).map_or(true, |n| n.trim().is_empty() || n == "boundary");
+                if !legacy.is_empty() && at_default {
+                    g.insert("output_group_name".into(), Value::String(legacy));
+                }
+                return Self::resolve(specs, Some(&g));
+            }
+        }
         Self::resolve(specs, given)
     }
     /// The node's defaults overlaid with the graph's values; unknown names and unsupported non-defaults are errors.
