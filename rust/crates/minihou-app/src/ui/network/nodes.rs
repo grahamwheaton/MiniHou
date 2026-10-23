@@ -86,8 +86,16 @@ pub(super) fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &
         if link_count > 0 { p.text(pos2(face.right(), r.center().y), Align2::RIGHT_CENTER, format!("↗ {link_count}"), FontId::proportional(10.0 * zoom), link_color); }
     } else { p.rect_filled(r.shrink(2.0), 3.0, cat); }
     let inputs = input_slots(node, &v.doc["nodes"][id]);
-    for index in 0..inputs.len() {
-        p.circle(r.min + input_offset(index, inputs.len()) * zoom, 5.0 * zoom, t.base, Stroke::new(1.5_f32, t.stroke2));
+    for (index, (port, multi)) in inputs.iter().enumerate() {
+        if *multi {
+            let (left, width) = bar_span(inputs.len(), index);
+            let bar = Rect::from_min_size(r.min + vec2(left, -5.0) * zoom, vec2(width, 10.0) * zoom);
+            p.rect(bar, 5.0 * zoom, t.base, Stroke::new(1.5_f32, t.stroke2), StrokeKind::Middle);
+            let wires = wire_count(node, port);
+            for k in 0..wires { p.circle(r.min + vec2(port_x(inputs.len(), index, true, k, wires), 0.0) * zoom, 2.5 * zoom, t.stroke2, Stroke::NONE); }
+        } else {
+            p.circle(r.min + input_offset(index, inputs.len()) * zoom, 5.0 * zoom, t.base, Stroke::new(1.5_f32, t.stroke2));
+        }
     }
     if node.node_type != "output" {
         let count = output_count(&v.doc["nodes"][id]);
