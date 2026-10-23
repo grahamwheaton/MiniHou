@@ -39,8 +39,30 @@ impl App {
     }
     pub(super) fn modal_snap_feature(&self, at: egui::Pos2, snap_to: ui::SnapTargets) -> Option<picking::SnapFeature> {
         let scene = self.scene.as_ref()?;
-        picking::snap_feature(scene.positions(), scene.triangle_indices(), self.camera_info(),
-            self.last_viewport, at, snap_to, self.editor_state.snap.backface_culling)
+        let camera = self.camera_info();
+        let cull = self.editor_state.snap.backface_culling;
+        let (positions, tris) = (scene.positions(), scene.triangle_indices());
+        let face_center = snap_to.contains(ui::SnapTo::FaceCenter);
+        let other_bits = snap_to.bits() & !(1 << ui::SnapTo::FaceCenter as u8);
+        let base = (other_bits != 0).then(|| picking::snap_feature(positions, tris, camera, self.last_viewport, at,
+            ui::SnapTargets::from_bits(other_bits), cull)).flatten();
+        if !face_center { return base; }
+        // Face centre: the polygon under the pointer (same polygon topology as face selection), centred on its corners.
+        let (origin, direction) = ui::transform_gizmo::ray(camera, self.last_viewport, at);
+        let hit = picking::pick_triangle_culled(positions, tris, origin, direction, cull, |_| true);
+        let centre = hit.and_then(|hit| {
+            let topo = element_select::cached(&self.elem_topo, scene);
+            let poly = topo.poly_of_tri(hit.tri as u32)?;
+            let point = picking::polygon_centroid(positions, topo.polygon_vertices(poly))?;
+            let screen = ui::transform_gizmo::project(camera, self.last_viewport, point)?;
+            let distance = screen.distance(at);
+            if distance > picking::FACE_CENTER_RADIUS { return None; }
+            let ids = &tris[hit.tri * 3..hit.tri * 3 + 3];
+            let triangle = [0, 1, 2].map(|i| picking::at(positions, ids[i]));
+            Some((picking::SnapFeature { point, triangle, kind: ui::SnapTo::FaceCenter }, distance))
+        });
+        let base_distance = base.and_then(|b| ui::transform_gizmo::project(camera, self.last_viewport, b.point)).map(|s| s.distance(at));
+        picking::prefer_face_center(base, base_distance, centre)
     }
     pub(super) fn modal_snap_point(&self, at: egui::Pos2, snap_to: impl Into<ui::SnapTargets>) -> Option<[f32;3]> {
         self.modal_snap_feature(at,snap_to.into()).map(|feature|feature.point)
