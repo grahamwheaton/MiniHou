@@ -598,6 +598,11 @@
         "scatter"
       ],
       [
+        "Points Attract",
+        "points_attract",
+        "scatter"
+      ],
+      [
         "Blend",
         "blend",
         "blend"
@@ -920,6 +925,11 @@
       [
         "Point Relax",
         "point_relax",
+        "scatter"
+      ],
+      [
+        "Points Attract",
+        "points_attract",
         "scatter"
       ],
       [

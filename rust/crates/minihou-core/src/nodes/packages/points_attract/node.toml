@@ -1,0 +1,5 @@
+id = "points_attract"
+name = "Points Attract"
+category = "Deform"
+description = "Move points toward the nearest point or selected group on the input geometry."
+keywords = "points attract nearest group"
