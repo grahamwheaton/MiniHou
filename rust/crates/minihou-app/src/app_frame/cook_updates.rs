@@ -29,10 +29,9 @@ impl App {
                     if let Some(gpu) = &mut self.gpu { gpu.upload_lod(&self.state.device, &scene); }
                     else { self.gpu = Some(Gpu::new_lod(&self.state.device, &scene)); }
                 } else {
-                    let shown = scene.proxied(level);
-                    if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &shown); }
-                    else { self.gpu = Some(Gpu::new(&self.state.device, &shown)); }
-                    if let Some(gpu)=&mut self.gpu {gpu.upload_textures(&self.state.device,&self.state.queue,&shown,&mut self.materials);}
+                    if let Some(gpu) = &mut self.gpu { gpu.upload_proxy(&self.state.device, &scene, level); }
+                    else { self.gpu = Some(Gpu::new_proxy(&self.state.device, &scene, level)); }
+                    if let Some(gpu)=&mut self.gpu {gpu.upload_textures(&self.state.device,&self.state.queue,&scene,&mut self.materials);}
                 }
                 self.lod_uploaded = use_lod;
                 self.last_lod_view = None;
@@ -86,13 +85,13 @@ impl App {
             if use_lod != self.lod_uploaded {
                 if let Some(gpu) = &mut self.gpu {
                     if use_lod { gpu.upload_lod(&self.state.device, scene); }
-                    else { let shown=scene.proxied(level); gpu.upload(&self.state.device, &shown); gpu.upload_textures(&self.state.device,&self.state.queue,&shown,&mut self.materials); }
+                    else { gpu.upload_proxy(&self.state.device, scene, level); gpu.upload_textures(&self.state.device,&self.state.queue,scene,&mut self.materials); }
                 }
                 self.lod_uploaded = use_lod;
                 self.last_lod_view = None;
                 self.shown_level = level;
             } else if !use_lod && (level - self.shown_level).abs() > 1e-6 {
-                if let Some(gpu) = &mut self.gpu { let shown=scene.proxied(level); gpu.upload(&self.state.device, &shown); gpu.upload_textures(&self.state.device,&self.state.queue,&shown,&mut self.materials); }
+                if let Some(gpu) = &mut self.gpu { gpu.upload_proxy(&self.state.device, scene, level); gpu.upload_textures(&self.state.device,&self.state.queue,scene,&mut self.materials); }
                 self.shown_level = level;
             }
         }

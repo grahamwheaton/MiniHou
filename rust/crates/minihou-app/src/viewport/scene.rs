@@ -46,14 +46,10 @@ impl Scene {
         self.pick_bvh = std::sync::Arc::new(crate::picking::Bvh::new(&self.p, &self.tri));
         start..(self.p.len() / 3) as u32
     }
-    /// The same scene showing only `level` (0..1) of its triangles and edges (the viewport proxy); points, normals and bounds stay.
-    pub fn proxied(&self, level: f32) -> Scene {
-        Scene {
-            p: self.p.clone(), n: self.n.clone(), point:self.point.clone(), line:self.line.clone(), pick_bvh:self.pick_bvh.clone(),
-            tri: crate::ui::proxy_ui::proxy::reduced_triangles(&self.tri, level),
-            edge: crate::ui::proxy_ui::proxy::reduced_edges(&self.edge, level),
-            nlp: self.nlp.clone(), nln: self.nln.clone(), normal_points:self.normal_points.clone(), bbp: self.bbp, center: self.center, radius: self.radius, textured:self.textured.clone(), cd:self.cd.clone(),
-        }
+    /// Only index cuts change with proxy level; vertex attributes and picking stay at full detail.
+    pub fn proxy_indices(&self, level: f32) -> (Vec<u32>, Vec<u32>) {
+        (crate::ui::proxy_ui::proxy::reduced_triangles(&self.tri, level),
+         crate::ui::proxy_ui::proxy::reduced_edges(&self.edge, level))
     }
     pub fn triangles(&self) -> usize { self.tri.len() / 3 }
     pub fn has_textured_slots(&self) -> bool { self.textured.iter().any(|t|!t.slot.is_empty()) }

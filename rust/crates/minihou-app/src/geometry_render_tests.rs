@@ -65,7 +65,8 @@ fn element_indices_points_lines_mixed_and_proxy() {
     let g=Geometry::from_arrays(vec![0.;18],vec![0,1,2,3,4],vec![0,3,5],Some(vec![true,false])).unwrap();
     let s=Scene::new(&g); assert_eq!(s.point,[3,4,5]); assert_eq!(s.line,[3,4]);
     assert!(s.edge.chunks_exact(2).any(|e|e==[3,4]),"core edges include open primitives");
-    let proxy=s.proxied(0.); assert_eq!(proxy.line,s.line); assert_eq!(proxy.point,s.point);
+    let (tri, edge)=s.proxy_indices(0.); assert!(tri.is_empty() && edge.is_empty());
+    assert_eq!(s.line,[3,4]); assert_eq!(s.point,[3,4,5]);
     // Explicitly closed curve, distinguished from a polygon by source metadata.
     let mut g=Geometry::from_arrays(vec![0.;9],vec![0,1,2],vec![0,3],None).unwrap();
     g.prim.insert("__viewport_curve".into(),std::sync::Arc::new(minihou_core::geometry::Attr::i32(1,vec![1])));

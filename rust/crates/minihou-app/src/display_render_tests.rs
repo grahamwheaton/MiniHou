@@ -118,7 +118,7 @@ fn lod_and_proxy_ownership_headless() {
     let full_image=render(&device,&queue,&full,Mode::SmoothShaded,hide,true);
     // Sorting LOD line endpoints can round an interpolated channel by one UNORM unit.
     assert!(lod_image.iter().zip(&full_image).all(|(a,b)| a.iter().zip(b).all(|(a,b)| a.abs_diff(*b)<=1)),"LOD/full render exceeded one-unit rounding tolerance");
-    gpu.upload(&device,&scene.proxied(0.5));
+    gpu.upload_proxy(&device,&scene,0.5);
     gpu.select_objects(&device,&scene,vec![4..8]); gpu.set_object_ranges(&device,&scene,vec![0..4,4..8]);
     assert!(gpu.partition_tri.selected>0 && gpu.partition_tri.selected<gpu.partition_tri.total);
     // Full-resolution bounds stay identical across proxy levels.

@@ -30,7 +30,7 @@ use uploads::{MeshSource, MeshChunk, upload_chunks, box_chunks, capped_normal_ve
 pub use camera_grid::Target;
 use camera_grid::{DEPTH, inverse_projection};
 use textures::TextureBatch;
-use mesh_buffers::{Boxes, Partition, edge_world_of, sharp_edges, index_buffer, object_mask_indices, packed_cut};
+use mesh_buffers::{Boxes, Partition, edge_world_of, sharp_edges, sharp_edges_indices, index_buffer, object_mask_indices, packed_cut};
 
 const SKETCHUP_CREASE_DEGREES: f32 = 30.0;
 

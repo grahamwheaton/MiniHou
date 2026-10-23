@@ -16,17 +16,24 @@ fn distant_grid_fades_when_a_pixel_covers_multiple_cells() {
 
 impl Gpu {
     pub fn new_lod(device: &wgpu::Device, sc: &Scene) -> Self {
-        Self::new(device,&sc.proxied(0.0))
+        Self::new_with_indices(device, sc, &[], &[])
     }
     pub fn new(device: &wgpu::Device, sc: &Scene) -> Self {
+        Self::new_with_indices(device, sc, &sc.tri, &sc.edge)
+    }
+    pub fn new_proxy(device: &wgpu::Device, sc: &Scene, level: f32) -> Self {
+        let (tri, edge) = sc.proxy_indices(level);
+        Self::new_with_indices(device, sc, &tri, &edge)
+    }
+    fn new_with_indices(device: &wgpu::Device, sc: &Scene, tri: &[u32], edge: &[u32]) -> Self {
         let device_limits = device.limits();
         let mut limits = minihou_core::limits::Limits::default();
         limits.set_gpu_limits(device_limits.max_buffer_size, device_limits.max_storage_buffer_binding_size as u64);
         let max_bytes = device_limits.max_buffer_size.min(device_limits.max_storage_buffer_binding_size as u64);
-        let oversized = chunked_scene(sc, max_bytes);
+        let oversized = chunked_scene(sc, tri, edge, max_bytes);
         let mesh_source = oversized.then(|| MeshSource { p: sc.p.clone(), n: sc.n.clone(), colors: vec![0.72; sc.p.len()], cd: sc.cd.clone() });
-        let face_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sc.tri, 3, &[], max_bytes));
-        let edge_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sc.edge, 2, &[], max_bytes));
+        let face_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, tri, 3, &[], max_bytes));
+        let edge_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, edge, 2, &[], max_bytes));
         let fallback = [0f32; 3];
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let buf = |label, data: &[u8], usage| {
@@ -267,7 +274,7 @@ impl Gpu {
         let bb_p = buf("bb_p", bytemuck::cast_slice(if bb_chunks.is_empty() { &sc.bbp[..] } else { &[0.;3][..] }), wgpu::BufferUsages::VERTEX);
         let bb_n = buf("bb_n", bytemuck::cast_slice(if bb_chunks.is_empty() { &[0f32; 24][..] } else { &[0f32; 3][..] }), wgpu::BufferUsages::VERTEX);
         let bb_i = buf("bb_i", bytemuck::cast_slice(if bb_chunks.is_empty() { &BOX_EDGES[..] } else { &[0u32][..] }), wgpu::BufferUsages::INDEX);
-        let sharp_edge_indices=sharp_edges(sc,SKETCHUP_CREASE_DEGREES);
+        let sharp_edge_indices=sharp_edges_indices(sc,tri,edge,SKETCHUP_CREASE_DEGREES);
         let sharp_edge_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sharp_edge_indices, 2, &[], max_bytes));
 
         Self {
@@ -276,9 +283,9 @@ impl Gpu {
             face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,pipe_face_markers_xray,
             elements:Elements::new(device,sc,&[],&[]),element_points:Vec::new(),pipe_elements,pipe_elements_ghost,
             pipe_depth, pipe_wire_all, pipe_wire_hidden, pipe_ghost, pipe_ghost_wire,
-            partition_tri: Partition::new(device, if oversized { &[] } else { &sc.tri }, 3, &[]), partition_edge: Partition::new(device, if oversized { &[] } else { &sc.edge }, 2, &[]),
+            partition_tri: Partition::new(device, if oversized { &[] } else { tri }, 3, &[]), partition_edge: Partition::new(device, if oversized { &[] } else { edge }, 2, &[]),
             sharp_edge: Partition::new(device, if oversized { &[] } else { &sharp_edge_indices }, 2, &[]),
-            current_tri:sc.tri.clone(), current_edge:sc.edge.clone(),
+            current_tri:tri.to_vec(), current_edge:edge.to_vec(),
             sharp_edge_indices,
             boxes:Some(Boxes::new(device,sc,&[],&[],&[0..(sc.p.len()/3) as u32])), object_ranges:Vec::new(), object_ids:Vec::new(),
             matcap, matcap_loaded:std::sync::atomic::AtomicU8::new(0),
@@ -311,12 +318,12 @@ impl Gpu {
             vn,
             vc:buf("object colors",bytemuck::cast_slice(&vec![0.72f32;if oversized {3} else {sc.p.len().max(3)}]),wgpu::BufferUsages::VERTEX),
             vcd:sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(if oversized { &fallback[..] } else { c }),wgpu::BufferUsages::VERTEX)),
-            neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;neutral_color_len(sc,oversized,max_bytes)]),wgpu::BufferUsages::VERTEX),
+            neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;neutral_color_len(sc,tri,oversized,max_bytes)]),wgpu::BufferUsages::VERTEX),
             limits,
             mesh_source, face_chunks, edge_chunks, sharp_edge_chunks, mask_chunks:Vec::new(),
             object_mask: None, object_mask_n: 0, object_mask_points: None,
-            ntri_idx: sc.tri.len() as u32,
-            edge_world: edge_world_of(sc),
+            ntri_idx: tri.len() as u32,
+            edge_world: edge_world_of(sc,edge),
         }
     }
 }
