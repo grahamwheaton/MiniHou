@@ -154,35 +154,59 @@ impl eframe::App for App {
             }
             egui::Area::new(egui::Id::new("blender_indicator")).fixed_pos(egui::pos2(ctx.content_rect().right() - 330., 9.)).order(egui::Order::Foreground)
                 .show(ctx, |ui| ui::blender_ui::indicator(ui, &v, &mut out));
-            egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
+            let layout = self.prefs.ui_layout.clone();
+            if layout.shelf_locked { egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out)); }
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             ui::network::set_physics_snappiness(ctx, self.prefs.node_physics_snappiness);
             if let Some(targets) = self.subnet_pending_selection.take() {
                 ui::network::select_inner(ctx, &self.editor.path, targets);
             }
             ui::network::set_links(ctx, &self.editor.path, self.prefs.show_parameter_links);
-            let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
-            self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
-            self.subnet_scope = ui::network::current_scope(ctx, &self.editor.path, self.editor.doc.value())
-                .map(|(path, inner, selected, _)| (path, if selected.is_empty() || inner["nodes"].get(&selected).is_none() {
-                    let output = inner["output"].as_str().unwrap_or_default();
-                    if inner["nodes"][output]["type"] == "subnet_output" {
-                        inner["nodes"][output]["inputs"]["geo"].as_str().unwrap_or(output).to_owned()
-                    } else { output.to_owned() }
-                } else { selected }));
-            if self.params_open { egui::SidePanel::right("parameters").default_width(460.).show(ctx, |ui| {
-                egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
-                if let Some((path,inner,selected,selected_set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
-                    if let Ok(inner_graph)=Graph::from_value(&inner) {
-                        let mut scoped=v.clone(); scoped.graph=&inner_graph; scoped.doc=&inner;
-                        scoped.selected=&selected; scoped.selected_set=&selected_set;
-                        let mut actions=Actions::default();
-                        ui::params::show(ui,&scoped,&mut actions);
-                        for action in actions.0 {if let Some(edit)=ui::network::scoped_edit(self.editor.doc.value(),&path,action) {out.push(edit);}}
+            let mut hidden = layout.hidden.clone();
+            if !self.params_open { hidden.extend([ui::layout::PanelId::Parameters, ui::layout::PanelId::GeoInfo, ui::layout::PanelId::Spreadsheet]); }
+            egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |dock_ui| {
+                use ui::layout::PanelId;
+                let (leaves, dividers) = ui::dock::place(&layout.root, dock_ui.max_rect(), &hidden);
+                let mut viewport_rect = dock_ui.max_rect();
+                self.network_hover = false;
+                for leaf in &leaves {
+                    if leaf.active == PanelId::Viewport { viewport_rect = leaf.rect; continue; }
+                    let content = ui::dock::leaf_frame(dock_ui, leaf);
+                    let ui = &mut dock_ui.new_child(egui::UiBuilder::new().max_rect(content).id_salt(("dock_leaf", leaf.active)));
+                    ui.set_clip_rect(content.intersect(dock_ui.clip_rect()));
+                    match leaf.active {
+                        PanelId::Network => {
+                            ui::network::show(ui, &v, &mut out);
+                            self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| leaf.rect.contains(p));
+                        }
+                        PanelId::Parameters => {
+                            if let Some((path,inner,selected,selected_set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
+                                if let Ok(inner_graph)=Graph::from_value(&inner) {
+                                    let mut scoped=v.clone(); scoped.graph=&inner_graph; scoped.doc=&inner;
+                                    scoped.selected=&selected; scoped.selected_set=&selected_set;
+                                    let mut actions=Actions::default();
+                                    ui::params::show(ui,&scoped,&mut actions);
+                                    for action in actions.0 {if let Some(edit)=ui::network::scoped_edit(self.editor.doc.value(),&path,action) {out.push(edit);}}
+                                }
+                            } else {ui::params::show(ui, &v, &mut out);}
+                        }
+                        PanelId::GeoInfo => ui::geo_info::show_tab(ui, &v, ui::geo_info::GeoTab::Info),
+                        PanelId::Spreadsheet => ui::geo_info::show_tab(ui, &v, ui::geo_info::GeoTab::Spreadsheet),
+                        PanelId::Shelf => ui::shelf::show(ui, &v, &mut out),
+                        PanelId::Viewport => {}
                     }
-                } else {ui::params::show(ui, &v, &mut out);}
-            }); }
-            egui::CentralPanel::default().show(ctx, |ui| {
+                }
+                ui::dock::paint_dividers(dock_ui, &dividers);
+                self.subnet_scope = ui::network::current_scope(ctx, &self.editor.path, self.editor.doc.value())
+                    .map(|(path, inner, selected, _)| (path, if selected.is_empty() || inner["nodes"].get(&selected).is_none() {
+                        let output = inner["output"].as_str().unwrap_or_default();
+                        if inner["nodes"][output]["type"] == "subnet_output" {
+                            inner["nodes"][output]["inputs"]["geo"].as_str().unwrap_or(output).to_owned()
+                        } else { output.to_owned() }
+                    } else { selected }));
+                let margin = egui::Frame::central_panel(dock_ui.style()).inner_margin;
+                dock_ui.painter().rect_filled(viewport_rect, 0., dock_ui.visuals().panel_fill);
+                let ui = &mut dock_ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect - margin).id_salt("dock_viewport"));
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
                 self.last_viewport = rect;

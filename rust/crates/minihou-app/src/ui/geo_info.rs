@@ -411,17 +411,31 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, _out: &mut Actions) {
         // Clicking blank header area outside tabs also toggles if needed
     }
     if !open { return; }
+    tab_body(ui, v, id, tab, &mut ranges, width, HEIGHT - HEADER);
+}
 
-    ui.allocate_ui_with_layout(Vec2::new(width, HEIGHT - HEADER), egui::Layout::top_down(egui::Align::Min), |ui| {
-        ui.set_clip_rect(ui.max_rect());
+/// Dock id under which the docked Geometry Info and Spreadsheet panels keep their state.
+pub fn dock_id() -> egui::Id { egui::Id::new("geo_info_dock") }
+
+/// One docked tab (Geometry Info or Spreadsheet) filling the given ui; the dock draws the tab header.
+pub fn show_tab(ui: &mut egui::Ui, v: &View<'_>, tab: GeoTab) {
+    let id = dock_id();
+    let mut ranges = ui.ctx().data_mut(|d| d.get_persisted::<bool>(id.with("ranges")).unwrap_or(false));
+    let (width, height) = (ui.available_width(), ui.available_height().max(HEADER));
+    tab_body(ui, v, id, tab, &mut ranges, width, height);
+}
+
+fn tab_body(ui: &mut egui::Ui, v: &View<'_>, id: egui::Id, tab: GeoTab, ranges: &mut bool, width: f32, height: f32) {
+    ui.allocate_ui_with_layout(Vec2::new(width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
         match tab {
             GeoTab::Info => {
                 let r = line(ui, 22.);
                 let box_rect = Rect::from_min_size(Pos2::new(r.left() + 10., r.top() + 4.), Vec2::splat(14.));
                 let check = ui.interact(box_rect, id.with("ranges_check"), Sense::click());
-                ui.painter().rect(box_rect, 3., if ranges { v.theme.accent } else { v.theme.input },
-                    Stroke::new(1.0_f32, if ranges { v.theme.accent } else { v.theme.stroke2 }), StrokeKind::Inside);
-                if ranges {
+                ui.painter().rect(box_rect, 3., if *ranges { v.theme.accent } else { v.theme.input },
+                    Stroke::new(1.0_f32, if *ranges { v.theme.accent } else { v.theme.stroke2 }), StrokeKind::Inside);
+                if *ranges {
                     let c = box_rect.center();
                     let s = Stroke::new(1.4_f32, v.theme.panel);
                     ui.painter().line_segment([c + Vec2::new(-4., 0.), c + Vec2::new(-1., 3.)], s);
@@ -429,22 +443,22 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, _out: &mut Actions) {
                 }
                 text(ui, r.left() + 30., r.center().y, "ranges", v.theme.dim);
                 if check.clicked() {
-                    ranges = !ranges;
-                    ui.ctx().data_mut(|d| d.insert_persisted(id.with("ranges"), ranges));
+                    *ranges = !*ranges;
+                    ui.ctx().data_mut(|d| d.insert_persisted(id.with("ranges"), *ranges));
                 }
                 let Some(s) = v.geo else {
                     let r = line(ui, ROW);
                     text(ui, r.left() + 10., r.center().y, "Nothing cooked yet", v.theme.dim);
                     return;
                 };
-                egui::ScrollArea::both().id_salt("geo_info_scroll").max_height(HEIGHT - HEADER - 22.).show(ui, |ui| {
-                    ui.set_min_width(if ranges { 400. } else { width });
+                egui::ScrollArea::both().id_salt("geo_info_scroll").max_height(height - 22.).show(ui, |ui| {
+                    ui.set_min_width(if *ranges { 400. } else { width });
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                     stats(ui, s, v.theme, v.units);
-                    attribute_table(ui, "Point", &s.point_attrs, ranges, v.theme);
-                    attribute_table(ui, "Vertex", &s.vertex_attrs, ranges, v.theme);
-                    attribute_table(ui, "Primitive", &s.prim_attrs, ranges, v.theme);
-                    attribute_table(ui, "Detail", &s.detail_attrs, ranges, v.theme);
+                    attribute_table(ui, "Point", &s.point_attrs, *ranges, v.theme);
+                    attribute_table(ui, "Vertex", &s.vertex_attrs, *ranges, v.theme);
+                    attribute_table(ui, "Primitive", &s.prim_attrs, *ranges, v.theme);
+                    attribute_table(ui, "Detail", &s.detail_attrs, *ranges, v.theme);
                 });
             }
             GeoTab::Spreadsheet => {

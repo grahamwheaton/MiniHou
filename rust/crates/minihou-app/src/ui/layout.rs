@@ -127,6 +127,19 @@ mod tests {
     }
 
     #[test]
+    fn default_layout_contains_every_panel_once() {
+        let layout = UiLayout::default();
+        assert!(layout.is_valid());
+        assert!(layout.shelf_locked);
+        let panels = layout.root.panels();
+        for p in PanelId::ALL {
+            let want = usize::from(p != PanelId::Shelf);
+            assert_eq!(panels.iter().filter(|q| **q == p).count(), want, "{p:?}");
+        }
+        assert_eq!(panels, [PanelId::Network, PanelId::Viewport, PanelId::Parameters, PanelId::GeoInfo, PanelId::Spreadsheet]);
+    }
+
+    #[test]
     fn invalid_fractions_and_viewport_tabs_are_rejected() {
         let mut layout = UiLayout::default();
         if let DockNode::Split { fraction, .. } = &mut layout.root { *fraction = 1.5; }

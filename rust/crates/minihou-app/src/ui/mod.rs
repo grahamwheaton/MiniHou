@@ -13,6 +13,7 @@ pub mod number_step;
 pub mod prim_handles;
 pub mod deform_gizmo;
 pub mod curve_tool;
+pub mod dock;
 pub mod proxy_ui;
 pub mod selection_region;
 pub mod shelf;
