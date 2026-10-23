@@ -667,6 +667,45 @@ mod tests {
         let e = cook(fixture(), "points", "f@x = 1;\nf@y = @missing", "").unwrap_err();
         assert!(e.0.contains("point 0, line 2"), "{e}");
     }
+    #[test]
+    fn vector_constructor_scales_by_parenthesized_weight() {
+        let out = cook(fixture(), "points", "v@Cd = set(0.24, 0.115, 0.045) * (0.8 + 0.2 * @weight)", "").unwrap();
+        let colors = out.point["Cd"].as_f32().unwrap();
+        for (row, weight) in colors.chunks_exact(3).zip([1., 2., 3.]) {
+            let scale = 0.8 + 0.2 * weight;
+            for (actual, base) in row.iter().zip([0.24, 0.115, 0.045]) {
+                assert!((actual - base * scale).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn vector_constructors_add_componentwise() {
+        let out = cook(fixture(), "points", "v@sum = set(1, 2, 3) + set(4, 5, 6)", "").unwrap();
+        assert_eq!(out.point["sum"].as_f32().unwrap(), &[5., 7., 9., 5., 7., 9., 5., 7., 9.]);
+    }
+
+    #[test]
+    fn atan2_accepts_two_scalar_arguments() {
+        let out = cook(fixture(), "points", "f@angle = atan2(@P.y, @P.x)", "").unwrap();
+        assert_eq!(out.point["angle"].as_f32().unwrap(), &[0., 0., 0.]);
+    }
+
+    #[test]
+    fn existing_uv_width_error_names_attribute_and_widths() {
+        let mut g = fixture();
+        g.point.insert("uv".into(), Arc::new(Attr::f32(2, vec![0.; 6])));
+        let err = cook(g, "points", "v@uv = set(1, 2, 3)", "").unwrap_err().to_string();
+        assert!(err.contains("@uv"), "{err}");
+        assert!(err.contains("2") && err.contains("3"), "{err}");
+    }
+
+    #[test]
+    fn multi_statement_error_identifies_statement_and_excerpt() {
+        let err = cook(fixture(), "points", "f@ok = 1; v@bad = set(1, 2)", "").unwrap_err().to_string();
+        assert!(err.contains("statement 2"), "{err}");
+        assert!(err.contains("v@bad = set(1, 2)"), "{err}");
+    }
 
     #[test]
     fn extra_input_reads_match_element_number_and_zero_pad() {
