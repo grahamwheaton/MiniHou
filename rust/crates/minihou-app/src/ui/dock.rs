@@ -180,6 +180,16 @@ pub fn target_in(leaf: &Leaf, dragged: PanelId) -> Option<PanelId> { leaf.panels
 
 fn drag_id() -> egui::Id { egui::Id::new("dock_drag_panel") }
 
+/// Small Lock/Unlock toggle at the top-right of the Shelf (its strip when locked, its tab header when docked).
+pub fn shelf_lock_button(ctx: &egui::Context, rect: Rect, locked: bool, out: &mut super::Actions) {
+    let pos = Pos2::new(rect.right() - 58., rect.top() + 2.);
+    egui::Area::new(egui::Id::new("shelf_lock_toggle")).fixed_pos(pos).order(egui::Order::Foreground).show(ctx, |ui| {
+        let (label, tip) = if locked { ("Unlock", "Shelf is locked in place. Unlock to drag it as a panel.") }
+            else { ("Lock", "Lock the Shelf back as the fixed strip under the top bar.") };
+        if ui.small_button(label).on_hover_text(tip).clicked() { out.push(super::UiAction::ShelfLock(!locked)); }
+    });
+}
+
 /// "Reset UI to Default": forget panel state kept in egui memory (an unfinished tab drag, the docked
 /// Geometry Info collapse/ranges state, and remembered window/area positions).
 pub fn reset_memory(ctx: &egui::Context) {

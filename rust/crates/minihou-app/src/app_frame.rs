@@ -155,7 +155,10 @@ impl eframe::App for App {
             egui::Area::new(egui::Id::new("blender_indicator")).fixed_pos(egui::pos2(ctx.content_rect().right() - 330., 9.)).order(egui::Order::Foreground)
                 .show(ctx, |ui| ui::blender_ui::indicator(ui, &v, &mut out));
             let layout = self.prefs.ui_layout.clone();
-            if layout.shelf_locked { egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out)); }
+            if layout.shelf_locked {
+                let shelf = egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
+                ui::dock::shelf_lock_button(ctx, shelf.response.rect, true, &mut out);
+            }
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             ui::network::set_physics_snappiness(ctx, self.prefs.node_physics_snappiness);
             if let Some(targets) = self.subnet_pending_selection.take() {
@@ -193,7 +196,10 @@ impl eframe::App for App {
                         }
                         PanelId::GeoInfo => ui::geo_info::show_tab(ui, &v, ui::geo_info::GeoTab::Info),
                         PanelId::Spreadsheet => ui::geo_info::show_tab(ui, &v, ui::geo_info::GeoTab::Spreadsheet),
-                        PanelId::Shelf => ui::shelf::show(ui, &v, &mut out),
+                        PanelId::Shelf => {
+                            ui::shelf::show(ui, &v, &mut out);
+                            ui::dock::shelf_lock_button(ctx, leaf.rect, false, &mut out);
+                        }
                         PanelId::Viewport => {}
                     }
                 }

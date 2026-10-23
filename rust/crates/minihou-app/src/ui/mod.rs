@@ -135,6 +135,8 @@ pub enum UiAction {
     LoadUiLayout,
     /// Preferences menu: back to the built-in layout.
     ResetUiLayout,
+    /// Shelf lock toggle: true = fixed top strip, false = draggable dock panel.
+    ShelfLock(bool),
     /// Blender link bar: install the add-on into the chosen installation (index into `BlenderStatus::installs`).
     BlenderInstall(usize),
     BlenderOpen,

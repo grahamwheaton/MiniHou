@@ -72,6 +72,29 @@ impl UiLayout {
     /// Like `try_from_json`, but old or unknown layouts fall back to the default.
     pub fn from_json(v: &Value) -> Self { Self::try_from_json(v).unwrap_or_default() }
 
+    /// Lock the Shelf as the fixed top strip (taken out of the tree) or unlock it into a dock panel
+    /// placed above the Viewport, from where it can be dragged like any other panel.
+    pub fn set_shelf_locked(&mut self, locked: bool) {
+        if locked == self.shelf_locked { return; }
+        self.shelf_locked = locked;
+        if locked {
+            if let Some(root) = crate::ui::dock::remove(self.root.clone(), PanelId::Shelf) { self.root = root; }
+        } else {
+            fn above_viewport(n: &mut DockNode) -> bool {
+                match n {
+                    DockNode::Split { a, b, .. } => above_viewport(a) || above_viewport(b),
+                    DockNode::Tabs { panels, .. } if panels.contains(&PanelId::Viewport) => {
+                        let viewport = std::mem::replace(n, DockNode::tabs(&[]));
+                        *n = DockNode::split(Axis::Vertical, 0.12, DockNode::tabs(&[PanelId::Shelf]), viewport);
+                        true
+                    }
+                    DockNode::Tabs { .. } => false,
+                }
+            }
+            above_viewport(&mut self.root);
+        }
+    }
+
     /// Each panel appears exactly once (the Shelf only while unlocked), tab groups are non-empty,
     /// fractions are finite and inside (0, 1), and the Viewport is alone in its tab group.
     pub fn is_valid(&self) -> bool {
@@ -137,6 +160,32 @@ mod tests {
             assert_eq!(panels.iter().filter(|q| **q == p).count(), want, "{p:?}");
         }
         assert_eq!(panels, [PanelId::Network, PanelId::Viewport, PanelId::Parameters, PanelId::GeoInfo, PanelId::Spreadsheet]);
+    }
+
+    #[test]
+    fn shelf_lock_state_round_trips_through_the_layout() {
+        let mut layout = UiLayout::default();
+        layout.set_shelf_locked(false);
+        assert!(!layout.shelf_locked && layout.is_valid());
+        assert_eq!(layout.root.panels().iter().filter(|p| **p == PanelId::Shelf).count(), 1);
+        let back = UiLayout::from_json(&layout.to_json());
+        assert_eq!(back, layout);
+        assert!(!back.shelf_locked);
+        // Moved elsewhere while unlocked, then locked again: it leaves the tree and the rest is intact.
+        let mut moved = back.clone();
+        moved.root = crate::ui::dock::retarget(&moved.root, PanelId::Shelf, PanelId::Network, crate::ui::dock::DropZone::Centre).unwrap();
+        assert!(moved.is_valid());
+        moved.set_shelf_locked(true);
+        assert!(moved.shelf_locked && moved.is_valid());
+        assert_eq!(UiLayout::from_json(&moved.to_json()), moved);
+        // Locking/unlocking from the default goes back to the default.
+        let mut again = UiLayout::default();
+        again.set_shelf_locked(false); again.set_shelf_locked(true);
+        assert_eq!(again, UiLayout::default());
+        // An unlocked layout without the Shelf in the tree is invalid and falls back.
+        let mut v = UiLayout::default().to_json();
+        v["shelf_locked"] = json!(false);
+        assert_eq!(UiLayout::from_json(&v), UiLayout::default());
     }
 
     #[test]

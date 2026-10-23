@@ -625,6 +625,10 @@ impl App {
                         match self.prefs.save() { Ok(()) => "UI layout loaded".into(), Err(e) => format!("Could not save preferences: {e}") }
                     } else { "No saved UI layout; use Preferences > Save UI Layout first".into() };
                 }
+                UiAction::ShelfLock(locked) => {
+                    self.prefs.ui_layout.set_shelf_locked(locked);
+                    if let Err(e) = self.prefs.save() { self.file_status = format!("Could not save preferences: {e}"); }
+                }
                 UiAction::ResetUiLayout => {
                     self.prefs.reset_ui_layout();
                     ui::dock::reset_memory(ctx);
