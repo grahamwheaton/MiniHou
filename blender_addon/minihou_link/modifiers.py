@@ -517,13 +517,10 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     path = os.path.abspath(bpy.path.abspath(graph_path)) if graph_path.strip() else ""
     if path and not path.lower().endswith((".json", ".minihou")):
         raise ValueError("Graph must name a .minihou or .json file; leave Graph empty to start a new modifier")
+    # A new modifier starts as a plain pass-through: input straight to output, no transform parameters.
     starter = {"nodes": {"input": {"type": "modifier_input"},
-                           "transform": {"type": "transform", "inputs": {"geo": "input"}},
-                           "output": {"type": "output", "inputs": {"geo": "transform"}}},
-               "display": "output", "exposed": [
-                   {"name": "Translate", "node": "transform", "param": "translate"},
-                   {"name": "Scale", "node": "transform", "param": "uniform_scale"},
-                   {"name": "Rotate", "node": "transform", "param": "rotate"}]}
+                           "output": {"type": "output", "inputs": {"geo": "input"}}},
+               "display": "output", "exposed": []}
     header = _connection(host, port).describe(path, None if path else starter)
     mod = obj.modifiers.new("MiniHou", "NODES")
     ng = bpy.data.node_groups.new("MiniHou " + os.path.basename(path), "GeometryNodeTree")
