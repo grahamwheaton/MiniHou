@@ -29,7 +29,7 @@ fn test_switch_selects_and_clamps() {
 }
 
 #[test]
-fn multiple_input_slots_selected_by_select_parameter() {
+fn multiple_input_slots_selected_by_index() {
     let g0 = Geometry::points_only(vec![0.0, 0.0, 0.0]).unwrap();
     let g1 = Geometry::points_only(vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0]).unwrap();
     let g2 = Geometry::points_only(vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0]).unwrap();
@@ -39,19 +39,19 @@ fn multiple_input_slots_selected_by_select_parameter() {
         vec![Arc::new(g2)],
     ];
 
-    let p0 = Params::resolve(NODE.params, json!({"select": 0}).as_object()).unwrap();
+    let p0 = Params::resolve(NODE.params, json!({"index": 0}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&inputs, &p0).unwrap().npoints, 1);
 
-    let p1 = Params::resolve(NODE.params, json!({"select": 1}).as_object()).unwrap();
+    let p1 = Params::resolve(NODE.params, json!({"index": 1}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&inputs, &p1).unwrap().npoints, 2);
 
-    let p2 = Params::resolve(NODE.params, json!({"select": 2}).as_object()).unwrap();
+    let p2 = Params::resolve(NODE.params, json!({"index": 2}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&inputs, &p2).unwrap().npoints, 3);
 
-    let p_clamp = Params::resolve(NODE.params, json!({"select": 99}).as_object()).unwrap();
+    let p_clamp = Params::resolve(NODE.params, json!({"index": 99}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&inputs, &p_clamp).unwrap().npoints, 3);
 
-    let p_neg = Params::resolve(NODE.params, json!({"select": -1}).as_object()).unwrap();
+    let p_neg = Params::resolve(NODE.params, json!({"index": -1}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&inputs, &p_neg).unwrap().npoints, 1);
 }
 
@@ -69,7 +69,7 @@ fn switch_graph_cook_multi_slot_and_single_input() {
         "nodes": {
             "b": {"type": "box"},
             "s": {"type": "sphere"},
-            "sw": {"type": "switch", "inputs": {"input0": "b", "input1": "s"}, "params": {"select": 1}},
+            "sw": {"type": "switch", "inputs": {"input0": "b", "input1": "s"}, "params": {"index": 1}},
         },
         "display": "sw"
     });
@@ -86,4 +86,15 @@ fn switch_graph_cook_multi_slot_and_single_input() {
     });
     let cooked_legacy = Graph::from_value(&graph_legacy).unwrap().cook(None).unwrap();
     assert_eq!(cooked_legacy.npoints, 8);
+}
+
+#[test]
+fn legacy_select_value_is_ignored() {
+    let g0 = Geometry::points_only(vec![0.0, 0.0, 0.0]).unwrap();
+    let g1 = Geometry::points_only(vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0]).unwrap();
+    let inputs = vec![vec![Arc::new(g0)], vec![Arc::new(g1)]];
+    let p = Params::resolve(NODE.params, json!({"index": 1, "select": 0}).as_object()).unwrap();
+    assert_eq!((NODE.cook)(&inputs, &p).unwrap().npoints, 2);
+    let p = Params::resolve(NODE.params, json!({"select": 1}).as_object()).unwrap();
+    assert_eq!((NODE.cook)(&inputs, &p).unwrap().npoints, 1);
 }

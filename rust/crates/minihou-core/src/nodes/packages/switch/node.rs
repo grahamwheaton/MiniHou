@@ -20,21 +20,12 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
     inputs: INPUTS,
     params: crate::params!(
         "index": 0;
-        "select": 0;
     ),
     cook,
 };
 
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let idx = if let Ok(s) = p.i("select") {
-        if s != 0 || p.i("index").unwrap_or(0) == 0 {
-            s
-        } else {
-            p.i("index").unwrap_or(s)
-        }
-    } else {
-        p.i("index")?
-    };
+    let idx = p.i("index")?;
 
     let non_empty: Vec<(usize, &[Arc<Geometry>])> = inputs
         .iter()
