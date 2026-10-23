@@ -73,7 +73,7 @@ fn unused_groups_are_removed_per_piece() {
 #[test]
 fn extract_selected_point_and_edge_without_a_whole_face() {
     let g = box_with_group();
-    let points = Params::resolve(NODE.params, serde_json::json!({"group":"0", "group_type":"points", "extract_elements":true}).as_object()).unwrap();
+    let points = Params::resolve(NODE.params, serde_json::json!({"group":"0", "group_type":"points"}).as_object()).unwrap();
     let picked = cook(&[vec![Arc::new(g.clone())]], &points).unwrap();
     assert_eq!(picked.npoints, 1);
     assert_eq!(picked.nprims(), 0);
@@ -81,8 +81,8 @@ fn extract_selected_point_and_edge_without_a_whole_face() {
     assert_eq!(outputs.0.len(), 2);
     assert_eq!(outputs[0].npoints, 1);
     assert_eq!(outputs[0].nprims(), 0);
-    assert_eq!(outputs[1].topology.vertex_point, g.topology.vertex_point);
-    let edges = Params::resolve(NODE.params, serde_json::json!({"group":"p0-1", "group_type":"edges", "extract_elements":true}).as_object()).unwrap();
+    assert_eq!(outputs[1].npoints, g.npoints - 1);
+    let edges = Params::resolve(NODE.params, serde_json::json!({"group":"p0-1", "group_type":"edges"}).as_object()).unwrap();
     let picked = cook(&[vec![Arc::new(g.clone())]], &edges).unwrap();
     assert_eq!(picked.npoints, 2);
     assert_eq!(picked.nprims(), 1);
@@ -92,7 +92,32 @@ fn extract_selected_point_and_edge_without_a_whole_face() {
     assert_eq!(outputs.0.len(), 2);
     assert_eq!(outputs[0].npoints, 2);
     assert_eq!(outputs[0].nprims(), 1);
-    assert_eq!(outputs[1].topology.vertex_point, g.topology.vertex_point);
+    assert_eq!(outputs[1].nprims(), crate::topo::edges(&g.topology, g.npoints).len() - 1);
     outputs[0].validate().unwrap();
     outputs[1].validate().unwrap();
+}
+
+#[test]
+fn point_group_outputs_are_complementary() {
+    let mut g = Geometry::points_only(vec![0.,0.,0., 1.,0.,0., 2.,0.,0., 3.,0.,0.]).unwrap();
+    g.point.insert("group_pick".into(), Arc::new(Attr::i32(1, vec![0, 1, 0, 1])));
+    g.point.insert("id".into(), Arc::new(Attr::i32(1, vec![0, 1, 2, 3])));
+    let p = Params::resolve(NODE.params, serde_json::json!({"group":"pick", "group_type":"points"}).as_object()).unwrap();
+    let outputs = NODE.cook_outputs(&[vec![Arc::new(g)]], &p).unwrap();
+    assert_eq!((outputs[0].npoints, outputs[1].npoints), (2, 2));
+    assert_eq!(outputs[0].point["id"].as_i32().unwrap(), &[1, 3]);
+    assert_eq!(outputs[1].point["id"].as_i32().unwrap(), &[0, 2]);
+    outputs[0].validate().unwrap();
+    outputs[1].validate().unwrap();
+}
+
+#[test]
+fn legacy_extract_elements_value_is_ignored() {
+    assert!(!NODE.params.iter().any(|spec| spec.name == "extract_elements"));
+    for value in [false, true] {
+        let given = serde_json::json!({"group":"pick", "group_type":"faces", "extract_elements":value});
+        let p = Params::resolve_node("split", NODE.params, given.as_object()).unwrap();
+        let outputs = NODE.cook_outputs(&[vec![Arc::new(box_with_group())]], &p).unwrap();
+        assert_eq!((outputs[0].nprims(), outputs[1].nprims()), (1, 5));
+    }
 }
