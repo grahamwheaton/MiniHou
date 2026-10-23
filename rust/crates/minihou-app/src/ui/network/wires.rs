@@ -1,21 +1,36 @@
 use super::*;
 
-/// Slots include unused declared inputs; multi-input wires share their named port.
-pub(super) fn input_slots(node: &NodeDef, raw: &serde_json::Value) -> Vec<String> {
+/// One entry per declared input: (port name, is multi-input). A multi port is one elongated bar.
+pub(super) fn input_slots(node: &NodeDef, raw: &serde_json::Value) -> Vec<(String, bool)> {
     if node.node_type == "subnet" {
         if let Some(sockets) = raw["input_sockets"].as_array() {
             return sockets.iter().filter_map(|socket| socket["index"].as_u64())
-                .map(|index| format!("in{index}")).collect();
+                .map(|index| (format!("in{index}"), false)).collect();
         }
     }
-    minihou_core::nodes::get(&node.node_type).map(|spec| spec.inputs.iter().flat_map(|port| {
-        let count = node.inputs.iter().find(|(name, _)| name == port.name).map_or(0, |(_, refs)| refs.len()).max(1);
-        std::iter::repeat_n(port.name.to_owned(), count)
-    }).collect()).unwrap_or_default()
+    minihou_core::nodes::get(&node.node_type).map(|spec| spec.inputs.iter().map(|p| (p.name.to_owned(), p.multi)).collect()).unwrap_or_default()
 }
 
+/// Inputs are spread evenly across the card width, so a lone input stays centred.
 pub(super) fn input_offset(index: usize, count: usize) -> Vec2 {
-    vec2(CARD.x * 0.5 + (index as f32 - (count.saturating_sub(1)) as f32 * 0.5) * 16.0, 0.0)
+    vec2(CARD.x * (index as f32 + 1.0) / (count.max(1) as f32 + 1.0), 0.0)
+}
+
+/// Local x of wire `wire` of `wires` on port `group` of `groups`; a multi port spreads its wires along its bar.
+pub(super) fn port_x(groups: usize, group: usize, multi: bool, wire: usize, wires: usize) -> f32 {
+    if !multi { return input_offset(group, groups).x; }
+    let (left, width) = bar_span(groups, group);
+    left + width * (wire as f32 + 1.0) / (wires.max(1) as f32 + 1.0)
+}
+
+/// Local (left, width) of a multi-input bar: 80% of the card for a lone port, else just under the spacing between ports.
+pub(super) fn bar_span(groups: usize, group: usize) -> (f32, f32) {
+    let width = if groups <= 1 { CARD.x * 0.8 } else { CARD.x / (groups as f32 + 1.0) * 0.9 };
+    (input_offset(group, groups).x - width * 0.5, width)
+}
+
+pub(super) fn wire_count(node: &NodeDef, port: &str) -> usize {
+    node.inputs.iter().find(|(name, _)| name == port).map_or(0, |(_, refs)| refs.len())
 }
 
 pub(super) fn output_count(raw: &serde_json::Value) -> usize {
@@ -50,7 +65,8 @@ mod subnet_port_tests {
         let doc = crate::subnet_edit::add_input(&doc, "sub", "box1").unwrap();
         let graph = minihou_core::Graph::from_value(&doc).unwrap();
         let node = &graph.nodes.iter().find(|(id, _)| id == "sub").unwrap().1;
-        assert_eq!(input_slots(node, &doc["nodes"]["sub"]), vec!["in0", "in1"]);
+        let names: Vec<String> = input_slots(node, &doc["nodes"]["sub"]).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["in0", "in1"]);
         assert_ne!(input_offset(0, 2), input_offset(1, 2));
         assert_ne!(output_offset(0, 2), output_offset(1, 2));
         let sparse=json!({"output_sockets":[{"index":0,"name":"First"},{"index":3,"name":"Fourth"}]});
@@ -65,8 +81,16 @@ pub(super) fn canvas_ports(v: &View, positions: &[(String, Pos2)]) -> Vec<(AddCo
     for (id, at) in positions {
         let Some((_, node)) = v.graph.nodes.iter().find(|(n, _)| n == id) else { continue };
         let inputs = input_slots(node, &v.doc["nodes"][id]);
-        for (index, port) in inputs.iter().enumerate() {
-            ports.push((AddConnection::Input { node: id.clone(), port: port.clone() }, *at + input_offset(index, inputs.len())));
+        for (index, (port, multi)) in inputs.iter().enumerate() {
+            let target = AddConnection::Input { node: id.clone(), port: port.clone() };
+            if *multi {
+                // A drop anywhere on the bar targets the port: sample it densely.
+                let (left, width) = bar_span(inputs.len(), index);
+                let steps = (width / 8.0).ceil() as usize;
+                for s in 0..=steps { ports.push((target.clone(), *at + vec2(left + width * s as f32 / steps as f32, 0.0))); }
+            } else {
+                ports.push((target, *at + input_offset(index, inputs.len())));
+            }
         }
         if node.node_type != "output" {
             let count = output_count(&v.doc["nodes"][id]);
@@ -150,14 +174,15 @@ pub(super) fn curves_for(canvas: Rect, state: &State, graph: &minihou_core::Grap
         for (port, source, source_index) in def.inputs.iter().flat_map(|(port, refs)| refs.iter().enumerate().map(move |(index, source)|
             (port, source, index))) {
             let offset = used.entry(port).or_default();
-            let Some(index) = slots.iter().position(|name| name == port).map(|i| i + *offset) else { continue };
+            let Some(index) = slots.iter().position(|(name, _)| name == port) else { continue };
+            let x = port_x(slots.len(), index, slots[index].1, *offset, wire_count(def, port));
             *offset += 1;
             let Some(&start) = lookup.get(source.as_str()) else { continue };
             let endpoint = def.output_for(port, source_index, source);
             let raw=&doc["nodes"][source];
             let Some(position)=output_position(raw,endpoint.output) else { continue };
             let a = screen(canvas, state, start + output_offset(position, output_count(raw)));
-            let b = screen(canvas, state, end + input_offset(index, slots.len()));
+            let b = screen(canvas, state, end + vec2(x, 0.0));
             let wire = WireRef { from: source.clone(), to: target.clone(), port: port.clone() };
             if seen.insert(wire.clone()) { wires.push((wire, network_wires::curve(a,b))); }
         }
@@ -177,3 +202,31 @@ pub(super) fn wires(p: &egui::Painter, canvas: Rect, state: &State, v: &View, po
     }
 }
 
+
+#[cfg(test)] mod port_spacing_tests {
+    use super::*;
+    #[test] fn single_port_is_centred_and_multiple_ports_are_even() {
+        assert_eq!(input_offset(0, 1).x, CARD.x * 0.5);
+        let xs: Vec<f32> = (0..3).map(|i| input_offset(i, 3).x).collect();
+        assert!((xs[1] - xs[0] - (xs[2] - xs[1])).abs() < 1e-4);
+        assert!((xs[0] - (CARD.x - xs[2])).abs() < 1e-4);
+        assert!(xs[0] > 0.0 && xs[2] < CARD.x);
+    }
+}
+
+#[cfg(test)] mod merged_socket_tests {
+    use super::*;
+    #[test] fn multi_wires_spread_along_one_bar_and_singles_stay_put() {
+        let (left, width) = bar_span(1, 0);
+        assert!((left + width * 0.5 - CARD.x * 0.5).abs() < 1e-4);
+        assert!(left >= 0.0 && left + width <= CARD.x);
+        let xs: Vec<f32> = (0..3).map(|k| port_x(1, 0, true, k, 3)).collect();
+        assert!((xs[1] - xs[0] - (xs[2] - xs[1])).abs() < 1e-4);
+        assert!(xs[0] > left && xs[2] < left + width);
+        assert!((port_x(1, 0, true, 0, 1) - CARD.x * 0.5).abs() < 1e-3);
+        assert_eq!(port_x(2, 1, false, 0, 1), input_offset(1, 2).x);
+        let (l0, w0) = bar_span(2, 0);
+        let (l1, _) = bar_span(2, 1);
+        assert!(l0 + w0 <= l1);
+    }
+}
