@@ -1,6 +1,5 @@
 //! Embeds a build identifier (package version, git commit, build time) shown in the status bar.
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 fn git(args: &[&str]) -> Option<String> {
     let out = Command::new("git").args(args).output().ok()?;
@@ -24,11 +23,16 @@ fn utc_stamp(secs: u64) -> String {
 }
 
 fn main() {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    // Commit time, not wall-clock time: the value only changes when HEAD changes, so it
+    // does not invalidate the incremental cache on every build.
+    let stamp = git(&["log", "-1", "--format=%ct"])
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(|secs| format!("{} UTC", utc_stamp(secs)))
+        .unwrap_or_else(|| "unknown".into());
     let hash = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "nogit".into());
     let dirty = git(&["status", "--porcelain"]).is_some_and(|s| !s.is_empty());
     println!("cargo:rustc-env=MINIHOU_BUILD_COMMIT={hash}{}", if dirty { "*" } else { "" });
-    println!("cargo:rustc-env=MINIHOU_BUILD_TIME={} UTC", utc_stamp(secs));
+    println!("cargo:rustc-env=MINIHOU_BUILD_TIME={stamp}");
     // Any source change in the app or core re-runs this script so the build time stays honest.
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=../minihou-core/src");
