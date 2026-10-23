@@ -191,3 +191,46 @@ fn bevel_faces_wind_outward_and_edges_are_oriented_consistently() {
         }
     }
 }
+
+#[test]
+fn valence_three_corner_matches_blender_vertex_mesh_counts() {
+    // Blender's vertex mesh: ring j holds n * (s - 2j) points while that is
+    // positive, plus one shared centre point when s is even; the original
+    // vertex is removed. Faces: n * floor(s/2) * ceil(s/2) quads, plus a
+    // centre n-gon when s is odd (M_POLY for s = 1).
+    for (segments, points, faces) in [(1, 3, 1), (2, 7, 3), (3, 12, 7), (4, 19, 12)] {
+        let g = cube();
+        let out = run(g.clone(), json!({"group": "0", "width": 0.2, "segments": segments}));
+        out.validate().unwrap();
+        assert_eq!(out.npoints, g.npoints - 1 + points, "segments {segments}");
+        assert_eq!(out.nprims(), g.nprims() + faces, "segments {segments}");
+        assert!(crate::topo::edges(&out.topology, out.npoints)
+            .count
+            .iter()
+            .all(|&n| n == 2));
+        // No sliver triangles at the corner once the viewport fans each
+        // polygon from its first point (trimmed faces start at a far point).
+        let corner = [g.p()[0] as f64, g.p()[1] as f64, g.p()[2] as f64];
+        let (tris, _) = crate::preview::fan_triangles(
+            &out.topology.vertex_point,
+            &out.topology.prim_offsets,
+            out.topology.closed.as_deref(),
+        );
+        let p = out.p();
+        let at = |i: u32| {
+            let i = i as usize * 3;
+            [p[i] as f64, p[i + 1] as f64, p[i + 2] as f64]
+        };
+        for t in tris.chunks(3) {
+            let (a, b, c) = (at(t[0]), at(t[1]), at(t[2]));
+            if [a, b, c].iter().any(|&q| len(sub(q, corner)) > 0.5) {
+                continue;
+            }
+            for (o, u, v) in [(a, b, c), (b, c, a), (c, a, b)] {
+                let (u, v) = (sub(u, o), sub(v, o));
+                let cos = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (len(u) * len(v));
+                assert!(cos.acos().to_degrees() > 5.0, "segments {segments}: sliver {t:?}");
+            }
+        }
+    }
+}
