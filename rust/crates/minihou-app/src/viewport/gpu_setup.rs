@@ -10,7 +10,7 @@ fn viewport_shader() -> String {
 #[test]
 fn distant_grid_fades_when_a_pixel_covers_multiple_cells() {
     let shader = viewport_shader();
-    assert!(shader.contains("smoothstep(0.25,0.5,width)"));
+    assert!(shader.contains("smoothstep(0.08,0.35,width)"));
     assert!(shader.contains("minor_line*(1.-transition)+major_line*transition"));
 }
 
