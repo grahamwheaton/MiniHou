@@ -292,7 +292,9 @@ fn grid_line(value:f32, spacing:f32) -> f32 {
     let edge=abs(fract(units+0.5)-0.5);
     let width=max(fwidth(units),0.0001);
     // Subpixel cells cannot form stable lines. Fade them before they alias.
-    return (1.-smoothstep(0.,width*1.2,edge))*(1.-smoothstep(0.25,0.5,width));
+    // Start fading earlier: between 0.08 and 0.35 cells per pixel the lines dim smoothly
+    // instead of breaking into dashes as the sampling pattern aliases.
+    return (1.-smoothstep(0.,width*1.2,edge))*(1.-smoothstep(0.08,0.35,width));
 }
 @fragment
 fn fs_infinite_floor(@builtin(position) pixel:vec4<f32>) -> FloorPixel {
