@@ -23,10 +23,10 @@ impl Constraint {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchStage { Off, Pivot, Reference, Angle }
-/// Base snap picking and hover targets: points and edge centres by default; with Alt held, also
-/// the edge and face surfaces so the point can slide along an edge or over a face. Volume stays off.
+/// Base snap picking and hover targets: points, edge centres and face (polygon) centres by default; with Alt
+/// held, also the edge and face surfaces so the point can slide along an edge or over a face. Volume stays off.
 pub fn base_snap_targets(alt: bool) -> SnapTargets {
-    let mut kinds = vec![SnapTo::Vertex, SnapTo::EdgeCenter];
+    let mut kinds = vec![SnapTo::Vertex, SnapTo::EdgeCenter, SnapTo::FaceCenter];
     if alt { kinds.extend([SnapTo::Edge, SnapTo::Face]); }
     SnapTargets::from_bits(kinds.iter().fold(0u8, |bits, to| bits | (1 << *to as u8)))
 }
@@ -347,7 +347,7 @@ pub fn feature_rotation_axis(feature: &crate::picking::SnapFeature) -> Option<[f
     let triangle=feature.triangle;
     let edges=[(0,1),(1,2),(2,0)];
     let vector=match feature.kind {
-        SnapTo::Face => {
+        SnapTo::Face | SnapTo::FaceCenter => {
             let a=base_snap_offset(triangle[0],triangle[1]);
             let b=base_snap_offset(triangle[0],triangle[2]);
             [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]
@@ -443,10 +443,10 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
     }
     #[test] fn base_snap_targets_default_points_and_centres_alt_adds_surfaces() {
         let targets=base_snap_targets(false);
-        for to in [SnapTo::Vertex,SnapTo::EdgeCenter] { assert!(targets.contains(to),"{to:?}"); }
+        for to in [SnapTo::Vertex,SnapTo::EdgeCenter,SnapTo::FaceCenter] { assert!(targets.contains(to),"{to:?}"); }
         for to in [SnapTo::Edge,SnapTo::Face,SnapTo::Volume,SnapTo::Increment] { assert!(!targets.contains(to),"{to:?}"); }
         let alt=base_snap_targets(true);
-        for to in [SnapTo::Vertex,SnapTo::EdgeCenter,SnapTo::Edge,SnapTo::Face] { assert!(alt.contains(to),"{to:?}"); }
+        for to in [SnapTo::Vertex,SnapTo::EdgeCenter,SnapTo::FaceCenter,SnapTo::Edge,SnapTo::Face] { assert!(alt.contains(to),"{to:?}"); }
         assert!(!alt.contains(SnapTo::Volume)); assert!(!alt.contains(SnapTo::Increment));
     }
     #[test] fn b_from_move_starts_base_snap_without_prompt() {

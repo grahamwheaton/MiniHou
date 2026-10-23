@@ -64,6 +64,31 @@ pub fn snap_feature(positions: &[f32], indices: &[u32], camera: crate::ui::Camer
     best.map(|(_,_,feature)| feature)
 }
 
+/// Polygon centre as the average of its corner points (not triangle-weighted), so quads and n-gons
+/// get their true vertex centroid. None for an empty polygon or a stale point id.
+pub fn polygon_centroid(positions: &[f32], corners: &[u32]) -> Option<[f32; 3]> {
+    if corners.is_empty() { return None; }
+    let mut sum = [0_f32; 3];
+    for &id in corners { let p = try_at(positions, id)?; for k in 0..3 { sum[k] += p[k]; } }
+    let n = corners.len() as f32;
+    Some(sum.map(|s| s / n))
+}
+
+/// Pixel radius around a polygon centre within which the centre is offered while the pointer is over that polygon.
+pub const FACE_CENTER_RADIUS: f32 = 40.;
+
+/// Merge a face-centre candidate (pixel distance from pointer) into the result of `snap_feature`.
+/// Point features (vertex, edge centre) keep priority when they are nearer in pixels; surface features
+/// (edge, face, volume) always yield to the centre so the default snap lands on it.
+pub fn prefer_face_center(base: Option<SnapFeature>, base_distance: Option<f32>, centre: Option<(SnapFeature, f32)>) -> Option<SnapFeature> {
+    use crate::ui::SnapTo;
+    let Some((centre, centre_distance)) = centre else { return base; };
+    match (base, base_distance) {
+        (Some(b), Some(d)) if matches!(b.kind, SnapTo::Vertex | SnapTo::EdgeCenter) && d <= centre_distance => Some(b),
+        _ => Some(centre),
+    }
+}
+
 /// A region in viewport screen coordinates. Boundaries count as inside.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RegionShape {

@@ -36,11 +36,12 @@ impl Pivot {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[repr(u8)]
-pub enum SnapTo { Increment, #[default] Vertex, Edge, Face, Volume, EdgeCenter }
+pub enum SnapTo { Increment, #[default] Vertex, Edge, Face, Volume, EdgeCenter, FaceCenter }
 impl SnapTo {
-    pub const ALL: [SnapTo; 6] = [Self::Increment, Self::Vertex, Self::Edge, Self::Face, Self::Volume, Self::EdgeCenter];
+    pub const ALL: [SnapTo; 7] = [Self::Increment, Self::Vertex, Self::Edge, Self::Face, Self::Volume, Self::EdgeCenter, Self::FaceCenter];
     pub fn label(self) -> &'static str {
-        match self { Self::Increment => "Increment", Self::Vertex => "Vertex", Self::Edge => "Edge", Self::Face => "Face", Self::Volume => "Volume", Self::EdgeCenter => "Edge Center" }
+        match self { Self::Increment => "Increment", Self::Vertex => "Vertex", Self::Edge => "Edge", Self::Face => "Face", Self::Volume => "Volume",
+            Self::EdgeCenter => "Edge Center", Self::FaceCenter => "Face Center" }
     }
 }
 
@@ -61,7 +62,7 @@ impl Default for SnapTargets { fn default() -> Self { SnapTo::Vertex.into() } }
 impl From<SnapTo> for SnapTargets { fn from(to: SnapTo) -> Self { Self(1 << to as u8) } }
 impl SnapTargets {
     pub fn bits(self) -> u8 { self.0 }
-    pub fn from_bits(bits: u8) -> Self { let bits = bits & 63; if bits == 0 { Self::default() } else { Self(bits) } }
+    pub fn from_bits(bits: u8) -> Self { let bits = bits & 127; if bits == 0 { Self::default() } else { Self(bits) } }
     pub fn contains(self, to: SnapTo) -> bool { self.0 & (1 << to as u8) != 0 }
     pub fn toggle(&mut self, to: SnapTo) { let bits = self.0 ^ (1 << to as u8); if bits != 0 { self.0 = bits; } }
     pub fn geometry(self) -> bool { self.0 & !1 != 0 }

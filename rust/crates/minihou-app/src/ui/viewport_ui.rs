@@ -103,7 +103,7 @@ fn overlay_contents(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) 
     let snap_label = if ed.snap.to == SnapTo::Increment.into() { crate::units::format(ed.snap.increment as f64, v.units) }
         else if ed.snap.to.iter().count()>1 { "Multi".into() }
         else { match ed.snap.to.iter().next().unwrap_or_default() {
-            SnapTo::Vertex=>"Vtx",SnapTo::Edge=>"Edge",SnapTo::Face=>"Face",SnapTo::Volume=>"Vol",SnapTo::EdgeCenter=>"Mid",SnapTo::Increment=>"Grid"
+            SnapTo::Vertex=>"Vtx",SnapTo::Edge=>"Edge",SnapTo::Face=>"Face",SnapTo::Volume=>"Vol",SnapTo::EdgeCenter=>"Mid",SnapTo::FaceCenter=>"Ctr",SnapTo::Increment=>"Grid"
         }.into() };
     let snap_main = Rect::from_min_max(h.snap.min, Pos2::new(h.snap.right() - 16., h.snap.bottom()));
     if button_text(ui, th, snap_main, "vp_snap_toggle", ed.snap.enabled, "Toggle snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled && h.snap.width() > 44. { Some(snap_label.as_str()) } else { None }, false)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }

@@ -7,7 +7,7 @@ mod spatial;
 
 mod interact;
 
-pub use spatial::{position_bounds, SnapFeature, snap_feature, RegionShape, SelectOp, Hit, Bvh, WireHit, pick_wire, pick_wire_occluded};
+pub use spatial::{position_bounds, SnapFeature, snap_feature, polygon_centroid, prefer_face_center, FACE_CENTER_RADIUS, RegionShape, SelectOp, Hit, Bvh, WireHit, pick_wire, pick_wire_occluded};
 
 pub use interact::{Selection, at, try_at, pick_triangle, pick_triangle_filtered, pick_triangle_culled, element_of, extend, highlight, intersect_horizontal_plane, drop_world_position, cursor_hit_position, primitive_rest_offset, intersect_ground_plane, intersect_ground_or_mesh};
 
@@ -258,6 +258,30 @@ mod tests {
         assert_eq!(face.kind,SnapTo::Face);
         assert!((face.point[0]-0.2).abs()<1e-5 && (face.point[1]-0.1).abs()<1e-5);
         assert!(snap_feature(&p,&[0,2,1],camera,rect,pos2(120.,90.),SnapTo::Face.into(),true).is_none());
+    }
+
+    #[test]
+    fn polygon_centroid_of_quad_and_pentagon() {
+        let quad=[0.,0.,0., 2.,0.,0., 2.,4.,0., 0.,4.,0.];
+        assert_eq!(polygon_centroid(&quad,&[0,1,2,3]),Some([1.,2.,0.]));
+        // Irregular pentagon: corner average, not the triangle-fan area centroid.
+        let pent=[0.,0.,1., 4.,0.,1., 5.,3.,1., 2.,5.,1., -1.,2.,1.];
+        let c=polygon_centroid(&pent,&[0,1,2,3,4]).unwrap();
+        assert!((c[0]-2.).abs()<1e-6 && (c[1]-2.).abs()<1e-6 && (c[2]-1.).abs()<1e-6,"{c:?}");
+        assert_eq!(polygon_centroid(&quad,&[]),None);
+        assert_eq!(polygon_centroid(&quad,&[0,9]),None);
+    }
+
+    #[test]
+    fn face_center_beats_surface_but_not_nearer_points() {
+        use crate::ui::SnapTo;
+        let f=|kind| SnapFeature { point:[0.;3], triangle:[[0.;3];3], kind };
+        let centre=Some((f(SnapTo::FaceCenter),10.));
+        assert_eq!(prefer_face_center(Some(f(SnapTo::Face)),Some(1.),centre).unwrap().kind,SnapTo::FaceCenter);
+        assert_eq!(prefer_face_center(Some(f(SnapTo::Vertex)),Some(3.),centre).unwrap().kind,SnapTo::Vertex);
+        assert_eq!(prefer_face_center(Some(f(SnapTo::EdgeCenter)),Some(12.),centre).unwrap().kind,SnapTo::FaceCenter);
+        assert_eq!(prefer_face_center(None,None,centre).unwrap().kind,SnapTo::FaceCenter);
+        assert_eq!(prefer_face_center(Some(f(SnapTo::Edge)),Some(1.),None).unwrap().kind,SnapTo::Edge);
     }
 
     #[test]
