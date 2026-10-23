@@ -1,5 +1,5 @@
 id = "switch"
 name = "Switch"
 category = "Flow"
-description = "Pass on one of several inputs by index or select parameter."
+description = "Pass on one of several inputs by index."
 keywords = "switch select choose index branch flow"
