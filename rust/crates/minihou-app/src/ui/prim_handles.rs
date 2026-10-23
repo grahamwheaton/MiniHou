@@ -310,6 +310,38 @@ mod tests {
     }
 
     #[test]
+    fn primitive_count_drags_start_at_displayed_defaults() {
+        for (node_type, rows, columns) in [
+            ("sphere", 16, 32),
+            ("tube", 1, 24),
+            ("torus", 12, 32),
+        ] {
+            let params = json!({});
+            let (grips, ring) = handles_for_node("primitive", node_type, &params);
+            assert_eq!(ring.unwrap().label, format!("{rows} x {columns}"));
+            for (param, start) in [("rows", rows), ("columns", columns)] {
+                let grip = grips.iter().find(|grip| matches!(grip.action,
+                    GripAction::IntStep { param: name, .. } if name == param)).unwrap();
+                let drag = PrimDrag {
+                    node: "primitive".into(),
+                    start_pointer: pos2(100.0, 100.0),
+                    screen_dir: Vec2::X,
+                    span: 10.0,
+                    start_params: params.clone(),
+                    action: grip.action.clone(),
+                    world_dir: grip.world_dir,
+                    camera: CameraInfo::default(),
+                    rect: Rect::NOTHING,
+                };
+                for (delta, expected) in [(0.0, start), (20.0, start + 2)] {
+                    let edits = compute_edits_for_drag(&drag, pos2(100.0 + delta, 100.0), false);
+                    assert_eq!(edits, vec![(param, json!(expected))], "{node_type} {param} at {delta}px");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_tube_radii_height() {
         let start_params = json!({
             "radius_top": 1.0,
