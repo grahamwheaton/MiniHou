@@ -23,9 +23,12 @@ impl Constraint {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchStage { Off, Pivot, Reference, Angle }
-/// Every geometric inference kind (all `SnapTo` except Increment), used for base snap picking and hover.
-pub fn base_snap_targets() -> SnapTargets {
-    SnapTargets::from_bits(SnapTo::ALL.iter().filter(|to| **to != SnapTo::Increment).fold(0u8, |bits, to| bits | (1 << *to as u8)))
+/// Base snap picking and hover targets: points and edge centres by default; with Alt held, also
+/// the edge and face surfaces so the point can slide along an edge or over a face. Volume stays off.
+pub fn base_snap_targets(alt: bool) -> SnapTargets {
+    let mut kinds = vec![SnapTo::Vertex, SnapTo::EdgeCenter];
+    if alt { kinds.extend([SnapTo::Edge, SnapTo::Face]); }
+    SnapTargets::from_bits(kinds.iter().fold(0u8, |bits, to| bits | (1 << *to as u8)))
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BaseStage { Off, Base, Target, SourceDirection, TargetDirection, Done }
@@ -438,10 +441,13 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
             assert_eq!(modal.base_stage,BaseStage::Base);
         }
     }
-    #[test] fn base_snap_targets_cover_every_inference_kind() {
-        let targets=base_snap_targets();
-        for to in [SnapTo::Vertex,SnapTo::Edge,SnapTo::Face,SnapTo::Volume,SnapTo::EdgeCenter] { assert!(targets.contains(to),"{to:?}"); }
-        assert!(!targets.contains(SnapTo::Increment));
+    #[test] fn base_snap_targets_default_points_and_centres_alt_adds_surfaces() {
+        let targets=base_snap_targets(false);
+        for to in [SnapTo::Vertex,SnapTo::EdgeCenter] { assert!(targets.contains(to),"{to:?}"); }
+        for to in [SnapTo::Edge,SnapTo::Face,SnapTo::Volume,SnapTo::Increment] { assert!(!targets.contains(to),"{to:?}"); }
+        let alt=base_snap_targets(true);
+        for to in [SnapTo::Vertex,SnapTo::EdgeCenter,SnapTo::Edge,SnapTo::Face] { assert!(alt.contains(to),"{to:?}"); }
+        assert!(!alt.contains(SnapTo::Volume)); assert!(!alt.contains(SnapTo::Increment));
     }
     #[test] fn b_from_move_starts_base_snap_without_prompt() {
         let mut modal=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Vertex,false,1.);
@@ -722,7 +728,7 @@ impl App {
                 egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, .. } => {
                     if modal.base_stage!=BaseStage::Off {
                         // Point and surface features work even when incremental snapping is the current preference.
-                        let geometry=base_snap_targets();
+                        let geometry=base_snap_targets(modifiers.alt);
                         let feature=self.modal_snap_feature(pos,geometry);
                         let picked=feature.map(|feature|feature.point);
                         let plane_point=modal.base_point.unwrap_or(modal.pivot);
@@ -802,7 +808,7 @@ impl App {
         let snap=self.editor_state.snap.enabled ^ modifiers.ctrl;
         if matches!(modal.base_stage,BaseStage::Base|BaseStage::Target) {
             // Base snap hover: the indicator follows the nearest inference point before any click.
-            let feature=self.modal_snap_feature(modal.pointer,base_snap_targets());
+            let feature=self.modal_snap_feature(modal.pointer,base_snap_targets(modifiers.alt));
             modal.target=feature.map(|f|f.point);
             modal.target_kind=feature.map(|f|f.kind);
             modal.target_shape=feature.map(|f|f.triangle);
@@ -817,7 +823,7 @@ impl App {
                 let axis=modal.rotation_axis(frame,camera);
                 let offset=modal.base_target.map(|target|base_snap_offset(base,target)).unwrap_or([0.;3]);
                 let plane=[0,1,2].map(|i|base[i]+offset[i]);
-                let feature=self.modal_snap_feature(modal.pointer,base_snap_targets());
+                let feature=self.modal_snap_feature(modal.pointer,base_snap_targets(modifiers.alt));
                 let point=feature.map(|feature|feature.point).or_else(|| {
                     let (origin,direction)=ui::transform_gizmo::ray(camera,self.last_viewport,modal.pointer);
                     ray_plane_point(origin,direction,plane,axis)
