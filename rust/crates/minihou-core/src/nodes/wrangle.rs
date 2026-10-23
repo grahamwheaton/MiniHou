@@ -292,8 +292,70 @@ fn split_top(s: &str, delim: char) -> Option<Vec<&str>> {
         Some(parts)
     }
 }
+fn top_operator(s: &str, operators: &[char]) -> Result<Option<(usize, char)>> {
+    let mut stack = Vec::new();
+    let mut found = None;
+    let mut previous = None;
+    for (at, ch) in s.char_indices() {
+        match ch {
+            '(' | '{' => stack.push(ch),
+            ')' | '}' => {
+                let expected = if ch == ')' { '(' } else { '{' };
+                if stack.pop() != Some(expected) {
+                    return Err(Error::new("unbalanced expression delimiters"));
+                }
+            }
+            _ if stack.is_empty() && operators.contains(&ch) => {
+                let unary = matches!(previous, None | Some('(' | '{' | ',' | '+' | '-' | '*' | '/'));
+                let exponent = matches!(ch, '+' | '-') && matches!(previous, Some('e' | 'E'))
+                    && s[..at].chars().rev().nth(1).is_some_and(|c| c.is_ascii_digit());
+                let power = ch == '*' && (s[at + 1..].starts_with('*') || s[..at].ends_with('*'));
+                if !unary && !exponent && !power {
+                    found = Some((at, ch));
+                }
+            }
+            _ => {}
+        }
+        if !ch.is_whitespace() {
+            previous = Some(ch);
+        }
+    }
+    if !stack.is_empty() {
+        return Err(Error::new("unbalanced expression delimiters"));
+    }
+    Ok(found)
+}
+fn wrapped(s: &str, open: char, close: char) -> bool {
+    if !s.starts_with(open) || !s.ends_with(close) { return false; }
+    let mut depth = 0;
+    for (at, ch) in s.char_indices() {
+        if ch == open { depth += 1; }
+        if ch == close {
+            depth -= 1;
+            if depth == 0 { return at + ch.len_utf8() == s.len(); }
+        }
+    }
+    false
+}
 fn eval(s: &str, g: &Geometry, d: Domain, i: usize, inputs: &Inputs) -> Result<Vec<f64>> {
     let s = s.trim();
+    let binary = top_operator(s, &['+', '-'])?.or(top_operator(s, &['*', '/'])?);
+    if let Some((at, op)) = binary {
+        let a = eval(&s[..at], g, d, i, inputs)?;
+        let b = eval(&s[at + 1..], g, d, i, inputs)?;
+        let width = a.len().max(b.len());
+        if a.len() != 1 && a.len() != width || b.len() != 1 && b.len() != width {
+            return Err(Error::new("vector widths differ"));
+        }
+        return (0..width).map(|k| {
+            let x = a[if a.len() == 1 { 0 } else { k }];
+            let y = b[if b.len() == 1 { 0 } else { k }];
+            Ok(match op { '+' => x + y, '-' => x - y, '*' => x * y, _ => x / y })
+        }).collect();
+    }
+    if wrapped(s, '(', ')') {
+        return eval(&s[1..s.len() - 1], g, d, i, inputs);
+    }
     if s == "rand()" {
         return eval(&format!("rand({i})"), g, d, i, inputs);
     }
@@ -311,7 +373,7 @@ fn eval(s: &str, g: &Geometry, d: Domain, i: usize, inputs: &Inputs) -> Result<V
             }
         }
     }
-    let vec_inner = if s.starts_with('{') && s.ends_with('}') {
+    let vec_inner = if wrapped(s, '{', '}') {
         Some(&s[1..s.len() - 1])
     } else if s.starts_with("set(") && s.ends_with(')') {
         Some(&s[4..s.len() - 1])
@@ -338,32 +400,6 @@ fn eval(s: &str, g: &Geometry, d: Domain, i: usize, inputs: &Inputs) -> Result<V
     }
     if s.starts_with('@') && reference(s).is_ok() {
         return read(g, d, i, s, inputs);
-    }
-    for op in ['+', '-', '*', '/'] {
-        if let Some(parts) = split_top(s, op) {
-            if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                let a = eval(parts[0], g, d, i, inputs)?;
-                let b = eval(parts[1], g, d, i, inputs)?;
-                if a.len() > 1 || b.len() > 1 {
-                    let w = a.len().max(b.len());
-                    if a.len() != 1 && a.len() != w || b.len() != 1 && b.len() != w {
-                        return Err(Error::new("vector widths differ"));
-                    }
-                    return (0..w)
-                        .map(|k| {
-                            let x = a[if a.len() == 1 { 0 } else { k }];
-                            let y = b[if b.len() == 1 { 0 } else { k }];
-                            Ok(match op {
-                                '+' => x + y,
-                                '-' => x - y,
-                                '*' => x * y,
-                                _ => x / y,
-                            })
-                        })
-                        .collect();
-                }
-            }
-        }
     }
     let expr = Expr::parse(s)?;
     let result = expr.eval(&mut |name| {

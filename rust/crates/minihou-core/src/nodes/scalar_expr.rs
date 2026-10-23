@@ -56,6 +56,7 @@ impl Expr {
                 let value=match (name.as_str(),v.as_slice()){
                     ("sin",[x])=>if array{(*x as f32).sin() as f64}else{x.sin()},
                     ("cos",[x])=>if array{(*x as f32).cos() as f64}else{x.cos()},
+                    ("atan2",[y,x])=>if array{(*y as f32).atan2(*x as f32) as f64}else{y.atan2(*x)},
                     ("abs",[x])=>x.abs(),("round",[x])=>x.round(),("sqrt",[x])=>if array{(*x as f32).sqrt() as f64}else{x.sqrt()},
                     ("min",xs) if xs.len()>=2=>xs.iter().copied().reduce(|x,y|if y<x{y}else{x}).unwrap(),
                     ("max",xs) if xs.len()>=2=>xs.iter().copied().reduce(|x,y|if y>x{y}else{x}).unwrap(),
@@ -113,7 +114,7 @@ impl Parser<'_>{
         if attr&&self.text.get(self.pos)==Some(&b'.'){self.pos+=1;while self.text.get(self.pos).is_some_and(u8::is_ascii_alphabetic){self.pos+=1;}}
         let name=std::str::from_utf8(&self.text[start..self.pos]).unwrap().to_owned();
         if !attr&&self.take(b"("){
-            if !["sin","cos","abs","round","sqrt","min","max","clamp","smoothstep","fit","rand","noise","ch","chs","chv"].contains(&name.as_str()){return Err(Error::new(format!("unsupported function {name}")));}
+            if !["sin","cos","atan2","abs","round","sqrt","min","max","clamp","smoothstep","fit","rand","noise","ch","chs","chv"].contains(&name.as_str()){return Err(Error::new(format!("unsupported function {name}")));}
             let mut args=Vec::new();if !self.take(b")"){loop{args.push(self.sum()?);if self.take(b")"){break;}if !self.take(b","){return Err(Error::new("expected ',' or ')'"));}}}
             Ok(Expr::Call(name,args))
         }else{Ok(Expr::Name(if attr{format!("@{name}")}else if dollar{format!("${name}")}else{name}))}
