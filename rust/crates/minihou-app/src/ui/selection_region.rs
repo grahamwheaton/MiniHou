@@ -64,7 +64,7 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
         let canvas = |p| viewport.contains(p) && super::viewport_ui::selection_canvas_contains(viewport, p);
         if !s.armed {
             if let egui::Event::PointerButton { pos, button, pressed: true, modifiers } = &event {
-                if canvas(*pos) && !modifiers.alt {
+                if canvas(*pos) && !modifiers.alt && !super::sketch::measurement_ui_hit(ctx, *pos) {
                     if *button == PointerButton::Secondary && modifiers.ctrl {
                         s = State { armed: true, kind: Kind::Lasso, ..Default::default() };
                     } else if *button == PointerButton::Primary && matches!(v.editor.tool, super::Tool::Select | super::Tool::Move | super::Tool::Rotate | super::Tool::Scale | super::Tool::Transform)
@@ -170,6 +170,25 @@ pub fn paint(ui: &egui::Ui, viewport: Rect, v: &View) {
 mod tests {
     use super::*;
     use egui::{Event, Key, PointerButton, Pos2, RawInput};
+
+    #[test]
+    fn press_on_clear_measurements_button_does_not_start_region() {
+        let mut fixture = crate::ui::testing::Fixture::new();
+        fixture.editor.tool = super::super::Tool::Select;
+        let ctx = egui::Context::default();
+        let viewport = Rect::from_min_max(pos2(0., 0.), pos2(800., 600.));
+        let on_button = pos2(100., 600. - 88. + 12.);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sketch_measurement_hit_rects"),
+            vec![Rect::from_min_size(pos2(57., 600. - 88.), egui::vec2(112., 24.))]));
+        assert!(super::super::sketch::measurement_ui_hit(&ctx, on_button));
+        let mut out = Actions::default();
+        let _ = ctx.run(RawInput { screen_rect: Some(viewport), events: vec![
+            button(on_button, PointerButton::Primary, true, false, false)], ..Default::default() }, |ctx| {
+            assert!(!handle(ctx, viewport, &fixture.view(), &mut out));
+            let s: State = ctx.data(|d| d.get_temp(id())).unwrap_or_default();
+            assert!(!s.armed);
+        });
+    }
 
     #[test]
     fn selection_works_with_every_transform_tool() {
