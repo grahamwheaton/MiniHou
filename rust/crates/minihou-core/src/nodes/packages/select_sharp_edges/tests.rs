@@ -104,3 +104,33 @@ fn test_sharp_edges_tags_and_group_filter() {
     let out_filt = run(&c, serde_json::json!({"angle": 30.0, "group": "0"})).unwrap();
     assert_eq!(edge_group_count(&out_filt, "sharp_edges"), 1);
 }
+
+fn flat_grid(n: usize) -> Geometry {
+    let mut p = Vec::new();
+    for y in 0..=n {
+        for x in 0..=n {
+            p.extend([x as f32, y as f32, 0.0]);
+        }
+    }
+    let (mut vp, mut offs) = (Vec::new(), vec![0]);
+    let w = (n + 1) as i32;
+    for y in 0..n as i32 {
+        for x in 0..n as i32 {
+            let a = y * w + x;
+            vp.extend([a, a + 1, a + w + 1, a + w]);
+            offs.push(vp.len() as i32);
+        }
+    }
+    Geometry::from_arrays(p, vp, offs, None).unwrap()
+}
+
+#[test]
+fn test_flat_grid_has_no_sharp_edges() {
+    let g = flat_grid(3);
+    // 3x3 grid: 24 edges, 12 interior (two faces) and 12 boundary (one face); every dihedral angle is 0 degrees
+    assert_eq!(crate::topo::edges(&g.topology, g.npoints).len(), 24);
+    for angle in [0.0, 30.0] {
+        let out = run(&g, serde_json::json!({"angle": angle})).unwrap();
+        assert_eq!(edge_group_count(&out, "sharp_edges"), 0, "angle {angle}");
+    }
+}
