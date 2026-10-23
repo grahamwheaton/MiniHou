@@ -676,8 +676,11 @@ def read_prefix(obj, mod, *, with_materials=False):
         temp.modifiers.new("MiniHou prefix realization", "NODES").node_group = realize_group
         temp.hide_set(False)
         bpy.context.view_layer.update()
-        evaluated = temp.evaluated_get(bpy.context.evaluated_depsgraph_get())
-        mesh = evaluated.to_mesh()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = temp.evaluated_get(depsgraph)
+        # Same as mesh_reader.read_object: without preserve_all_data_layers the viewport depsgraph's data mask
+        # can leave out generic attributes, colours and UV maps, and the modifier input arrives without them.
+        mesh = evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
         try:
             arrays, _ = mesh_reader._read_mesh(temp, mesh)
             materials = tuple(material.original if material is not None else None

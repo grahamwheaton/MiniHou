@@ -109,7 +109,7 @@ class EdgeLinkTests(unittest.TestCase):
             def hide_set(self, value):
                 pass
             def evaluated_get(self, depsgraph):
-                return types.SimpleNamespace(to_mesh=lambda: types.SimpleNamespace(x=self.x, materials=[]),
+                return types.SimpleNamespace(to_mesh=lambda **_: types.SimpleNamespace(x=self.x, materials=[]),
                                              to_mesh_clear=lambda: None)
         class Nodes:
             def new(self, kind):
