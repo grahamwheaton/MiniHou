@@ -16,6 +16,18 @@ pub(super) fn capped_normal_vertices(float_count: usize, byte_limit: u64) -> usi
     (float_count / 3).min((byte_limit / 12) as usize) & !1
 }
 
+fn cut_wire_indices(lod: &ClusterLod, ids: &[ClusterId]) -> Vec<u32> {
+    let mut edges = Vec::new();
+    for &id in ids { for tri in &lod.clusters[id as usize].triangles {
+        for (a,b) in [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])] {
+            edges.push((a.min(b),a.max(b)));
+        }
+    } }
+    edges.sort_unstable();
+    edges.dedup();
+    edges.into_iter().flat_map(|(a,b)| [a,b]).collect()
+}
+
 pub(super) fn chunked_scene(sc: &Scene, tri: &[u32], edge: &[u32], byte_limit: u64) -> bool {
     [sc.p.len().saturating_mul(4), sc.n.len(), sc.cd.as_ref().map_or(0, Vec::len),
         tri.len(), edge.len(), sc.nlp.len(), sc.nln.len(), sc.bbp.len()]
@@ -267,18 +279,29 @@ impl Gpu {
         self.current_tri=indices;
         self.partition_tri=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_tri},3,self.object_mask_points.as_deref().unwrap_or(&[]));
         if wire {
-            let mut edges = std::collections::BTreeSet::new();
-            for &id in ids { for tri in &lod.clusters[id as usize].triangles {
-                for (a,b) in [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])] { edges.insert((a.min(b),a.max(b))); }
-            } }
-            let mut indices=Vec::with_capacity(edges.len()*2);
-            for (a,b) in edges { indices.extend_from_slice(&[a,b]); }
-            self.current_edge=indices;
+            self.current_edge=cut_wire_indices(lod,ids);
         } else { self.current_edge.clear(); }
         self.partition_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_edge},2,self.object_mask_points.as_deref().unwrap_or(&[]));
         self.rebuild_chunks(device);
     }
 
+}
+
+#[test]
+fn grid_cut_wire_indices_match_ordered_set() {
+    use minihou_core::lod::{Cluster,Sphere};
+    let mut triangles=Vec::new();
+    for y in 0..4 { for x in 0..4 {
+        let a=y*5+x;
+        triangles.extend_from_slice(&[[a,a+1,a+6],[a,a+6,a+5]]);
+    }}
+    let cluster=Cluster {triangles,bounds:Sphere {center:[0.;3],radius:1.},error:0.,level:0};
+    let lod=ClusterLod {clusters:vec![cluster],..Default::default()};
+    let old:std::collections::BTreeSet<_>=lod.clusters[0].triangles.iter()
+        .flat_map(|tri| [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])])
+        .map(|(a,b)|(a.min(b),a.max(b))).collect();
+    let expected:Vec<u32>=old.into_iter().flat_map(|(a,b)|[a,b]).collect();
+    assert_eq!(cut_wire_indices(&lod,&[0]),expected);
 }
 
 #[test]
