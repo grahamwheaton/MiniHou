@@ -17,7 +17,7 @@ type Weights = Vec<(usize, f64)>;
 pub const KNIFE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None,
     name: "knife",
     inputs: GEO,
-    params: crate::params!("cuts":"[]"; "cut_through":false; "snap_tolerance":10.0),
+    params: crate::params!("cuts":"[]"; "cut_through":false; "snap_tolerance":10.0; "knife_edge":false; "knife_intersect_points":false),
     cook: knife,
 };
 fn sub2(a: V2, b: V2) -> V2 {
@@ -793,6 +793,10 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let mut point = interpolate(&g.point, &pointweights);
     point.insert("point_group_knife".into(), Arc::new(Attr::i32(1,
         (0..pointweights.len()).map(|i| i32::from(i>=g.npoints)).collect())));
+    if p.b("knife_intersect_points")? {
+        point.insert("point_group_knife_intersect_points".into(), Arc::new(Attr::i32(1,
+            (0..pointweights.len()).map(|i| i32::from(i>=g.npoints)).collect())));
+    }
     // _build.make takes P from its explicit positions argument, not the attribute table.
     point.insert(
         "P".into(),
@@ -857,6 +861,7 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         .map(|(i, q)| (origin[i].is_none() && protected(q[0] as usize, q[1] as usize)) as u8 as f32)
         .collect();
     edges::write_values(&mut out, "edge_group_knife", &cut, true)?;
+    if p.b("knife_edge")? { edges::write_values(&mut out, "edge_group_knife_edge", &cut, true)?; }
     Ok(out)
 }
 fn pair(a: usize, b: usize) -> (usize, usize) {
@@ -1036,6 +1041,24 @@ mod tests {
         assert_eq!(out.npoints,6);
         let extra=out.p().chunks_exact(3).skip(4).map(|q|(q[0],q[1])).collect::<Vec<_>>();
         assert!(extra.iter().any(|&(x,y)|x==-1.&&y==-0.5)&&extra.iter().any(|&(x,y)|x==1.&&y==0.5),"{extra:?}");
+    }
+    #[test]
+    fn optional_knife_groups() {
+        let g=Geometry::from_arrays(vec![-1.,-1.,0.,1.,-1.,0.,1.,1.,0.,-1.,1.,0.],vec![0,1,2,3],vec![0,4],None).unwrap();
+        let matrix=[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.];
+        let cuts=json!([{"matrix":matrix,"a":[-2.,-1.],"b":[2.,1.],"through":true}]).to_string();
+        let cook=|e:bool,i:bool|{let p=Params::resolve(KNIFE.params,json!({"cuts":cuts,"knife_edge":e,"knife_intersect_points":i}).as_object()).unwrap();
+            knife(&[vec![Arc::new(g.clone())]],&p).unwrap()};
+        let off=cook(false,false);
+        assert!(off.point.get("point_group_knife_intersect_points").is_none());
+        assert!(!off.vertex.keys().any(|k|k.contains("knife_edge")));
+        let on=cook(true,true);
+        let pts=on.point.get("point_group_knife_intersect_points").unwrap();
+        let AttrData::I32(v)=&pts.data else {panic!()};
+        assert_eq!(v,&vec![0,0,0,0,1,1]);
+        let e=edges::values(&on,"edge_group_knife_edge").unwrap();
+        assert_eq!(e.iter().filter(|x|**x>0.).count(),1);
+        assert_eq!(e,edges::values(&on,"edge_group_knife").unwrap());
     }
     #[test]
     fn cube_face_diagonal_cut_adds_no_points() {
