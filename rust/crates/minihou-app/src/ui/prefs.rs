@@ -362,6 +362,20 @@ mod packed_display_tests {
         let back = Preferences::from_json(&p.to_json());
         assert_eq!(back.ui_layout_custom, Some(saved));
     }
+    #[test] fn reset_ui_layout_returns_the_default_and_keeps_the_slot() {
+        use crate::ui::layout::{PanelId, UiLayout};
+        let path = test_path("prefs-ui-reset");
+        let mut p = Preferences::default();
+        p.ui_layout.hidden.push(PanelId::Network);
+        p.ui_layout.shelf_locked = false;
+        p.save_ui_layout();
+        p.reset_ui_layout();
+        assert_eq!(p.ui_layout, UiLayout::default());
+        assert!(p.ui_layout_custom.is_some());
+        p.save_to(&path).unwrap();
+        assert_eq!(Preferences::load_from(&path).ui_layout, UiLayout::default());
+        let _ = fs::remove_file(path);
+    }
     #[test] fn corrupt_file_is_backed_up() {
         let path = test_path("prefs-corrupt"); fs::create_dir_all(path.parent().unwrap()).unwrap(); fs::write(&path,b"{").unwrap();
         assert_eq!(Preferences::load_from(&path),Preferences::default());

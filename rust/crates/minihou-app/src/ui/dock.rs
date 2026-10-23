@@ -180,6 +180,18 @@ pub fn target_in(leaf: &Leaf, dragged: PanelId) -> Option<PanelId> { leaf.panels
 
 fn drag_id() -> egui::Id { egui::Id::new("dock_drag_panel") }
 
+/// "Reset UI to Default": forget panel state kept in egui memory (an unfinished tab drag, the docked
+/// Geometry Info collapse/ranges state, and remembered window/area positions).
+pub fn reset_memory(ctx: &egui::Context) {
+    let geo = super::geo_info::dock_id();
+    ctx.data_mut(|d| {
+        d.remove::<PanelId>(drag_id());
+        d.remove::<bool>(geo.with("ranges"));
+        d.remove::<bool>(geo.with("open"));
+    });
+    ctx.memory_mut(|m| m.reset_areas());
+}
+
 /// Draw tab headers and divider handles; handle tab clicks, tab drags and divider drags.
 /// Returns the edited tree when the user changed it this frame.
 pub fn interact(ui: &mut egui::Ui, root: &DockNode, leaves: &[Leaf], dividers: &[Divider]) -> Option<DockNode> {
@@ -348,6 +360,17 @@ mod tests {
         assert_eq!(node_at(&root, &[1, 1, 1]), Some(&DockNode::Tabs { panels: vec![GeoInfo, Spreadsheet], active: 1 }));
         let (leaves, _) = place(&root, screen(), &[]);
         assert_eq!(target_in(leaves.last().unwrap(), Spreadsheet), Some(GeoInfo));
+    }
+
+    #[test]
+    fn reset_memory_forgets_dock_state() {
+        let ctx = egui::Context::default();
+        let geo = crate::ui::geo_info::dock_id();
+        ctx.data_mut(|d| { d.insert_temp(drag_id(), Spreadsheet); d.insert_persisted(geo.with("ranges"), true); d.insert_persisted(geo.with("open"), false); });
+        reset_memory(&ctx);
+        assert_eq!(ctx.data(|d| d.get_temp::<PanelId>(drag_id())), None);
+        assert_eq!(ctx.data_mut(|d| d.get_persisted::<bool>(geo.with("ranges"))), None);
+        assert_eq!(ctx.data_mut(|d| d.get_persisted::<bool>(geo.with("open"))), None);
     }
 
     #[test]

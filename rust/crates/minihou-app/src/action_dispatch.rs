@@ -627,6 +627,8 @@ impl App {
                 }
                 UiAction::ResetUiLayout => {
                     self.prefs.reset_ui_layout();
+                    ui::dock::reset_memory(ctx);
+                    self.params_open = true;
                     if let Err(e) = self.prefs.save() { self.file_status = format!("Could not save preferences: {e}"); }
                 }
                 UiAction::Command(name) => self.command(&name, ctx),
