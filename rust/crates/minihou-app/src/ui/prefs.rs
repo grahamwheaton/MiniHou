@@ -9,13 +9,27 @@ pub const SCHEMA: u32 = 1;
 pub enum ThemePref { Dark, Light, System }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Navigation { Blender, Houdini }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PackedInstances { #[default] Full, Auto }
+impl PackedInstances {
+    pub const ALL: [Self; 2] = [Self::Full, Self::Auto];
+    pub fn label(self) -> &'static str { match self { Self::Full => "Full", Self::Auto => "Auto" } }
+    fn parse(s: &str) -> Self { if s == "Auto" { Self::Auto } else { Self::Full } }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PackedProxyStyle { Solid, #[default] Wireframe }
+impl PackedProxyStyle {
+    pub const ALL: [Self; 2] = [Self::Solid, Self::Wireframe];
+    pub fn label(self) -> &'static str { match self { Self::Solid => "Solid", Self::Wireframe => "Wireframe" } }
+    fn parse(s: &str) -> Self { if s == "Solid" { Self::Solid } else { Self::Wireframe } }
+}
 impl ThemePref {
     pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::System];
     pub fn label(self) -> &'static str { match self { Self::Dark => "Dark", Self::Light => "Light", Self::System => "System" } }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct ViewportPreferences { pub overlays: crate::ui::Overlays, pub xray: bool, pub default_shading: String, pub object_visibility: crate::viewport::ObjectVisibility, pub matcap:crate::viewport::MatCap, pub matcap_flat:bool, pub object_color:crate::viewport::ObjectColor, pub textures:bool, pub navigation: Navigation, pub fly_navigation: bool, pub zoom_to_mouse: bool, pub orbit_to_mouse: bool, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub clip_start: f32, pub clip_end: f32 }
-impl Default for ViewportPreferences { fn default() -> Self { Self { overlays: Default::default(), xray: false, default_shading: "Smooth Shaded".into(), object_visibility: crate::viewport::ObjectVisibility::ShowAll, matcap:Default::default(), matcap_flat:false, object_color:Default::default(), textures:true, navigation: Navigation::Blender, fly_navigation: true, zoom_to_mouse:true, orbit_to_mouse:true, show_grid: true, show_axes: true, auto_budget: 400_000, clip_start: 0.01, clip_end: 1000.0 } } }
+pub struct ViewportPreferences { pub overlays: crate::ui::Overlays, pub xray: bool, pub default_shading: String, pub object_visibility: crate::viewport::ObjectVisibility, pub matcap:crate::viewport::MatCap, pub matcap_flat:bool, pub object_color:crate::viewport::ObjectColor, pub textures:bool, pub navigation: Navigation, pub fly_navigation: bool, pub zoom_to_mouse: bool, pub orbit_to_mouse: bool, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub packed_instances: PackedInstances, pub packed_full_percent: u8, pub packed_proxy_style: PackedProxyStyle, pub clip_start: f32, pub clip_end: f32 }
+impl Default for ViewportPreferences { fn default() -> Self { Self { overlays: Default::default(), xray: false, default_shading: "Smooth Shaded".into(), object_visibility: crate::viewport::ObjectVisibility::ShowAll, matcap:Default::default(), matcap_flat:false, object_color:Default::default(), textures:true, navigation: Navigation::Blender, fly_navigation: true, zoom_to_mouse:true, orbit_to_mouse:true, show_grid: true, show_axes: true, auto_budget: 400_000, packed_instances: PackedInstances::Full, packed_full_percent: 50, packed_proxy_style: PackedProxyStyle::Wireframe, clip_start: 0.01, clip_end: 1000.0 } } }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
@@ -97,6 +111,8 @@ impl Preferences {
             "orbit_to_mouse": self.viewport.orbit_to_mouse,
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget,
+            "packed_instances": self.viewport.packed_instances.label(), "packed_full_percent": self.viewport.packed_full_percent,
+            "packed_proxy_style": self.viewport.packed_proxy_style.label(),
             "clip_start": self.viewport.clip_start, "clip_end": self.viewport.clip_end },
         "inference": self.inference.to_json(),
         "security": { "allow_python_nodes": self.allow_python_nodes, "python_timeout_s": self.python_timeout_s },
@@ -148,6 +164,9 @@ impl Preferences {
             if let Some(x) = view.get("show_grid").and_then(Value::as_bool) { p.viewport.show_grid = x; }
             if let Some(x) = view.get("show_axes").and_then(Value::as_bool) { p.viewport.show_axes = x; }
             if let Some(x) = view.get("auto_budget").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()) { p.viewport.auto_budget = x.max(1); }
+            if let Some(x) = view.get("packed_instances").and_then(Value::as_str) { p.viewport.packed_instances = PackedInstances::parse(x); }
+            if let Some(x) = view.get("packed_full_percent").and_then(Value::as_u64) { p.viewport.packed_full_percent = x.min(100) as u8; }
+            if let Some(x) = view.get("packed_proxy_style").and_then(Value::as_str) { p.viewport.packed_proxy_style = PackedProxyStyle::parse(x); }
             // Legacy view_distance was a scene-radius multiplier and cannot be converted without a scene.
             let near = view.get("clip_start").and_then(Value::as_f64).map_or(p.viewport.clip_start, |x| x as f32);
             let far = view.get("clip_end").and_then(Value::as_f64).map_or(p.viewport.clip_end, |x| x as f32);
@@ -176,6 +195,26 @@ impl Preferences {
     pub fn add_recent(&mut self, path: PathBuf) {
         self.recent_files.retain(|p| p != &path);
         self.recent_files.insert(0, path); self.recent_files.truncate(10);
+    }
+}
+
+#[cfg(test)]
+mod packed_display_tests {
+    use super::*;
+
+    #[test]
+    fn packed_display_defaults_and_round_trip() {
+        let mut prefs = Preferences::default();
+        assert_eq!(prefs.viewport.packed_instances, PackedInstances::Full);
+        assert_eq!(prefs.viewport.packed_full_percent, 50);
+        assert_eq!(prefs.viewport.packed_proxy_style, PackedProxyStyle::Wireframe);
+        prefs.viewport.packed_instances = PackedInstances::Auto;
+        prefs.viewport.packed_full_percent = 25;
+        prefs.viewport.packed_proxy_style = PackedProxyStyle::Solid;
+        let restored = Preferences::from_json(&prefs.to_json());
+        assert_eq!(restored.viewport.packed_instances, PackedInstances::Auto);
+        assert_eq!(restored.viewport.packed_full_percent, 25);
+        assert_eq!(restored.viewport.packed_proxy_style, PackedProxyStyle::Solid);
     }
 }
 #[cfg(test)] mod tests {

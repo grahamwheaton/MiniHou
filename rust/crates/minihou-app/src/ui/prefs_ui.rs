@@ -79,6 +79,24 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             changed |= ui.checkbox(&mut prefs.viewport.orbit_to_mouse,"Orbit around mouse position").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.show_grid,"Show grid").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.show_axes,"Show axes").changed();
+                            ui.horizontal(|ui| { ui.label("Packed instances");
+                                egui::ComboBox::from_id_salt("packed_instances").selected_text(prefs.viewport.packed_instances.label()).show_ui(ui, |ui| {
+                                    for value in super::prefs::PackedInstances::ALL {
+                                        changed |= ui.selectable_value(&mut prefs.viewport.packed_instances, value, value.label()).changed();
+                                    }
+                                });
+                            });
+                            if prefs.viewport.packed_instances == super::prefs::PackedInstances::Auto {
+                                changed |= ui.add(egui::Slider::new(&mut prefs.viewport.packed_full_percent, 0..=100)
+                                    .text("Full detail in view").suffix("%")).changed();
+                            }
+                            ui.horizontal(|ui| { ui.label("Packed proxy style");
+                                egui::ComboBox::from_id_salt("packed_proxy_style").selected_text(prefs.viewport.packed_proxy_style.label()).show_ui(ui, |ui| {
+                                    for value in super::prefs::PackedProxyStyle::ALL {
+                                        changed |= ui.selectable_value(&mut prefs.viewport.packed_proxy_style, value, value.label()).changed();
+                                    }
+                                });
+                            });
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.auto_budget).range(1..=u32::MAX).speed(1_000.).prefix("Auto proxy triangle budget  ")).changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.clip_start).range(1e-6..=1e8).speed(0.01).prefix("Clip Start  ")).changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.clip_end).range(1e-6..=1e9).speed(1.0).prefix("Clip End  ")).changed();
