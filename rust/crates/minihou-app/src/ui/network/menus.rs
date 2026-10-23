@@ -109,7 +109,7 @@ pub(super) fn header_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions,
     let p = ui.painter();
     p.rect_filled(r, 0.0, v.theme.panel2);
     p.line_segment([pos2(r.left(), r.bottom() - 0.5), pos2(r.right(), r.bottom() - 0.5)], Stroke::new(1.0_f32, v.theme.stroke));
-    p.text(pos2(r.left()+10.,r.center().y),Align2::LEFT_CENTER,"Network",FontId::proportional(12.),v.theme.text);
+    // No "Network" title: the dock tab already names the panel; the strip keeps only its tool buttons.
     let links_rect=Rect::from_min_size(pos2(r.right()-226.,r.top()+5.),vec2(28.,22.));
     let snap_rect=Rect::from_min_size(pos2(r.right()-194.,r.top()+5.),vec2(28.,22.));
     if header_toggle(ui,links_rect,"links",state.show_links,"Show parameter references (Ctrl+Shift+D)",v) {

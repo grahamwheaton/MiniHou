@@ -206,7 +206,7 @@ impl eframe::App for App {
                     }
                 }
                 ui::dock::paint_dividers(dock_ui, &dividers);
-                if let Some(root) = ui::dock::interact(dock_ui, &layout.root, &leaves, &dividers) { dock_edit = Some(root); }
+                if let Some(root) = ui::dock::interact(dock_ui, &layout.root, &layout.hidden, &leaves, &dividers) { dock_edit = Some(root); }
                 self.subnet_scope = ui::network::current_scope(ctx, &self.editor.path, self.editor.doc.value())
                     .map(|(path, inner, selected, _)| (path, if selected.is_empty() || inner["nodes"].get(&selected).is_none() {
                         let output = inner["output"].as_str().unwrap_or_default();
@@ -684,7 +684,7 @@ impl eframe::App for App {
                 }
                 });
             });
-            if let Some(root) = dock_edit { self.prefs.ui_layout.root = root; }
+            if let Some((root, hidden)) = dock_edit { self.prefs.ui_layout.root = root; self.prefs.ui_layout.hidden = hidden; }
         }
         usd_export::show(self, ctx);
         self.python_confirm(ctx);
