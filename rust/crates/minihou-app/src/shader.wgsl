@@ -68,6 +68,29 @@ fn vs_surf(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) co
     return o;
 }
 
+fn instance_position(p:vec3<f32>,r0:vec4<f32>,r1:vec4<f32>,r2:vec4<f32>)->vec3<f32> {
+    let q=vec4<f32>(p,1.0);
+    return vec3<f32>(dot(r0,q),dot(r1,q),dot(r2,q));
+}
+fn instance_normal(n:vec3<f32>,r0:vec4<f32>,r1:vec4<f32>,r2:vec4<f32>)->vec3<f32> {
+    let a=r0.xyz;let b=r1.xyz;let c=r2.xyz;
+    let adj=vec3<f32>(dot(cross(b,c),n),dot(cross(c,a),n),dot(cross(a,b),n));
+    let sign=select(-1.0,1.0,dot(a,cross(b,c))>=0.0);
+    return normalize(adj*sign+vec3<f32>(1e-30));
+}
+@vertex
+fn vs_inst_surf(@location(0) p:vec3<f32>,@location(1) n:vec3<f32>,@location(2) color:vec3<f32>,
+    @location(3) r0:vec4<f32>,@location(4) r1:vec4<f32>,@location(5) r2:vec4<f32>,@location(6) tint:vec4<f32>)->VOut {
+    let world=instance_position(p,r0,r1,r2);
+    var o:VOut;
+    o.pos=u.view_proj*vec4<f32>(world,1.0);
+    o.vpos=(u.view*vec4<f32>(world,1.0)).xyz;
+    o.vnorm=(u.view*vec4<f32>(instance_normal(n,r0,r1,r2),0.0)).xyz;
+    o.vcolor=color*tint.rgb;
+    o.uv=vec2<f32>(0.0);o.uv_valid=0.0;
+    return o;
+}
+
 @vertex
 fn vs_tex(@location(0) p:vec3<f32>, @location(1) n:vec3<f32>, @location(2) color:vec3<f32>,
           @location(3) uv:vec2<f32>, @location(4) valid:f32) -> VOut {
@@ -141,6 +164,18 @@ fn vs_wire(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) co
     o.vpos = (u.view * vec4<f32>(p, 1.0)).xyz;
     o.vnorm = (u.view * vec4<f32>(n, 0.0)).xyz;
     o.vcolor = color;
+    return o;
+}
+
+@vertex
+fn vs_inst_wire(@location(0) p:vec3<f32>,@location(1) n:vec3<f32>,@location(2) color:vec3<f32>,
+    @location(3) r0:vec4<f32>,@location(4) r1:vec4<f32>,@location(5) r2:vec4<f32>,@location(6) tint:vec4<f32>)->WOut {
+    let world=instance_position(p,r0,r1,r2);
+    var o:WOut;
+    o.pos=u.view_proj*vec4<f32>(world,1.0);
+    o.vpos=(u.view*vec4<f32>(world,1.0)).xyz;
+    o.vnorm=(u.view*vec4<f32>(instance_normal(n,r0,r1,r2),0.0)).xyz;
+    o.vcolor=color*tint.rgb;
     return o;
 }
 

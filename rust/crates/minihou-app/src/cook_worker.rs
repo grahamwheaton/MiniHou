@@ -4,6 +4,15 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Instant;
 
+fn viewport_point_counts(g: &Geometry, bounds_fallback: bool) -> Option<(u32,u32)> {
+    use minihou_core::nodes::packed;
+    let ordinary = g.npoints.checked_sub(packed::instance_count(g))?;
+    let count = if packed::instance_count(g) == 0 { g.npoints }
+        else if bounds_fallback { packed::bounds_proxy_geometry(g).ok()?.npoints }
+        else { packed::estimated_display_counts(g)?.0 };
+    Some((u32::try_from(ordinary).ok()?,u32::try_from(count.checked_sub(ordinary)?).ok()?))
+}
+
 pub struct CookRequest { pub revision: u64, pub edit: Edit }
 pub struct CookResponse<T> {
     pub revision: u64,
@@ -150,14 +159,26 @@ fn cook_batch_preview<T>(session: &mut Session, target: &mut String, requests: V
     let expanded = session.graph().to_value()["nodes"].as_object()
         .and_then(|nodes| minihou_core::graph::expand_subnets(nodes).ok().flatten());
     let expanded_counts = expanded.as_ref().and_then(|_| session.expanded_cached_point_counts());
-    let mut offset = 0;
-    let mut display_ranges: Vec<_> = outputs.into_iter().filter_map(|id| {
-        let count = session.cached_geometry(&id).map(|geometry| geometry.npoints as u32)
-            .or_else(|| expanded_counts.as_ref()?.get(&id).copied())?;
-        let range = offset..offset + count;
-        offset += count;
-        Some((id, range))
+    // Match Scene::new's expansion budget for the whole merged display. Each
+    // output's ownership must use the same full or bounds representation.
+    let bounds_fallback = geometry.as_ref().is_some_and(|g| {
+        use minihou_core::nodes::packed;
+        packed::instance_count(g) > 0 && packed::estimated_display_counts(g)
+            .is_none_or(|(points, triangles)| points > 50_000 || triangles > 50_000)
+    });
+    let counts:Vec<_>=outputs.into_iter().filter_map(|id| {
+        let counts = session.cached_geometry(&id).and_then(|geometry| viewport_point_counts(&geometry,bounds_fallback))
+            .or_else(|| expanded_counts.as_ref()?.get(&id).copied().map(|n|(n,0)))?;
+        Some((id,counts))
     }).collect();
+    // Unpack and bounds_proxy_geometry append instances after ordinary points.
+    // Keep that order even when a display merge interleaves packed outputs.
+    let mut offset = 0;
+    let mut display_ranges=Vec::new();
+    for packed in [false,true] { for (id,(ordinary,instances)) in &counts {
+        let count=if packed {*instances}else{*ordinary};
+        if count>0 {display_ranges.push((id.clone(),offset..offset+count));offset+=count;}
+    }}
     let output_range_count = display_ranges.len();
     if let (Some(expanded), Some(counts)) = (expanded, expanded_counts) {
         let roots = display_ranges.clone();

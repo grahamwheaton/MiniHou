@@ -16,15 +16,27 @@ pub(super) fn capped_normal_vertices(float_count: usize, byte_limit: u64) -> usi
     (float_count / 3).min((byte_limit / 12) as usize) & !1
 }
 
-pub(super) fn chunked_scene(sc: &Scene, byte_limit: u64) -> bool {
+pub(super) fn cut_wire_indices(lod: &ClusterLod, ids: &[ClusterId]) -> Vec<u32> {
+    let mut edges = Vec::new();
+    for &id in ids { for tri in &lod.clusters[id as usize].triangles {
+        for (a,b) in [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])] {
+            edges.push((a.min(b),a.max(b)));
+        }
+    } }
+    edges.sort_unstable();
+    edges.dedup();
+    edges.into_iter().flat_map(|(a,b)| [a,b]).collect()
+}
+
+pub(super) fn chunked_scene(sc: &Scene, tri: &[u32], edge: &[u32], byte_limit: u64) -> bool {
     [sc.p.len().saturating_mul(4), sc.n.len(), sc.cd.as_ref().map_or(0, Vec::len),
-        sc.tri.len(), sc.edge.len(), sc.nlp.len(), sc.nln.len(), sc.bbp.len()]
+        tri.len(), edge.len(), sc.nlp.len(), sc.nln.len(), sc.bbp.len()]
         .into_iter().any(|n| (n as u64).saturating_mul(4) > byte_limit)
 }
 
-pub(super) fn neutral_color_len(sc: &Scene, oversized: bool, byte_limit: u64) -> usize {
+pub(super) fn neutral_color_len(sc: &Scene, tri: &[u32], oversized: bool, byte_limit: u64) -> usize {
     let floats = if oversized { sc.nlp.len().max(24) }
-        else { sc.p.len().saturating_mul(4).max(sc.tri.len()).max(sc.nlp.len()).max(24) };
+        else { sc.p.len().saturating_mul(4).max(tri.len()).max(sc.nlp.len()).max(24) };
     floats.min((byte_limit / 4) as usize)
 }
 
@@ -153,16 +165,25 @@ impl Gpu {
     }
 
     pub fn upload(&mut self, device: &wgpu::Device, sc: &Scene) {
+        self.upload_with_indices(device, sc, &sc.tri, &sc.edge);
+    }
+    pub fn upload_proxy(&mut self, device: &wgpu::Device, sc: &Scene, level: f32) {
+        let (tri, edge) = sc.proxy_indices(level);
+        self.upload_with_indices(device, sc, &tri, &edge);
+    }
+    fn upload_with_indices(&mut self, device: &wgpu::Device, sc: &Scene, tri: &[u32], edge: &[u32]) {
+        let (tri,edge)=sc.base_indices(tri,edge);
+        let (tri,edge)=(tri.as_ref(),edge.as_ref());
         let started = std::time::Instant::now();
         let limit = self.chunk_limit();
-        let oversized = chunked_scene(sc, limit);
+        let oversized = chunked_scene(sc, tri, edge, limit);
         self.face_markers.invalidate();
         self.tex_batches.clear(); self.texture_status.clear();
         self.elements=Elements::new(device,sc,&[],&self.element_points);
-        self.current_tri=sc.tri.clone(); self.current_edge=sc.edge.clone();
-        self.sharp_edge_indices=sharp_edges(sc,SKETCHUP_CREASE_DEGREES);
-        self.partition_tri=Partition::new(device,if oversized {&[]} else {&sc.tri},3,&[]);
-        self.partition_edge=Partition::new(device,if oversized {&[]} else {&sc.edge},2,&[]);
+        self.current_tri=tri.to_vec(); self.current_edge=edge.to_vec();
+        self.sharp_edge_indices=sharp_edges_indices(sc,tri,edge,SKETCHUP_CREASE_DEGREES);
+        self.partition_tri=Partition::new(device,if oversized {&[]} else {tri},3,&[]);
+        self.partition_edge=Partition::new(device,if oversized {&[]} else {edge},2,&[]);
         self.sharp_edge=Partition::new(device,if oversized {&[]} else {&self.sharp_edge_indices},2,&[]);
         self.boxes=Some(Boxes::new(device,sc,&[],&[],&[0..(sc.p.len()/3) as u32])); self.object_ranges.clear(); self.object_ids.clear();
         self.object_mask = None; self.object_mask_n = 0; self.object_mask_points = None;
@@ -174,18 +195,19 @@ impl Gpu {
         self.vn=buf("N",bytemuck::cast_slice(if oversized {&fallback[..]} else {&sc.n}),wgpu::BufferUsages::VERTEX);
         self.vc=buf("object colors",bytemuck::cast_slice(&vec![0.72f32;if oversized {3} else {sc.p.len().max(3)}]),wgpu::BufferUsages::VERTEX);
         self.vcd=sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(if oversized {&fallback[..]} else {c}),wgpu::BufferUsages::VERTEX));
-        self.neutral_color=buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;neutral_color_len(sc,oversized,limit)]),wgpu::BufferUsages::VERTEX);
+        self.neutral_color=buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;neutral_color_len(sc,tri,oversized,limit)]),wgpu::BufferUsages::VERTEX);
         self.mesh_source=oversized.then(|| MeshSource {p:sc.p.clone(),n:sc.n.clone(),colors:vec![0.72;sc.p.len()],cd:sc.cd.clone()});
         self.mask_chunks.clear();
         self.rebuild_chunks(device);
-        self.ntri_idx=sc.tri.len() as u32;
-        self.edge_world=edge_world_of(sc);
+        self.ntri_idx=tri.len() as u32;
+        self.edge_world=edge_world_of(sc,edge);
         let normal_floats=capped_normal_vertices(sc.nlp.len().min(sc.nln.len()),limit)*3;
         self.nl_p=buf("nl_p",bytemuck::cast_slice(&sc.nlp[..normal_floats]),wgpu::BufferUsages::VERTEX);
         self.nl_n=buf("nl_n",bytemuck::cast_slice(&sc.nln[..normal_floats]),wgpu::BufferUsages::VERTEX);
         self.nl_count=(normal_floats/3) as u32; self.nl_selected=0;
         self.bb_chunks=box_chunks(device,sc,limit);
         self.bb_p=buf("bb_p",bytemuck::cast_slice(if self.bb_chunks.is_empty() {&sc.bbp[..]} else {&[0.;3][..]}),wgpu::BufferUsages::VERTEX);
+        self.upload_packed(device,sc);
         if std::env::var_os("MINIHOU_VIEWPORT_TIMING").is_some() {
             eprintln!("viewport Gpu::upload: points={} triangles={} ms={:.3}", sc.p.len()/3, sc.tri.len()/3, started.elapsed().as_secs_f64()*1000.0);
         }
@@ -195,7 +217,8 @@ impl Gpu {
         if self.object_mask_points.as_ref() == Some(&ranges) { return; }
         self.face_markers.invalidate();
         self.elements=Elements::new(device,scene,&ranges,&self.element_points);
-        let indices = object_mask_indices(scene.triangle_indices(), &ranges);
+        let (base_tri,_)=scene.base_indices(scene.triangle_indices(),&[]);
+        let indices = object_mask_indices(&base_tri, &ranges);
         self.object_mask_n = indices.len() as u32;
         self.object_mask = (!self.mesh_source.is_some()).then(|| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("selected object mask"),
@@ -208,6 +231,7 @@ impl Gpu {
         self.partition_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_edge},2,&ranges);
         self.sharp_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.sharp_edge_indices},2,&ranges);
         self.object_mask_points = Some(ranges.clone());
+        self.update_packed_instances(device);
         self.rebuild_chunks(device);
         self.boxes=None;
         let (mut p,mut n)=(Vec::with_capacity(scene.nlp.len()),Vec::with_capacity(scene.nln.len()));
@@ -241,18 +265,20 @@ impl Gpu {
         }
         if let Some(source)=&mut self.mesh_source {source.colors=colors.clone(); self.rebuild_chunks(device);
             if let Some(selected)=&self.object_mask_points {
-                let indices=object_mask_indices(scene.triangle_indices(),selected);
+                let (base_tri,_)=scene.base_indices(scene.triangle_indices(),&[]);
+                let indices=object_mask_indices(&base_tri,selected);
                 self.mask_chunks=upload_chunks(device,self.mesh_source.as_ref().unwrap(),&indices,3,&[],self.chunk_limit());
             }
         }
         else {self.vc=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("object colors"),contents:bytemuck::cast_slice(&colors),usage:wgpu::BufferUsages::VERTEX});}
         self.boxes=Some(Boxes::new(device,scene,&ranges,&ids,self.object_mask_points.as_deref().unwrap_or(&[])));
         self.object_ranges=ranges; self.object_ids=ids;
+        self.update_packed_instances(device);
     }
     /// Retain the source vertex attributes but start with no triangles; selection uploads a cut.
     pub fn upload_lod(&mut self, device: &wgpu::Device, sc: &Scene) {
         self.face_markers.invalidate();
-        self.upload(device,&sc.proxied(0.0));
+        self.upload_with_indices(device,sc,&[],&[]);
     }
     pub fn select_lod(&mut self, device: &wgpu::Device, lod: &ClusterLod, ids: &[ClusterId], wire: bool) {
         let (indices, _)=packed_cut(lod, ids);
@@ -260,16 +286,47 @@ impl Gpu {
         self.current_tri=indices;
         self.partition_tri=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_tri},3,self.object_mask_points.as_deref().unwrap_or(&[]));
         if wire {
-            let mut edges = std::collections::BTreeSet::new();
-            for &id in ids { for tri in &lod.clusters[id as usize].triangles {
-                for (a,b) in [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])] { edges.insert((a.min(b),a.max(b))); }
-            } }
-            let mut indices=Vec::with_capacity(edges.len()*2);
-            for (a,b) in edges { indices.extend_from_slice(&[a,b]); }
-            self.current_edge=indices;
+            self.current_edge=cut_wire_indices(lod,ids);
         } else { self.current_edge.clear(); }
         self.partition_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_edge},2,self.object_mask_points.as_deref().unwrap_or(&[]));
         self.rebuild_chunks(device);
     }
 
+}
+
+#[test]
+fn grid_cut_wire_indices_match_ordered_set() {
+    use minihou_core::lod::{Cluster,Sphere};
+    let mut triangles=Vec::new();
+    for y in 0..4 { for x in 0..4 {
+        let a=y*5+x;
+        triangles.extend_from_slice(&[[a,a+1,a+6],[a,a+6,a+5]]);
+    }}
+    let cluster=Cluster {triangles,bounds:Sphere {center:[0.;3],radius:1.},error:0.,level:0};
+    let lod=ClusterLod {clusters:vec![cluster],..Default::default()};
+    let old:std::collections::BTreeSet<_>=lod.clusters[0].triangles.iter()
+        .flat_map(|tri| [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])])
+        .map(|(a,b)|(a.min(b),a.max(b))).collect();
+    let expected:Vec<u32>=old.into_iter().flat_map(|(a,b)|[a,b]).collect();
+    assert_eq!(cut_wire_indices(&lod,&[0]),expected);
+}
+
+#[test]
+fn proxy_upload_indices_match_previous_scene_cuts() {
+    let positions=(0..25).flat_map(|i|[(i%5) as f32,(i/5) as f32,0.]).collect();
+    let mut vertices=Vec::new();
+    let mut offsets=vec![0];
+    for y in 0..4 { for x in 0..4 {
+        let i=y*5+x;
+        vertices.extend_from_slice(&[i,i+1,i+6,i+5]);
+        offsets.push(vertices.len() as i32);
+    }}
+    let geo=Geometry::from_arrays(positions,vertices,offsets,Some(vec![true;16])).unwrap();
+    let scene=Scene::new(&geo);
+    for level in [0.,0.1,0.5,1.] {
+        let (tri,edge)=scene.proxy_indices(level);
+        assert_eq!(tri,crate::ui::proxy_ui::proxy::reduced_triangles(&scene.tri,level));
+        assert_eq!(edge,crate::ui::proxy_ui::proxy::reduced_edges(&scene.edge,level));
+        assert_eq!(scene.p.len(),75);
+    }
 }

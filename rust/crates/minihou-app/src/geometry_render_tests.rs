@@ -2,6 +2,59 @@ use super::*;
 use super::display_render_tests::{adapter,render,changed};
 
 #[test]
+fn packed_display_ranges_pick_and_outline_the_correct_object() {
+    use minihou_app::{Document,Edit,cook_worker::{cook_batch,CookRequest}};
+    let value=serde_json::json!({"display":["packed","moved"],"nodes":{
+        "box":{"type":"box"},
+        "packed":{"type":"pack","inputs":{"geo":"box"}},
+        "other":{"type":"box"},
+        "moved":{"type":"transform","inputs":{"geo":"other"},"params":{"translate":[10.,0.,0.]}}
+    }});
+    let mut session=Document::parse(value.to_string()).unwrap().session().unwrap();
+    let mut target=session.graph().main_output().unwrap();
+    let response=cook_batch(&mut session,&mut target,
+        vec![CookRequest{revision:1,edit:Edit::Replace(value)}],|g|Scene::new(g));
+    assert!(response.error.is_none(),"{:?}",response.error);
+    let scene=response.prepared.unwrap();
+    let ranges=response.display_ranges;
+    assert_eq!(ranges.len(),2);
+    assert_eq!(ranges[0],("moved".into(),0..8));
+    assert_eq!(ranges[1],("packed".into(),8..16));
+    for (origin, expected) in [([0.,0.,10.],"packed"),([10.,0.,10.],"moved")] {
+        let hit=crate::pick_displayed(&scene,origin,[0.,0.,-1.],ObjectVisibility::ShowAll,&ranges,&Default::default()).unwrap();
+        assert_eq!(crate::picked_object(&ranges,scene.triangle_indices(),hit),Some(expected));
+        let range=&ranges.iter().find(|(id,_)|id==expected).unwrap().1;
+        let outline=object_mask_indices(scene.triangle_indices(),std::slice::from_ref(range));
+        assert!(!outline.is_empty());
+        assert!(outline.iter().all(|id|range.contains(id)));
+    }
+}
+
+#[test]
+fn packed_source_uses_one_instanced_draw_cut_headless() {
+    use minihou_core::{nodes::packed::instance_geometry,math::IDENTITY};
+    let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping instanced render test");return;};
+    let source=std::sync::Arc::new(Geometry::from_arrays(
+        vec![-0.5,-0.5,0.,0.5,-0.5,0.,0.,0.5,0.],vec![0,1,2],vec![0,3],Some(vec![true])).unwrap());
+    let geo=instance_geometry(&[source],&[0,0],vec![-1.,0.,0.,1.,0.,0.],&[IDENTITY;2],Default::default()).unwrap();
+    let scene=Scene::new(&geo);
+    let mut gpu=Gpu::new(&device,&scene);
+    assert_eq!(gpu.packed.len(),1);
+    assert_eq!(gpu.packed[0].total,2);
+    assert_eq!(gpu.partition_tri.total,0);
+    let empty=Gpu::new(&device,&Scene::new(&Geometry::points_only(Vec::new()).unwrap()));
+    let overlay=Overlay {geometry:crate::ui::Overlays {faces:true,lines:false,..Default::default()},..Default::default()};
+    assert!(changed(&render(&device,&queue,&gpu,Mode::SmoothShaded,overlay,false),
+        &render(&device,&queue,&empty,Mode::SmoothShaded,overlay,false))>100);
+    gpu.select_objects(&device,&scene,vec![0..3]);
+    gpu.set_named_object_ranges(&device,&scene,vec![("left".into(),0..3),("right".into(),3..6)]);
+    assert_eq!(gpu.packed[0].selected,1);
+    let hide=Overlay {visibility:ObjectVisibility::HideOthers,..overlay};
+    assert!(changed(&render(&device,&queue,&gpu,Mode::SmoothShaded,hide,true),
+        &render(&device,&queue,&empty,Mode::SmoothShaded,hide,false))>50);
+}
+
+#[test]
 fn grid_spacing_transition_is_continuous_at_far_zoom() {
     let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping grid render test"); return; };
     let scene=Scene::new(&Geometry::points_only(Vec::new()).unwrap());
@@ -65,7 +118,8 @@ fn element_indices_points_lines_mixed_and_proxy() {
     let g=Geometry::from_arrays(vec![0.;18],vec![0,1,2,3,4],vec![0,3,5],Some(vec![true,false])).unwrap();
     let s=Scene::new(&g); assert_eq!(s.point,[3,4,5]); assert_eq!(s.line,[3,4]);
     assert!(s.edge.chunks_exact(2).any(|e|e==[3,4]),"core edges include open primitives");
-    let proxy=s.proxied(0.); assert_eq!(proxy.line,s.line); assert_eq!(proxy.point,s.point);
+    let (tri, edge)=s.proxy_indices(0.); assert!(tri.is_empty() && edge.is_empty());
+    assert_eq!(s.line,[3,4]); assert_eq!(s.point,[3,4,5]);
     // Explicitly closed curve, distinguished from a polygon by source metadata.
     let mut g=Geometry::from_arrays(vec![0.;9],vec![0,1,2],vec![0,3],None).unwrap();
     g.prim.insert("__viewport_curve".into(),std::sync::Arc::new(minihou_core::geometry::Attr::i32(1,vec![1])));

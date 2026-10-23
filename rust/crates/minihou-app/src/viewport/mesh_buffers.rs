@@ -14,14 +14,18 @@ fn object_mask_excludes_unselected_outputs() {
     assert!(object_mask_indices(&triangles, &[]).is_empty());
 }
 
-pub(super) fn edge_world_of(sc: &Scene) -> f32 {
-    (2.0 * sc.radius) / ((sc.edge.len().max(2) as f32) / 2.0).sqrt()
+pub(super) fn edge_world_of(sc: &Scene, edge: &[u32]) -> f32 {
+    (2.0 * sc.radius) / ((edge.len().max(2) as f32) / 2.0).sqrt()
 }
 
 /// Keep only polygon edges with adjacent surface normals above the crease angle.
 /// Match endpoints by position because box faces may have separate point ids at
 /// the same corner. The ordinary wire buffer remains unfiltered for edit modes.
 pub(super) fn sharp_edges(sc: &Scene, threshold_degrees: f32) -> Vec<u32> {
+    sharp_edges_indices(sc, &sc.tri, &sc.edge, threshold_degrees)
+}
+
+pub(super) fn sharp_edges_indices(sc: &Scene, tri: &[u32], edge: &[u32], threshold_degrees: f32) -> Vec<u32> {
     type Key = ([i64; 3], [i64; 3]);
     let tolerance = sc.radius.max(1e-3) * 1e-6;
     let point = |id: u32| -> Option<[f32; 3]> {
@@ -36,10 +40,10 @@ pub(super) fn sharp_edges(sc: &Scene, threshold_degrees: f32) -> Vec<u32> {
         let b = position_key(point(b)?);
         (a != b).then_some(if a < b { (a, b) } else { (b, a) })
     };
-    let candidates: HashSet<Key> = sc.edge.chunks_exact(2)
+    let candidates: HashSet<Key> = edge.chunks_exact(2)
         .filter_map(|edge| edge_key(edge[0], edge[1])).collect();
     let mut faces: HashMap<Key, Vec<[f32; 3]>> = HashMap::new();
-    for tri in sc.tri.chunks_exact(3) {
+    for tri in tri.chunks_exact(3) {
         let (Some(a), Some(b), Some(c)) = (point(tri[0]), point(tri[1]), point(tri[2])) else { continue };
         let ab = [0, 1, 2].map(|i| b[i] - a[i]);
         let ac = [0, 1, 2].map(|i| c[i] - a[i]);
@@ -56,7 +60,7 @@ pub(super) fn sharp_edges(sc: &Scene, threshold_degrees: f32) -> Vec<u32> {
     let limit = threshold_degrees.to_radians().cos();
     let mut seen = HashSet::new();
     let mut result = Vec::new();
-    for edge in sc.edge.chunks_exact(2) {
+    for edge in edge.chunks_exact(2) {
         let Some(key) = edge_key(edge[0], edge[1]) else { continue };
         if !seen.insert(key) { continue; }
         let Some(normals) = faces.get(&key) else { continue };
