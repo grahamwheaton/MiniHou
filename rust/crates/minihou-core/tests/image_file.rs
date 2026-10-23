@@ -19,6 +19,7 @@ fn test_image_file_graph_cook_8bit() {
                     "colorspace": "auto",
                     "size": 10.0,
                     "center": [1.0, 2.0, 3.0],
+                    "mode": "height_map",
                     "height": "red",
                     "height_scale": 2.0
                 }
@@ -51,6 +52,7 @@ fn test_image_file_graph_cook_16bit() {
                     "colorspace": "stored",
                     "size": 5.0,
                     "center": [0.0, 0.0, 0.0],
+                    "mode": "height_map",
                     "height": "luminance",
                     "height_scale": 1.5
                 }
@@ -216,6 +218,7 @@ fn test_image_file_edge_cases_and_determinism() {
                 "type": "image_file",
                 "params": {
                     "file": p.to_str().unwrap(),
+                    "mode": "height_map",
                     "height": "luminance"
                 }
             }

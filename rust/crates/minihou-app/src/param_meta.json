@@ -3528,16 +3528,16 @@
    "kind": "str"
   },
   "height": {
-   "default": "none",
-   "doc": "Lift the points by this channel (a height map): z = value * height_scale; also stored as `height`",
+   "default": "luminance",
+   "doc": "Height-map channel; z = value * height_scale and the value is stored as `height`",
    "kind": "enum",
    "options": [
-    "none",
     "luminance",
     "red",
     "green",
     "blue",
-    "alpha"
+    "alpha",
+    "none"
    ]
   },
   "height_scale": {
@@ -3553,6 +3553,15 @@
    "kind": "int",
    "max": 8192,
    "min": 2
+  },
+  "mode": {
+   "default": "plane",
+   "doc": "plane: flat image grid with UV and Cd; height_map: displace the grid in Z using the selected height channel",
+   "kind": "enum",
+   "options": [
+    "plane",
+    "height_map"
+   ]
   },
   "size": {
    "default": 10.0,

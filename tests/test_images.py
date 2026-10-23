@@ -235,13 +235,30 @@ class NodeTests(unittest.TestCase):
     def test_image_file_reads_a_png_and_recooks_when_it_changes(self):
         path = os.path.join(self.tmp.name, "h.png")
         images.write_png(path, ramp(5, 8), bits=16, srgb=False)
-        node = {"f": {"type": "image_file", "params": {"file": path, "colorspace": "stored", "height": "red", "height_scale": 2.0}}}
+        node = {"f": {"type": "image_file", "params": {"file": path, "colorspace": "stored", "mode": "height_map", "height": "red", "height_scale": 2.0}}}
         g = cook(node, "f")
         self.assertEqual((g.detail["grid_columns"], g.detail["grid_rows"]), (8, 5))
         np.testing.assert_allclose(g.P[:8, 2], np.linspace(0, 1, 8) * 2.0, atol=1e-4)
         with self.assertRaises(Exception) as cm:
             cook({"f": {"type": "image_file", "params": {"file": os.path.join(self.tmp.name, "nope.png")}}}, "f")
         self.assertIn("no such file", str(cm.exception))
+
+    def test_image_file_plane_and_height_map_modes(self):
+        path = os.path.join(self.tmp.name, "modes.png")
+        images.write_png(path, ramp(3, 4), bits=16, srgb=False)
+        base = {"file": path, "colorspace": "stored", "center": [0, 0, 3], "height": "red", "height_scale": 2.0}
+        plane = cook({"f": {"type": "image_file", "params": base}}, "f")
+        self.assertEqual(plane.npoints, 12)
+        self.assertEqual(plane.point["uv"].shape, (12, 2))
+        np.testing.assert_allclose(plane.P[:, 2], 3.0)
+        self.assertIn("Cd", plane.point)
+        self.assertNotIn("height", plane.point)
+
+        terrain = cook({"f": {"type": "image_file", "params": {**base, "mode": "height_map"}}}, "f")
+        self.assertEqual(terrain.npoints, 12)
+        np.testing.assert_allclose(terrain.point["uv"], plane.point["uv"])
+        np.testing.assert_allclose(terrain.P[:, 2], 3.0 + terrain.point["height"] * 2.0)
+        self.assertGreater(float(np.ptp(terrain.P[:, 2])), 0.0)
 
     def test_a_height_image_goes_through_the_heightfield_nodes(self):
         rng = np.random.default_rng(5)
