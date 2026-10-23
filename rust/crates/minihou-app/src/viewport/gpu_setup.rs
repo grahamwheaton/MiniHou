@@ -26,6 +26,8 @@ impl Gpu {
         Self::new_with_indices(device, sc, &tri, &edge)
     }
     fn new_with_indices(device: &wgpu::Device, sc: &Scene, tri: &[u32], edge: &[u32]) -> Self {
+        let (tri,edge)=sc.base_indices(tri,edge);
+        let (tri,edge)=(tri.as_ref(),edge.as_ref());
         let device_limits = device.limits();
         let mut limits = minihou_core::limits::Limits::default();
         limits.set_gpu_limits(device_limits.max_buffer_size, device_limits.max_storage_buffer_binding_size as u64);
@@ -106,6 +108,11 @@ impl Gpu {
         };
         let surf_bufs = [vb(&POS), vb(&NRM), vb(&COL)];
         let wire_bufs = [vb(&POS), vb(&NRM), vb(&COL)];
+        const INST_ATTRS:[wgpu::VertexAttribute;4]=wgpu::vertex_attr_array![3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4];
+        let inst_bufs=[vb(&POS),vb(&NRM),vb(&COL),wgpu::VertexBufferLayout {
+            array_stride:std::mem::size_of::<InstanceVertex>() as u64,
+            step_mode:wgpu::VertexStepMode::Instance,attributes:&INST_ATTRS,
+        }];
         const TEX_ATTRS:[wgpu::VertexAttribute;5]=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x3,3=>Float32x2,4=>Float32];
         let tex_bufs=[wgpu::VertexBufferLayout {array_stride:std::mem::size_of::<TexVertex>() as u64,step_mode:wgpu::VertexStepMode::Vertex,attributes:&TEX_ATTRS}];
 
@@ -141,6 +148,14 @@ impl Gpu {
         let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-4,true,C::LessEqual,true,W::ALL);
         let pipe_elements_ghost=mk("ghost points and curves","vs_element","fs_element_ghost",&element_bufs,T::TriangleList,-1,true,C::LessEqual,false,W::ALL);
         let pipe_surf = mk("surf", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 0, false, C::LessEqual, true, W::ALL);
+        let pipe_inst_surf=mk("instanced surf","vs_inst_surf","fs_surf",&inst_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
+        let pipe_inst_wire=mk("instanced wire","vs_inst_wire","fs_wire",&inst_bufs,T::LineList,-1,true,C::LessEqual,false,W::ALL);
+        let pipe_inst_wire_all=mk("instanced all wires","vs_inst_wire","fs_wire",&inst_bufs,T::LineList,0,true,C::Always,false,W::ALL);
+        let pipe_inst_wire_hidden=mk("instanced hidden wires","vs_inst_wire","fs_ghost_wire",&inst_bufs,T::LineList,0,true,C::Greater,false,W::ALL);
+        let pipe_inst_ghost_wire=mk("instanced ghost wires","vs_inst_wire","fs_ghost_wire",&inst_bufs,T::LineList,0,true,C::LessEqual,false,W::ALL);
+        let pipe_inst_depth=mk("instanced depth","vs_inst_surf","fs_mask",&inst_bufs,T::TriangleList,2,false,C::LessEqual,true,W::empty());
+        let pipe_inst_xray=mk("instanced xray","vs_inst_surf","fs_xray",&inst_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
+        let pipe_inst_ghost=mk("instanced ghost","vs_inst_surf","fs_ghost",&inst_bufs,T::TriangleList,0,true,C::LessEqual,false,W::ALL);
         let pipe_tex=mk("textured surface","vs_tex","fs_tex",&tex_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
         let pipe_tex_bias=mk("textured surface+bias","vs_tex","fs_tex",&tex_bufs,T::TriangleList,2,false,C::LessEqual,true,W::ALL);
         let pipe_tex_xray=mk("textured xray","vs_tex","fs_tex_xray",&tex_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
@@ -203,6 +218,16 @@ impl Gpu {
             multisample: Default::default(),
             multiview: None,
             cache: None,
+        });
+        let pipe_inst_mask=device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label:Some("instanced mask"),layout:Some(&layout),
+            vertex:wgpu::VertexState {module:&shader,entry_point:Some("vs_inst_surf"),compilation_options:Default::default(),buffers:&inst_bufs},
+            fragment:Some(wgpu::FragmentState {module:&shader,entry_point:Some("fs_mask"),compilation_options:Default::default(),
+                targets:&[Some(wgpu::ColorTargetState {format:wgpu::TextureFormat::R8Unorm,blend:None,write_mask:wgpu::ColorWrites::ALL})]}),
+            primitive:wgpu::PrimitiveState {topology:wgpu::PrimitiveTopology::TriangleList,cull_mode:None,..Default::default()},
+            depth_stencil:Some(wgpu::DepthStencilState {format:DEPTH,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::LessEqual,
+                stencil:Default::default(),bias:wgpu::DepthBiasState {constant:-8,slope_scale:-2.,clamp:0.}}),
+            multisample:Default::default(),multiview:None,cache:None,
         });
 
         let bgl_outline = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -277,7 +302,9 @@ impl Gpu {
         let sharp_edge_indices=sharp_edges_indices(sc,tri,edge,SKETCHUP_CREASE_DEGREES);
         let sharp_edge_chunks = mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device, source, &sharp_edge_indices, 2, &[], max_bytes));
 
-        Self {
+        let mut out=Self {
+            packed:Vec::new(),packed_cut_cache:std::sync::Mutex::new(None),pipe_inst_surf,pipe_inst_wire,pipe_inst_wire_all,pipe_inst_wire_hidden,
+            pipe_inst_ghost_wire,pipe_inst_depth,pipe_inst_xray,pipe_inst_ghost,pipe_inst_mask,
             tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
             pipe_floor,z_axis,pipe_z_axis,
             face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,pipe_face_markers_xray,
@@ -324,6 +351,8 @@ impl Gpu {
             object_mask: None, object_mask_n: 0, object_mask_points: None,
             ntri_idx: tri.len() as u32,
             edge_world: edge_world_of(sc,edge),
-        }
+        };
+        out.upload_packed(device,sc);
+        out
     }
 }

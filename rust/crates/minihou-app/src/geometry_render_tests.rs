@@ -31,6 +31,30 @@ fn packed_display_ranges_pick_and_outline_the_correct_object() {
 }
 
 #[test]
+fn packed_source_uses_one_instanced_draw_cut_headless() {
+    use minihou_core::{nodes::packed::instance_geometry,math::IDENTITY};
+    let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping instanced render test");return;};
+    let source=std::sync::Arc::new(Geometry::from_arrays(
+        vec![-0.5,-0.5,0.,0.5,-0.5,0.,0.,0.5,0.],vec![0,1,2],vec![0,3],Some(vec![true])).unwrap());
+    let geo=instance_geometry(&[source],&[0,0],vec![-1.,0.,0.,1.,0.,0.],&[IDENTITY;2],Default::default()).unwrap();
+    let scene=Scene::new(&geo);
+    let mut gpu=Gpu::new(&device,&scene);
+    assert_eq!(gpu.packed.len(),1);
+    assert_eq!(gpu.packed[0].total,2);
+    assert_eq!(gpu.partition_tri.total,0);
+    let empty=Gpu::new(&device,&Scene::new(&Geometry::points_only(Vec::new()).unwrap()));
+    let overlay=Overlay {geometry:crate::ui::Overlays {faces:true,lines:false,..Default::default()},..Default::default()};
+    assert!(changed(&render(&device,&queue,&gpu,Mode::SmoothShaded,overlay,false),
+        &render(&device,&queue,&empty,Mode::SmoothShaded,overlay,false))>100);
+    gpu.select_objects(&device,&scene,vec![0..3]);
+    gpu.set_named_object_ranges(&device,&scene,vec![("left".into(),0..3),("right".into(),3..6)]);
+    assert_eq!(gpu.packed[0].selected,1);
+    let hide=Overlay {visibility:ObjectVisibility::HideOthers,..overlay};
+    assert!(changed(&render(&device,&queue,&gpu,Mode::SmoothShaded,hide,true),
+        &render(&device,&queue,&empty,Mode::SmoothShaded,hide,false))>50);
+}
+
+#[test]
 fn grid_spacing_transition_is_continuous_at_far_zoom() {
     let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping grid render test"); return; };
     let scene=Scene::new(&Geometry::points_only(Vec::new()).unwrap());

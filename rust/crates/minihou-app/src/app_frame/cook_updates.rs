@@ -13,6 +13,7 @@ impl App {
                 self.cooking.geometry=None;self.cooking.lod=None;self.geo=None;
             }
             if let Some(mut scene) = accepted.filter(|_| !display_is_empty(self.editor.doc.value())) {
+                if self.cooking.lod.is_none() {self.cooking.lod=scene.automatic_lod();}
                 self.display_ranges = display_ranges;
                 self.output_range_count = output_range_count;
                 let preview = self.cooking.preview.as_ref().filter(|(id, _, _)| id == &self.selected).map(|(_, geo, _)| geo.as_ref());
@@ -24,7 +25,8 @@ impl App {
                 self.materials.register_graph(self.editor.doc.value()); let _=self.materials.register_sidecar(&self.editor.path);
                 let textured=scene.has_textured_slots();
                 let level = if textured {1.0}else{self.proxy_level(scene.triangles())};
-                let use_lod = !self.selected_preview && !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+                let use_lod = !self.selected_preview && !textured && self.cooking.lod.is_some()
+                    && (self.editor_state.proxy.clustered || scene.automatic_lod().is_some());
                 if use_lod {
                     if let Some(gpu) = &mut self.gpu { gpu.upload_lod(&self.state.device, &scene); }
                     else { self.gpu = Some(Gpu::new_lod(&self.state.device, &scene)); }
@@ -81,7 +83,8 @@ impl App {
         if let Some(scene) = &self.scene {
             let textured=scene.has_textured_slots();
             let level = if textured {1.0}else{self.proxy_level(scene.triangles())};
-            let use_lod = !self.selected_preview && !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+            let use_lod = !self.selected_preview && !textured && self.cooking.lod.is_some()
+                && (self.editor_state.proxy.clustered || scene.automatic_lod().is_some());
             if use_lod != self.lod_uploaded {
                 if let Some(gpu) = &mut self.gpu {
                     if use_lod { gpu.upload_lod(&self.state.device, scene); }

@@ -16,7 +16,7 @@ pub(super) fn capped_normal_vertices(float_count: usize, byte_limit: u64) -> usi
     (float_count / 3).min((byte_limit / 12) as usize) & !1
 }
 
-fn cut_wire_indices(lod: &ClusterLod, ids: &[ClusterId]) -> Vec<u32> {
+pub(super) fn cut_wire_indices(lod: &ClusterLod, ids: &[ClusterId]) -> Vec<u32> {
     let mut edges = Vec::new();
     for &id in ids { for tri in &lod.clusters[id as usize].triangles {
         for (a,b) in [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])] {
@@ -172,6 +172,8 @@ impl Gpu {
         self.upload_with_indices(device, sc, &tri, &edge);
     }
     fn upload_with_indices(&mut self, device: &wgpu::Device, sc: &Scene, tri: &[u32], edge: &[u32]) {
+        let (tri,edge)=sc.base_indices(tri,edge);
+        let (tri,edge)=(tri.as_ref(),edge.as_ref());
         let started = std::time::Instant::now();
         let limit = self.chunk_limit();
         let oversized = chunked_scene(sc, tri, edge, limit);
@@ -205,6 +207,7 @@ impl Gpu {
         self.nl_count=(normal_floats/3) as u32; self.nl_selected=0;
         self.bb_chunks=box_chunks(device,sc,limit);
         self.bb_p=buf("bb_p",bytemuck::cast_slice(if self.bb_chunks.is_empty() {&sc.bbp[..]} else {&[0.;3][..]}),wgpu::BufferUsages::VERTEX);
+        self.upload_packed(device,sc);
         if std::env::var_os("MINIHOU_VIEWPORT_TIMING").is_some() {
             eprintln!("viewport Gpu::upload: points={} triangles={} ms={:.3}", sc.p.len()/3, sc.tri.len()/3, started.elapsed().as_secs_f64()*1000.0);
         }
@@ -214,7 +217,8 @@ impl Gpu {
         if self.object_mask_points.as_ref() == Some(&ranges) { return; }
         self.face_markers.invalidate();
         self.elements=Elements::new(device,scene,&ranges,&self.element_points);
-        let indices = object_mask_indices(scene.triangle_indices(), &ranges);
+        let (base_tri,_)=scene.base_indices(scene.triangle_indices(),&[]);
+        let indices = object_mask_indices(&base_tri, &ranges);
         self.object_mask_n = indices.len() as u32;
         self.object_mask = (!self.mesh_source.is_some()).then(|| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("selected object mask"),
@@ -227,6 +231,7 @@ impl Gpu {
         self.partition_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_edge},2,&ranges);
         self.sharp_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.sharp_edge_indices},2,&ranges);
         self.object_mask_points = Some(ranges.clone());
+        self.update_packed_instances(device);
         self.rebuild_chunks(device);
         self.boxes=None;
         let (mut p,mut n)=(Vec::with_capacity(scene.nlp.len()),Vec::with_capacity(scene.nln.len()));
@@ -260,13 +265,15 @@ impl Gpu {
         }
         if let Some(source)=&mut self.mesh_source {source.colors=colors.clone(); self.rebuild_chunks(device);
             if let Some(selected)=&self.object_mask_points {
-                let indices=object_mask_indices(scene.triangle_indices(),selected);
+                let (base_tri,_)=scene.base_indices(scene.triangle_indices(),&[]);
+                let indices=object_mask_indices(&base_tri,selected);
                 self.mask_chunks=upload_chunks(device,self.mesh_source.as_ref().unwrap(),&indices,3,&[],self.chunk_limit());
             }
         }
         else {self.vc=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("object colors"),contents:bytemuck::cast_slice(&colors),usage:wgpu::BufferUsages::VERTEX});}
         self.boxes=Some(Boxes::new(device,scene,&ranges,&ids,self.object_mask_points.as_deref().unwrap_or(&[])));
         self.object_ranges=ranges; self.object_ids=ids;
+        self.update_packed_instances(device);
     }
     /// Retain the source vertex attributes but start with no triangles; selection uploads a cut.
     pub fn upload_lod(&mut self, device: &wgpu::Device, sc: &Scene) {

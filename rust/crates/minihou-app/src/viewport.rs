@@ -25,6 +25,7 @@ mod textures;
 mod overlays;
 mod camera_grid;
 mod draw;
+mod packed_draw;
 mod uploads;
 use uploads::{MeshSource, MeshChunk, upload_chunks, box_chunks, capped_normal_vertices, chunked_scene, neutral_color_len};
 pub use camera_grid::Target;
@@ -83,6 +84,27 @@ pub struct Scene {
     textured:Vec<SurfaceTri>,
     /// Per-point display colour from the `Cd` attribute (point, vertex or primitive domain, averaged onto points); None without Cd.
     cd:Option<Vec<f32>>,
+    packed_sources:Vec<PackedSource>,
+    auto_lod:Option<std::sync::Arc<ClusterLod>>,
+}
+
+struct PackedSource {
+    scene:Box<Scene>, lod:Option<std::sync::Arc<ClusterLod>>, instances:Vec<PackedInstance>,
+}
+
+#[derive(Clone)]
+struct PackedInstance {
+    rows:[[f32;4];3], range:std::ops::Range<u32>, proxy_tri:Option<usize>, compact:bool,
+}
+
+#[repr(C)]
+#[derive(Clone,Copy,Pod,Zeroable)]
+struct InstanceVertex { rows:[[f32;4];3], color:[f32;4] }
+
+struct PackedGpuSource {
+    lod:std::sync::Arc<ClusterLod>, instances:Vec<PackedInstance>,
+    p:wgpu::Buffer,n:wgpu::Buffer,c:wgpu::Buffer,instance_buffer:wgpu::Buffer,
+    selected:u32,total:u32,
 }
 /// Corner order of `Scene::bbp`; the 12 edges as index pairs.
 const BOX_EDGES: [u32; 24] = [0,1, 1,3, 3,2, 2,0, 4,5, 5,7, 7,6, 6,4, 0,4, 1,5, 2,6, 3,7];
@@ -103,6 +125,12 @@ struct Uniforms {
 }
 
 pub struct Gpu {
+    packed:Vec<PackedGpuSource>,
+    packed_cut_cache:std::sync::Mutex<Option<([[f32;4];4],[f32;3],[u32;2],bool,Vec<packed_draw::PackedCut>)>>,
+    pipe_inst_surf:wgpu::RenderPipeline,pipe_inst_wire:wgpu::RenderPipeline,
+    pipe_inst_wire_all:wgpu::RenderPipeline,pipe_inst_wire_hidden:wgpu::RenderPipeline,
+    pipe_inst_ghost_wire:wgpu::RenderPipeline,pipe_inst_depth:wgpu::RenderPipeline,
+    pipe_inst_xray:wgpu::RenderPipeline,pipe_inst_ghost:wgpu::RenderPipeline,pipe_inst_mask:wgpu::RenderPipeline,
     tex_bgl:wgpu::BindGroupLayout, default_tex_bind:wgpu::BindGroup, pipe_tex:wgpu::RenderPipeline, pipe_tex_bias:wgpu::RenderPipeline, pipe_tex_xray:wgpu::RenderPipeline,
     tex_batches:Vec<TextureBatch>, texture_status:Vec<String>,
     gpu_images:HashMap<String,(wgpu::TextureView,usize,u64)>, gpu_tick:u64,
@@ -229,7 +257,7 @@ fn cube(extra:bool) -> Geometry {
         }).collect();
         let scene=Scene {p,n:vec![0.,0.,1.].repeat(4),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],
             point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
-            nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:1.5,textured,cd:None};
+            nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:1.5,textured,cd:None,packed_sources:Vec::new(),auto_lod:None};
         let mut gpu=Gpu::new(&device,&scene);
         let mut registry=Registry::new(".");
         // The red F has a top bar and left stem. A V mirror puts its bar at the bottom.
@@ -344,7 +372,7 @@ fn cube(extra:bool) -> Geometry {
             pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
             nlp: Vec::new(), nln: Vec::new(), normal_points:Vec::new(), bbp: [0.0; 24],
             center: [0.0, 0.0, 0.0], radius: 1.5,
-            textured:Vec::new(), cd:None,
+            textured:Vec::new(), cd:None,packed_sources:Vec::new(),auto_lod:None,
         };
 
         let gpu = Gpu::new(&device, &scene);
