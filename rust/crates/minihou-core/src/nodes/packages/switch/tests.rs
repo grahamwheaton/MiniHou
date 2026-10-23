@@ -93,8 +93,8 @@ fn legacy_select_value_is_ignored() {
     let g0 = Geometry::points_only(vec![0.0, 0.0, 0.0]).unwrap();
     let g1 = Geometry::points_only(vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0]).unwrap();
     let inputs = vec![vec![Arc::new(g0)], vec![Arc::new(g1)]];
-    let p = Params::resolve(NODE.params, json!({"index": 1, "select": 0}).as_object()).unwrap();
+    let p = Params::resolve_node("switch", NODE.params, json!({"index": 1, "select": 0}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&inputs, &p).unwrap().npoints, 2);
-    let p = Params::resolve(NODE.params, json!({"select": 1}).as_object()).unwrap();
+    let p = Params::resolve_node("switch", NODE.params, json!({"select": 1}).as_object()).unwrap();
     assert_eq!((NODE.cook)(&inputs, &p).unwrap().npoints, 1);
 }

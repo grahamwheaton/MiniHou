@@ -33,6 +33,14 @@ impl Params {
                 return Self::resolve(specs, Some(&g));
             }
         }
+        if node_type == "switch" {
+            if let Some(g) = given.filter(|g| g.contains_key("select")) {
+                // Legacy: the removed "select" slider is ignored so older graphs still load.
+                let mut g = g.clone();
+                g.remove("select");
+                return Self::resolve(specs, Some(&g));
+            }
+        }
         Self::resolve(specs, given)
     }
     /// The node's defaults overlaid with the graph's values; unknown names and unsupported non-defaults are errors.
