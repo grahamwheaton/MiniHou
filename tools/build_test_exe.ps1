@@ -11,11 +11,12 @@ param(
 $repo = "C:\Users\Grayw\Documents\Minihou_Rust\.claude\worktrees\native-ui-cont"
 $target = "C:\Users\Grayw\Documents\Minihou_Rust\target-testbuild"
 if (-not (Test-Path $Build)) { git -C $repo worktree add --detach $Build $Ref | Out-Null }
-git -C $Build fetch -q origin $Ref
-git -C $Build checkout -q --detach FETCH_HEAD
+# Build from the local ref: worktrees share this repo's refs, so no GitHub push or fetch is needed.
+git -C $Build checkout -q --detach $Ref
 $head = (git -C $Build rev-parse --short=9 HEAD)
 $env:CARGO_TARGET_DIR = $target
-$env:CARGO_BUILD_JOBS = "2"
+# Use all cores for the build; the cap of 2 only slowed it down.
+Remove-Item Env:CARGO_BUILD_JOBS -ErrorAction SilentlyContinue
 Push-Location "$Build\rust"
 cargo build -p minihou-app --profile testbuild
 $code = $LASTEXITCODE
