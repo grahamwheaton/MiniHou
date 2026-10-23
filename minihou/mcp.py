@@ -104,9 +104,12 @@ TOOLS: List[dict] = [
          "include_layout": {"type": "boolean", "description": "Include node positions (default false)."}},
          "additionalProperties": False}},
     {"name": "edit_graph",
-     "description": "Apply a batch of edit operations atomically (all or nothing), wait for the cook, and report the "
-                    "result: created ids, cook success or the failing node and message, point/prim counts.\n" + OPS_DOC,
+     "description": "Apply a structurally atomic batch of edit operations and wait for the cook. By default the edit stays "
+                    "in the graph if cooking fails. On the Rust backend, rollback_on_cook_error=true cooks a private "
+                    "candidate first and leaves the original graph intact if that cook fails. The reply reports "
+                    "edit_applied, cook_ok, failed_node and the structured error.\n" + OPS_DOC,
      "inputSchema": {"type": "object", "required": ["ops"], "additionalProperties": False, "properties": {
+         "rollback_on_cook_error": {"type": "boolean", "description": "Rust backend: validate a private cook before committing; retain the original graph if it fails."},
          "ops": {"type": "array", "minItems": 1, "description": "Edit operations, applied in order.",
                  "items": {"type": "object", "required": ["op"], "properties": {
                      "op": {"type": "string", "enum": ["add", "insert", "remove", "rename", "connect", "disconnect", "set",
@@ -423,10 +426,21 @@ class McpServer:
         return (f"File: {snap.get('path')}  rev {snap['rev']}\n{format_status(st, snap['graph'])}\n\n"
                 + json.dumps(graph, indent=1))
 
-    def tool_edit_graph(self, ops: List[dict]) -> str:
+    def tool_edit_graph(self, ops: List[dict], rollback_on_cook_error: bool = False) -> str:
         if not isinstance(ops, list) or not ops:
             raise ToolError("ops must be a non-empty list of edit operations")
-        r = self.engine.post("/api/edit", {"ops": ops, "wait": True, "timeout": 60, "origin": "mcp"})
+        if rollback_on_cook_error and self.engine.get("/api/state")["engine"].get("backend") != "rust":
+            raise ToolError("rollback_on_cook_error requires the Rust backend")
+        r = self.engine.post("/api/edit", {"ops": ops, "wait": True, "timeout": 60, "origin": "mcp",
+                                            "rollback_on_cook_error": rollback_on_cook_error})
+        status = r.get("status") or {}
+        r.setdefault("edit_applied", bool(r.get("changed")))
+        r.setdefault("cook_ok", status.get("ok"))
+        r.setdefault("failed_node", (status.get("error") or {}).get("node"))
+        r.setdefault("error", status.get("error"))
+        if r.get("rolled_back"):
+            return ("Edit rolled back after cook failure.\n" +
+                    json.dumps({k: r.get(k) for k in ("edit_applied", "cook_ok", "failed_node", "error")}, indent=1))
         created = [res["id"] for res, op in zip(r["results"], ops) if op.get("op") in ("add", "rename") and "id" in res]
         exposed = [res["name"] for res, op in zip(r["results"], ops) if op.get("op") == "expose"]
         head = f"Applied {len(ops)} op(s), graph rev {r['rev']}." if r["changed"] else "No change (graph already like that)."
@@ -437,7 +451,8 @@ class McpServer:
         tail = ""
         if r["status"].get("ok") is False:
             tail = "\nThe edit was kept; fix it with another edit_graph call, or call undo."
-        return head + "\n" + format_status(r["status"], r["graph"]["graph"]) + tail
+        fields = {k: r.get(k) for k in ("edit_applied", "cook_ok", "failed_node", "error")}
+        return head + "\n" + format_status(r["status"], r["graph"]["graph"]) + tail + "\n" + json.dumps(fields)
 
     def tool_inspect_node(self, node: str, detail: bool = True) -> str:
         r = self.engine.post("/api/inspect", {"node": node, "detail": detail})

@@ -1,7 +1,8 @@
 //! UI-thread adapter: the HTTP service uses the same history/worker/link path as UI edits.
 use crate::*;
 use minihou_app::{
-    http_api::{error_detail, HttpServer, Request, Response},
+    display_nodes,
+    http_api::{edit_status, error_detail, HttpServer, Request, Response},
     http_geometry::{Query, QueryKind},
     http_ops,
 };
@@ -128,6 +129,16 @@ fn library(root: &Path) -> Value {
     let files=std::fs::read_dir(&dir).ok().into_iter().flatten().flatten().filter(|e|e.path().extension().is_some_and(|e|e=="py"||e=="json")).map(|e|json!({"file":e.path(),"nodes":[],"error":"Python node-library loading is not available in the Rust core"})).collect::<Vec<_>>();
     json!({"dirs":[dir],"files":files,"backend":"rust","supported":false})
 }
+fn validate_edit_cook(value: &Value, frame: f64, fps: f64) -> Result<()> {
+    let graph = Graph::from_value(value)?;
+    if graph.nodes.is_empty() { return Ok(()); }
+    let targets = display_nodes(value);
+    let targets = if targets.is_empty() { vec![graph.main_output()?] } else { targets };
+    let mut session = minihou_core::session::Session::new(graph);
+    session.set_time(frame, fps)?;
+    for target in targets { session.cook(Some(&target))?; }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -158,6 +169,16 @@ mod tests {
                 .unwrap()
                 .contains("not available in the Rust core"));
         }
+    }
+    #[test]
+    fn opt_in_cook_validation_rejects_bad_wrangle() {
+        let graph = json!({"version":1,"nodes":{
+            "box1":{"type":"box"},
+            "w":{"type":"wrangle","inputs":{"geo":"box1"},"params":{"snippet":"f@ok = 1; v@bad = set(1, 2)"}}
+        },"display":"w"});
+        let error = validate_edit_cook(&graph, 1., 24.).unwrap_err().to_string();
+        assert!(error.contains("statement 2"), "{error}");
+        assert!(error.contains("v@bad = set(1, 2)"), "{error}");
     }
 }
 impl App {
@@ -213,6 +234,7 @@ impl App {
                         let mut body = body.unwrap_or_else(|| self.http_status());
                         if body.get("results").is_some() {
                             body["status"] = self.http_status();
+                            edit_status(&mut body);
                             if let Err(e) = self.editor.save_to(self.editor.path.clone()) {
                                 body["save_error"] = json!(e.to_string());
                             }
@@ -423,13 +445,28 @@ impl App {
                 let before = self.editor.doc.value();
                 let (value, results) = http_ops::apply_ops(before, &b["ops"])?;
                 let changed = before != &value;
+                let rollback = match b.get("rollback_on_cook_error") {
+                    None | Some(Value::Bool(false)) => false,
+                    Some(Value::Bool(true)) => true,
+                    _ => return Err("rollback_on_cook_error must be boolean".into()),
+                };
+                if changed && rollback {
+                    let (frame, fps) = self.link.as_ref().map(|l| (l.frame, l.fps)).unwrap_or(self.http_time);
+                    if let Err(e) = validate_edit_cook(&value, frame, fps) {
+                        let error = error_detail(&e.to_string());
+                        return Ok(Some(Response::ok(json!({"changed":false,"edit_applied":false,"cook_ok":false,
+                            "failed_node":error["node"],"error":error,"rolled_back":true,"rev":self.cooking.requested,
+                            "results":results,"graph":self.http_snapshot(),"status":self.http_status()}))));
+                    }
+                }
                 if changed && !self.commit_document(value, "apply MCP edits") {
                     return Err(self.file_status.clone().into());
                 }
                 if changed {
                     self.http_sync_selection();
                 }
-                let out = json!({"changed":changed,"rev":self.cooking.requested,"results":results,"graph":self.http_snapshot(),"status":self.http_status()});
+                let mut out = json!({"changed":changed,"rev":self.cooking.requested,"results":results,"graph":self.http_snapshot(),"status":self.http_status()});
+                edit_status(&mut out);
                 if b["wait"] == true {
                     self.http_wait(r, Some(out));
                     return Ok(None);

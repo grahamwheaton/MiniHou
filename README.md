@@ -437,7 +437,7 @@ Then start `claude` in this folder (approve the `minihou` server) and ask, for e
 > Expose the boulder count and dune height to Blender.
 
 The assistant gets these tools: `engine_status`, `list_node_types` (every node, input and parameter with ranges and docs),
-`get_graph`, `edit_graph` (atomic batches of edit operations; the reply says whether the cook worked, which node failed and why,
+`get_graph`, `edit_graph` (structurally atomic batches of edit operations; edits stay after a cook error by default, while the Rust backend's `rollback_on_cook_error` option validates a private cook before committing; the reply says whether the cook worked, which node failed and why,
 and point/prim counts), `inspect_node` (counts, bounds and attribute ranges at any node), `undo`, `list_graphs`, `open_graph`
 (also starts the engine if it isn't running), `wrangle_reference` and `node_library` (write brand-new node types in Python,
 see below). The screenshots above are from exactly that loop.
