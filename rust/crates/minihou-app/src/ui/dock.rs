@@ -175,6 +175,49 @@ pub fn retarget(root: &DockNode, panel: PanelId, target: PanelId, zone: DropZone
     insert(&mut tree, panel, target, zone).then_some(tree)
 }
 
+/// Drop the dragged `panel` on the tab header of `target`: it joins `target`'s tab group at `target`'s
+/// position (just before it) and becomes the active tab. Works within one group too (reorders).
+pub fn join_at(root: &DockNode, panel: PanelId, target: PanelId) -> Option<DockNode> {
+    if panel == PanelId::Viewport || target == PanelId::Viewport || panel == target { return None; }
+    let all = root.panels();
+    if !all.contains(&panel) || !all.contains(&target) { return None; }
+    fn put(n: &mut DockNode, panel: PanelId, target: PanelId) -> bool {
+        match n {
+            DockNode::Split { a, b, .. } => put(a, panel, target) || put(b, panel, target),
+            DockNode::Tabs { panels, active } => match panels.iter().position(|p| *p == target) {
+                Some(i) => { panels.insert(i, panel); *active = i; true }
+                None => false,
+            },
+        }
+    }
+    let mut tree = remove(root.clone(), panel)?;
+    (put(&mut tree, panel, target) && tree != *root).then_some(tree)
+}
+
+/// Close a tab: the panel is hidden (it stays in the tree and can be added back from any "+" menu).
+/// A group whose panels are all closed takes no space. `None` for the Viewport or an already closed panel.
+pub fn close_tab(hidden: &[PanelId], panel: PanelId) -> Option<Vec<PanelId>> {
+    if panel == PanelId::Viewport || hidden.contains(&panel) { return None; }
+    let mut out = hidden.to_vec();
+    out.push(panel);
+    Some(out)
+}
+
+/// Panels a "+" menu offers: closed panels that are in the tree (a locked Shelf is not), never the Viewport.
+pub fn addable(root: &DockNode, hidden: &[PanelId]) -> Vec<PanelId> {
+    let all = root.panels();
+    PanelId::ALL.into_iter().filter(|p| *p != PanelId::Viewport && hidden.contains(p) && all.contains(p)).collect()
+}
+
+/// Add a closed `panel` from the "+" menu to the tab group holding `target`, as its last and active tab.
+/// The group it was closed in collapses if it is left empty.
+pub fn add_tab(root: &DockNode, hidden: &[PanelId], panel: PanelId, target: PanelId) -> Option<(DockNode, Vec<PanelId>)> {
+    if !addable(root, hidden).contains(&panel) || target == PanelId::Viewport || !root.panels().contains(&target) { return None; }
+    let mut tree = remove(root.clone(), panel)?;
+    if !insert(&mut tree, panel, target, DropZone::Centre) { return None; }
+    Some((tree, hidden.iter().copied().filter(|p| *p != panel).collect()))
+}
+
 /// A panel in `leaf` other than `dragged`, used as the drop target for that group.
 pub fn target_in(leaf: &Leaf, dragged: PanelId) -> Option<PanelId> { leaf.panels.iter().copied().find(|p| *p != dragged) }
 
@@ -203,9 +246,13 @@ pub fn reset_memory(ctx: &egui::Context) {
 }
 
 /// Draw tab headers and divider handles; handle tab clicks, tab drags and divider drags.
-/// Returns the edited tree when the user changed it this frame.
-pub fn interact(ui: &mut egui::Ui, root: &DockNode, leaves: &[Leaf], dividers: &[Divider]) -> Option<DockNode> {
+/// Each tab shows "Name ×" (the cross closes it); a "+" after the tabs adds a closed panel to that group.
+/// Returns the edited tree and closed-panel list when the user changed them this frame.
+pub fn interact(ui: &mut egui::Ui, root: &DockNode, hidden: &[PanelId], leaves: &[Leaf], dividers: &[Divider]) -> Option<(DockNode, Vec<PanelId>)> {
     let mut edited: Option<DockNode> = None;
+    let mut closed: Option<Vec<PanelId>> = None;
+    let mut headers: Vec<(PanelId, Rect)> = Vec::new();
+    let font = egui::FontId::proportional(12.);
     let ctx = ui.ctx().clone();
     let pointer = ctx.input(|i| i.pointer.interact_pos());
     let visuals = ui.visuals().clone();
@@ -230,30 +277,66 @@ pub fn interact(ui: &mut egui::Ui, root: &DockNode, leaves: &[Leaf], dividers: &
         ui.painter().rect_filled(strip, 0., visuals.faint_bg_color);
         let mut x = strip.left() + 4.;
         for panel in &leaf.panels {
-            let width = ui.painter().layout_no_wrap(panel.label().into(), egui::FontId::proportional(12.), visuals.text_color()).size().x;
-            let tab = Rect::from_min_size(Pos2::new(x, strip.top()), egui::vec2(width + 16., TAB_HEIGHT));
+            let width = ui.painter().layout_no_wrap(panel.label().into(), font.clone(), visuals.text_color()).size().x;
+            let tab = Rect::from_min_size(Pos2::new(x, strip.top()), egui::vec2(width + 30., TAB_HEIGHT));
             x = tab.right() + 2.;
+            headers.push((*panel, tab));
+            let cross = Rect::from_center_size(Pos2::new(tab.right() - 10., tab.center().y), egui::vec2(14., 14.));
             let r = ui.interact(tab, egui::Id::new(("dock_tab", *panel)), egui::Sense::click_and_drag());
+            let rc = ui.interact(cross, egui::Id::new(("dock_tab_close", *panel)), egui::Sense::click()).on_hover_text(format!("Close {}", panel.label()));
             let active = *panel == leaf.active;
             if active { ui.painter().rect_filled(tab, 3., visuals.panel_fill); }
             let color = if active || r.hovered() { visuals.strong_text_color() } else { visuals.weak_text_color() };
-            ui.painter().text(tab.center(), egui::Align2::CENTER_CENTER, panel.label(), egui::FontId::proportional(12.), color);
-            if r.clicked() && !active {
+            ui.painter().text(Pos2::new(tab.left() + 8., tab.center().y), egui::Align2::LEFT_CENTER, panel.label(), font.clone(), color);
+            if rc.hovered() { ui.painter().rect_filled(cross, 2., visuals.widgets.hovered.bg_fill); }
+            ui.painter().text(cross.center(), egui::Align2::CENTER_CENTER, "×", font.clone(), if rc.hovered() { visuals.strong_text_color() } else { visuals.weak_text_color() });
+            if rc.clicked() {
+                let base = closed.take().unwrap_or_else(|| hidden.to_vec());
+                closed = Some(close_tab(&base, *panel).unwrap_or(base));
+            } else if r.clicked() && !active {
                 let mut tree = edited.take().unwrap_or_else(|| root.clone());
                 set_active(&mut tree, *panel);
                 edited = Some(tree);
             }
             if r.drag_started() { ctx.data_mut(|d| d.insert_temp(drag_id(), *panel)); }
         }
+        // "+": add a closed panel to this group.
+        let plus = Rect::from_min_size(Pos2::new(x, strip.top() + 2.), egui::vec2(TAB_HEIGHT - 4., TAB_HEIGHT - 4.));
+        let rp = ui.interact(plus, egui::Id::new(("dock_tab_add", leaf.path.clone())), egui::Sense::click()).on_hover_text("Add a panel to this section");
+        if rp.hovered() { ui.painter().rect_filled(plus, 2., visuals.widgets.hovered.bg_fill); }
+        ui.painter().text(plus.center(), egui::Align2::CENTER_CENTER, "+", egui::FontId::proportional(14.), visuals.text_color());
+        let options = addable(root, hidden);
+        let target = leaf.active;
+        egui::Popup::menu(&rp).show(|ui| {
+            if options.is_empty() { ui.weak("All panels are shown"); }
+            for p in &options {
+                if ui.button(p.label()).clicked() {
+                    if let Some((tree, h)) = add_tab(root, hidden, *p, target) { edited = Some(tree); closed = Some(h); }
+                    ui.close();
+                }
+            }
+        });
     }
     let dragged = ctx.data(|d| d.get_temp::<PanelId>(drag_id()));
     if let (Some(dragged), Some(pos)) = (dragged, pointer) {
-        let hover = leaves.iter().find(|l| l.rect.contains(pos));
-        let drop = hover.and_then(|leaf| target_in(leaf, dragged).map(|t| (leaf, t, drop_zone(leaf.rect, pos))));
-        let result = drop.and_then(|(_, target, zone)| retarget(root, dragged, target, zone));
-        if let (Some((leaf, _, zone)), Some(_)) = (drop, &result) {
-            ui.painter().rect_filled(zone_rect(leaf.rect, zone), 2., visuals.selection.bg_fill.gamma_multiply(0.35));
-        }
+        // Over a tab header: join that group at that tab's position. Elsewhere: drop zones.
+        let on_tab = headers.iter().find(|(p, r)| *p != dragged && r.contains(pos)).copied();
+        let result = if let Some((target, tab)) = on_tab {
+            let result = join_at(root, dragged, target);
+            if result.is_some() {
+                let bar = Rect::from_min_max(Pos2::new(tab.left() - 2., tab.top()), Pos2::new(tab.left() + 1., tab.bottom()));
+                ui.painter().rect_filled(bar, 1., visuals.selection.bg_fill);
+            }
+            result
+        } else {
+            let hover = leaves.iter().find(|l| l.rect.contains(pos));
+            let drop = hover.and_then(|leaf| target_in(leaf, dragged).map(|t| (leaf, t, drop_zone(leaf.rect, pos))));
+            let result = drop.and_then(|(_, target, zone)| retarget(root, dragged, target, zone));
+            if let (Some((leaf, _, zone)), Some(_)) = (drop, &result) {
+                ui.painter().rect_filled(zone_rect(leaf.rect, zone), 2., visuals.selection.bg_fill.gamma_multiply(0.35));
+            }
+            result
+        };
         ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         if ctx.input(|i| i.pointer.any_released()) {
             ctx.data_mut(|d| d.remove::<PanelId>(drag_id()));
@@ -262,7 +345,8 @@ pub fn interact(ui: &mut egui::Ui, root: &DockNode, leaves: &[Leaf], dividers: &
     } else if dragged.is_some() && !ctx.input(|i| i.pointer.any_down()) {
         ctx.data_mut(|d| d.remove::<PanelId>(drag_id()));
     }
-    edited
+    if edited.is_none() && closed.is_none() { return None; }
+    Some((edited.unwrap_or_else(|| root.clone()), closed.unwrap_or_else(|| hidden.to_vec())))
 }
 
 /// Thin separator lines where side panels used to draw theirs.
@@ -370,6 +454,65 @@ mod tests {
         assert_eq!(node_at(&root, &[1, 1, 1]), Some(&DockNode::Tabs { panels: vec![GeoInfo, Spreadsheet], active: 1 }));
         let (leaves, _) = place(&root, screen(), &[]);
         assert_eq!(target_in(leaves.last().unwrap(), Spreadsheet), Some(GeoInfo));
+    }
+
+    #[test]
+    fn closing_tabs_hides_them_and_an_empty_group_gives_its_space_away() {
+        let root = UiLayout::default().root;
+        let h = close_tab(&[], GeoInfo).unwrap();
+        assert_eq!(h, [GeoInfo]);
+        assert_eq!(close_tab(&h, GeoInfo), None, "already closed");
+        assert_eq!(close_tab(&[], Viewport), None, "the Viewport has no close cross");
+        let (leaves, _) = place(&root, screen(), &h);
+        assert_eq!(leaves.iter().find(|l| l.panels.contains(&Spreadsheet)).unwrap().panels, [Spreadsheet]);
+        let h = close_tab(&h, Spreadsheet).unwrap();
+        let (leaves, dividers) = place(&root, screen(), &h);
+        assert!(leaves.iter().all(|l| !l.panels.contains(&GeoInfo) && !l.panels.contains(&Spreadsheet)));
+        assert_eq!(leaves.iter().find(|l| l.panels == [Parameters]).unwrap().rect.bottom(), 800.);
+        assert_eq!(dividers.len(), 2);
+        assert!(UiLayout { hidden: h, ..UiLayout::default() }.is_valid());
+    }
+
+    #[test]
+    fn plus_menu_lists_closed_panels_and_adds_them_to_a_group() {
+        let root = UiLayout::default().root;
+        assert!(addable(&root, &[]).is_empty());
+        assert_eq!(addable(&root, &[Shelf, Spreadsheet]), [Spreadsheet], "a locked Shelf is not in the tree");
+        let hidden = [GeoInfo, Spreadsheet];
+        assert_eq!(addable(&root, &hidden), [GeoInfo, Spreadsheet]);
+        // Add Spreadsheet to the Network group; GeoInfo stays closed in its old group.
+        let (tree, h) = add_tab(&root, &hidden, Spreadsheet, Network).unwrap();
+        assert_eq!(h, [GeoInfo]);
+        assert_eq!(node_at(&tree, &[0]), Some(&DockNode::Tabs { panels: vec![Network, Spreadsheet], active: 1 }));
+        assert!(valid(tree.clone()));
+        // Then GeoInfo: its old group is now empty and collapses into Parameters.
+        let (tree, h) = add_tab(&tree, &h, GeoInfo, Network).unwrap();
+        assert!(h.is_empty() && valid(tree.clone()));
+        assert_eq!(node_at(&tree, &[1, 1]), Some(&DockNode::tabs(&[Parameters])));
+        // Refused: not closed, or into the Viewport.
+        assert_eq!(add_tab(&root, &[], GeoInfo, Network), None);
+        assert_eq!(add_tab(&root, &hidden, GeoInfo, Viewport), None);
+        // Re-adding to the group it was closed in just reopens it as the active tab.
+        let (tree, h) = add_tab(&root, &[GeoInfo], GeoInfo, Spreadsheet).unwrap();
+        assert!(h.is_empty());
+        assert_eq!(node_at(&tree, &[1, 1, 1]), Some(&DockNode::Tabs { panels: vec![Spreadsheet, GeoInfo], active: 1 }));
+    }
+
+    #[test]
+    fn dropping_on_a_tab_header_joins_at_that_position() {
+        let root = UiLayout::default().root;
+        let tree = join_at(&root, Network, Spreadsheet).unwrap();
+        assert!(valid(tree.clone()));
+        assert_eq!(node_at(&tree, &[1, 1]), Some(&DockNode::Tabs { panels: vec![GeoInfo, Network, Spreadsheet], active: 1 }));
+        let tree = join_at(&root, Parameters, GeoInfo).unwrap();
+        assert_eq!(node_at(&tree, &[1, 1]), Some(&DockNode::Tabs { panels: vec![Parameters, GeoInfo, Spreadsheet], active: 0 }));
+        // Reordering within a group.
+        let tree = join_at(&root, Spreadsheet, GeoInfo).unwrap();
+        assert_eq!(node_at(&tree, &[1, 1, 1]), Some(&DockNode::Tabs { panels: vec![Spreadsheet, GeoInfo], active: 0 }));
+        assert_eq!(join_at(&root, GeoInfo, Spreadsheet), None, "already just before it");
+        assert_eq!(join_at(&root, Viewport, Network), None);
+        assert_eq!(join_at(&root, Network, Viewport), None);
+        assert_eq!(join_at(&root, Network, Network), None);
     }
 
     #[test]
