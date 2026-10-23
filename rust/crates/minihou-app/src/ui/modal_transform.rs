@@ -31,7 +31,8 @@ pub fn base_snap_targets(alt: bool) -> SnapTargets {
     SnapTargets::from_bits(kinds.iter().fold(0u8, |bits, to| bits | (1 << *to as u8)))
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BaseStage { Off, Base, Target, SourceDirection, TargetDirection, Done }
+/// Move: Base -> Target -> Done. Rotate and scale: Base (pivot) -> Target (reference) -> Destination -> Done.
+pub enum BaseStage { Off, Base, Target, Destination, Done }
 impl BaseStage {
     pub fn enter(active: bool) -> Self { if active { Self::Base } else { Self::Off } }
 }
@@ -133,9 +134,9 @@ impl Modal {
             } else if snap { self.snap_to.label() } else { "Off".into() },
             if self.proportional { "  Proportional" } else { "" },
             if self.base_stage != BaseStage::Off { match self.base_stage {
-                BaseStage::Base => "", BaseStage::Target => "  Base snap: pick target",
-                BaseStage::SourceDirection => "  Base snap: pick source edge direction",
-                BaseStage::TargetDirection => "  Base snap: pick target direction", BaseStage::Done => "  Base snap", BaseStage::Off => "" } }
+                BaseStage::Base => "",
+                BaseStage::Target => if self.kind==Kind::Move {"  Base snap: pick target"} else {"  Base snap: pick reference"},
+                BaseStage::Destination => "  Base snap: pick destination", BaseStage::Done => "  Base snap", BaseStage::Off => "" } }
             else if self.cage { "  Cage" } else if self.sketch != SketchStage::Off { "  Two-point" }
             else if self.trackball { "  Trackball" } else { "" })
     }
@@ -169,7 +170,7 @@ impl Modal {
                     let axis=self.rotation_axis(frame,camera);
                     let target=if self.base_stage==BaseStage::Done { self.target_direction }
                         else { self.pointer_direction.or(self.target_direction) };
-                    let angle=self.base_point.zip(self.source_direction).zip(target)
+                    let angle=self.base_point.zip(self.base_target).zip(target)
                         .and_then(|((base,source),target)|rotate_alignment_angle(base,source,target,axis))
                         .unwrap_or(0.);
                     let angle=self.typed(0).unwrap_or_else(|| if snap {snap_value(angle,if precision {5.} else {15.})} else {angle});
@@ -177,10 +178,18 @@ impl Modal {
                 }
                 Kind::Scale => {
                     if self.base_point.is_none() || self.base_target.is_none() { [1.; 3] } else {
-                        let start_distance = (self.start - center).length();
-                        let denominator = start_distance.max(12.);
-                        let factor = self.typed(0).unwrap_or_else(|| q(1. +
-                            ((self.pointer - center).length() - start_distance) / denominator * speed));
+                        // Scale about the pivot so the reference lands on the destination.
+                        let (pivot,reference)=(self.base_point.unwrap(),self.base_target.unwrap());
+                        let destination=if self.base_stage==BaseStage::Done { self.target_direction }
+                            else { self.pointer_direction.or(self.target_direction) };
+                        let r=base_snap_offset(pivot,reference);
+                        let d=destination.map(|p|base_snap_offset(pivot,p));
+                        let ratio=|a: f32, b: f32| if a.abs()<1e-6 { 1. } else { b/a };
+                        let factor = self.typed(0).unwrap_or_else(|| d.map(|d| match self.constraint {
+                            Constraint::Axis(axis,_) => ratio(dot(r,frame[axis]),dot(d,frame[axis])),
+                            _ => ratio(dot(r,r).sqrt(),dot(d,d).sqrt()),
+                        }).unwrap_or(1.));
+                        let _ = (q, speed, center);
                         match self.constraint {
                             Constraint::Axis(axis, _) => { let mut values = [1.; 3]; values[axis] = factor; values }
                             Constraint::Plane(axis, _) => { let mut values = [factor; 3]; values[axis] = 1.; values }
@@ -478,41 +487,65 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         assert_eq!(modal.base_stage,BaseStage::Base);
         for snap in [false,true] { assert!(!modal.status(snap).contains("Base snap"),"{}",modal.status(snap)); }
     }
-    #[test] fn base_snap_scale_follows_pointer_from_base() {
+    #[test] fn base_snap_scale_waits_for_reference_then_follows_hovered_destination() {
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let base=[2.,3.,4.];
         let mut modal=Modal::new(Kind::Scale,pos2(40.,50.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
-        modal.base_stage=BaseStage::Target;
-        modal.base_point=Some(base);
-        modal.base_target.get_or_insert([1.,0.,0.]);
-        assert_eq!(modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),false,1.,false),([1.;3],base));
-        modal.pointer=pos2(52.,50.);
-        assert_eq!(modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),false,1.,false),([2.;3],base));
-        modal.pointer=pos2(53.,50.);
-        let snapped=modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),true,1.,false).0;
-        assert!(snapped.iter().all(|factor| (*factor-2.1).abs()<1e-6),"{snapped:?}");
-        modal.base_target=Some([5.,7.,4.]);
-        assert_eq!(base_snap_offset(base,modal.base_target.unwrap()),[3.,4.,0.]);
+        modal.base_stage=BaseStage::Target; modal.base_point=Some(base);
+        modal.pointer_direction=Some([9.,3.,4.]);
+        assert_eq!(modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),false,1.,false),([1.;3],base),"no scale before the reference");
+        modal.base_stage=BaseStage::Destination; modal.base_target=Some([3.,3.,4.]);
+        modal.pointer_direction=Some([2.,6.,4.]);
+        assert_eq!(modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),true,1.,false),([3.;3],base));
     }
-    #[test] fn base_snap_rotate_follows_pointer_after_base_is_picked() {
+    #[test] fn base_snap_scale_two_when_destination_is_twice_the_reference() {
+        let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        let mut modal=Modal::new(Kind::Scale,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+        modal.base_stage=BaseStage::Done; modal.base_point=Some([1.,1.,1.]);
+        modal.base_target=Some([1.,2.,1.]); modal.target_direction=Some([3.,1.,1.]);
+        let (values,pivot)=modal.desired(pos2(0.,0.),100.,frame,CameraInfo::default(),false,1.,false);
+        assert_eq!(pivot,[1.,1.,1.]); assert_eq!(values,[2.;3]);
+    }
+    #[test] fn base_snap_scale_axis_constraint_scales_one_axis_only() {
+        let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        let mut modal=Modal::new(Kind::Scale,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+        modal.base_stage=BaseStage::Done; modal.base_point=Some([0.;3]);
+        modal.base_target=Some([2.,5.,0.]); modal.target_direction=Some([6.,1.,0.]);
+        modal.constraint=Constraint::Axis(0,false);
+        assert_eq!(modal.desired(pos2(0.,0.),100.,frame,CameraInfo::default(),false,1.,false).0,[3.,1.,1.]);
+        modal.base_target=Some([0.,5.,0.]);
+        assert_eq!(modal.desired(pos2(0.,0.),100.,frame,CameraInfo::default(),false,1.,false).0,[1.;3],"zero reference component is guarded");
+    }
+    #[test] fn base_snap_rotate_aims_reference_at_hovered_destination() {
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let camera=CameraInfo {ray_forward:[0.,0.,1.],..Default::default()};
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
         modal.base_stage=BaseStage::Target; modal.base_point=Some([2.,3.,4.]);
-        modal.base_target.get_or_insert([1.,0.,0.]);
-        modal.source_direction=Some([3.,3.,4.]);
         modal.pointer_direction=Some([2.,4.,4.]);
+        assert_eq!(modal.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0,[0.;3],"no rotation before the reference");
+        modal.base_stage=BaseStage::Destination; modal.base_target=Some([3.,3.,4.]);
         let (values,pivot)=modal.desired(pos2(0.,0.),100.,frame,camera,false,1.,false);
         assert_eq!(pivot,[2.,3.,4.]); assert!((values[2]-90.).abs()<1e-4,"{values:?}");
         modal.pointer_direction=Some([3.,3.,4.]);
         assert_eq!(modal.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0,[0.;3]);
     }
+    #[test] fn base_snap_rotate_pivot_stays_fixed_without_translation() {
+        let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        let camera=CameraInfo {ray_forward:[0.,0.,1.],..Default::default()};
+        let pivot=[1.,1.,0.];
+        let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+        modal.base_stage=BaseStage::Done; modal.base_point=Some(pivot);
+        modal.base_target=Some([3.,1.,0.]); modal.target_direction=Some([1.,-2.,0.]);
+        let (values,returned)=modal.desired(pos2(0.,0.),100.,frame,camera,false,1.,false);
+        assert_eq!(returned,pivot,"rotation pivots about snap 1");
+        assert!((values[2]+90.).abs()<1e-4,"{values:?}");
+        assert_eq!(values[0],0.); assert_eq!(values[1],0.);
+    }
     #[test] fn base_snap_rotate_typed_angle_wins() {
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
-        modal.base_stage=BaseStage::TargetDirection; modal.base_point=Some([0.;3]);
-        modal.base_target.get_or_insert([1.,0.,0.]);
-        modal.source_direction=Some([1.,0.,0.]); modal.pointer_direction=Some([0.,1.,0.]);
+        modal.base_stage=BaseStage::Destination; modal.base_point=Some([0.;3]);
+        modal.base_target=Some([1.,0.,0.]); modal.pointer_direction=Some([0.,1.,0.]);
         modal.numeric[0]="37.5".into();
         let values=modal.desired(pos2(0.,0.),100.,frame,CameraInfo::default(),true,1.,false).0;
         assert!((values[2]-37.5).abs()<1e-4,"{values:?}");
@@ -521,11 +554,10 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let face=crate::picking::SnapFeature {point:[0.;3],triangle:[[0.,0.,0.],[0.,1.,0.],[0.,0.,1.]],kind:SnapTo::Face};
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
-        modal.base_stage=BaseStage::TargetDirection; modal.base_point=Some([0.;3]);
-        modal.base_target.get_or_insert([1.,0.,0.]);
+        modal.base_stage=BaseStage::Destination; modal.base_point=Some([0.;3]);
         modal.base_axis=feature_rotation_axis(&face);
         assert_eq!(modal.rotation_axis(frame,CameraInfo::default()),[1.,0.,0.]);
-        modal.source_direction=Some([0.,1.,0.]); modal.pointer_direction=Some([0.,0.,1.]);
+        modal.base_target=Some([0.,1.,0.]); modal.pointer_direction=Some([0.,0.,1.]);
         let values=modal.desired(pos2(0.,0.),100.,frame,CameraInfo::default(),false,1.,false).0;
         assert!((values[0]-90.).abs()<1e-4,"{values:?}");
         let edge=crate::picking::SnapFeature {kind:SnapTo::Edge,point:[0.,0.5,0.],..face};
@@ -534,9 +566,8 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
     #[test] fn base_snap_rotate_protractor_snaps_to_fifteen_and_five_degrees() {
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let mut modal=Modal::new(Kind::Rotate,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
-        modal.base_stage=BaseStage::TargetDirection; modal.base_point=Some([0.;3]);
-        modal.base_target.get_or_insert([1.,0.,0.]);
-        modal.source_direction=Some([1.,0.,0.]);
+        modal.base_stage=BaseStage::Destination; modal.base_point=Some([0.;3]);
+        modal.base_target=Some([1.,0.,0.]);
         let (sin,cos)=12_f32.to_radians().sin_cos(); modal.pointer_direction=Some([cos,sin,0.]);
         let camera=CameraInfo {ray_forward:[0.,0.,1.],..Default::default()};
         assert!((modal.desired(pos2(0.,0.),100.,frame,camera,true,1.,false).0[2]-15.).abs()<1e-4);
@@ -546,10 +577,9 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
     #[test] fn base_snap_scale_typed_value_wins() {
         let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
         let mut modal=Modal::new(Kind::Scale,pos2(40.,50.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
-        modal.base_stage=BaseStage::Target;
+        modal.base_stage=BaseStage::Destination;
         modal.base_point=Some([2.,3.,4.]);
-        modal.base_target.get_or_insert([1.,0.,0.]);
-        modal.pointer=pos2(52.,50.);
+        modal.base_target=Some([3.,3.,4.]); modal.pointer_direction=Some([5.,3.,4.]);
         modal.numeric[0]="2.75".into();
         modal.constraint=Constraint::Axis(1,false);
         assert_eq!(modal.desired(pos2(40.,50.),100.,frame,CameraInfo::default(),true,1.,false).0,[1.,2.75,1.]);
@@ -818,15 +848,16 @@ impl App {
                                 if modal.kind==ModalKind::Scale {modal.start=pos;}
                                 modal.base_stage=BaseStage::Target;base_changed=true;
                             },
-                            BaseStage::Target => if let Some(point)=point {modal.base_target=Some(point);modal.base_stage=if modal.kind==ModalKind::Rotate {BaseStage::SourceDirection} else {BaseStage::Done};base_changed=true;confirm=modal.base_stage==BaseStage::Done;},
-                            BaseStage::SourceDirection => if let Some(point)=point {
-                                let offset=base_snap_offset(modal.base_point.unwrap(),modal.base_target.unwrap());
-                                modal.source_direction=Some([0,1,2].map(|i|point[i]-offset[i]));
-                                modal.base_stage=BaseStage::TargetDirection;
+                            // Move: click 2 is the target and confirms. Rotate and scale: click 2 is the reference.
+                            BaseStage::Target => if let Some(point)=point {
+                                modal.base_target=Some(point);
+                                if modal.kind==ModalKind::Move { modal.base_stage=BaseStage::Done; confirm=true; }
+                                else { modal.source_direction=Some(point); modal.base_stage=BaseStage::Destination; }
+                                base_changed=true;
                             },
-                            BaseStage::TargetDirection => if let Some(point)=point {
-                                let offset=base_snap_offset(modal.base_point.unwrap(),modal.base_target.unwrap());
-                                modal.target_direction=Some([0,1,2].map(|i|point[i]-offset[i]));
+                            // Rotate and scale: click 3 is the destination and confirms.
+                            BaseStage::Destination => if let Some(point)=point {
+                                modal.target_direction=Some(point);
                                 modal.base_stage=BaseStage::Done;base_changed=true;confirm=true;
                             },
                             BaseStage::Off|BaseStage::Done => confirm=true,
@@ -869,7 +900,7 @@ impl App {
         self.editor_state.proportional.enabled=modal.proportional;
         self.editor_state.proportional.radius=modal.radius;
         let snap=self.editor_state.snap.enabled ^ modifiers.ctrl;
-        if matches!(modal.base_stage,BaseStage::Base|BaseStage::Target) {
+        if matches!(modal.base_stage,BaseStage::Base|BaseStage::Target|BaseStage::Destination) {
             // Base snap hover: the indicator follows the nearest inference point before any click.
             let feature=self.modal_snap_feature(modal.pointer,base_snap_targets(modifiers.alt));
             modal.target=feature.map(|f|f.point);
@@ -881,11 +912,12 @@ impl App {
             modal.target_kind=feature.map(|f|f.kind);
             modal.target_shape=feature.map(|f|f.triangle);
         } else { modal.target=None; modal.target_shape=None; modal.target_kind=None; }
-        if modal.kind==ModalKind::Rotate && modal.base_stage!=BaseStage::Off {
+        if modal.kind!=ModalKind::Move && modal.base_stage!=BaseStage::Off {
+            // Hovered destination: the snap point under the pointer, else the pointer on a plane through the pivot.
             modal.pointer_direction=modal.base_point.and_then(|base| {
-                let axis=modal.rotation_axis(frame,camera);
-                let offset=modal.base_target.map(|target|base_snap_offset(base,target)).unwrap_or([0.;3]);
-                let plane=[0,1,2].map(|i|base[i]+offset[i]);
+                let axis=if modal.kind==ModalKind::Rotate {modal.rotation_axis(frame,camera)} else {camera.ray_forward};
+                let offset=[0.;3];
+                let plane=base;
                 let feature=self.modal_snap_feature(modal.pointer,base_snap_targets(modifiers.alt));
                 let point=feature.map(|feature|feature.point).or_else(|| {
                     let (origin,direction)=ui::transform_gizmo::ray(camera,self.last_viewport,modal.pointer);
@@ -925,7 +957,7 @@ impl App {
             let axis=modal.rotation_axis(frame,camera);
             let target=if modal.base_stage==BaseStage::Done {modal.target_direction} else {modal.pointer_direction};
             modal.base_angle=Some(modal.typed(0).unwrap_or_else(|| {
-                let raw=modal.base_point.zip(modal.source_direction).zip(target)
+                let raw=modal.base_point.zip(modal.base_target).zip(target)
                     .and_then(|((base,source),target)|rotate_alignment_angle(base,source,target,axis)).unwrap_or(0.);
                 if snap {snap_value(raw,if modifiers.shift {5.} else {15.})} else {raw}
             }));
@@ -934,9 +966,8 @@ impl App {
             self.editor.doc.value()["nodes"][target]["params"]["pivot"]!=json!(pivot));
         if values!=modal.last || pivot_changed || base_changed {
             let op=modal.step(values);
-            let offset=if modal.base_stage!=BaseStage::Off && modal.kind!=ModalKind::Move {
-                modal.base_point.zip(modal.base_target).map(|(base,target)|base_snap_offset(base,target))
-            } else {None};
+            // Rotate and scale pivot about snap 1 with no translation; move carries its offset in the values.
+            let offset=None;
             let orientation=if modal.kind==ModalKind::Rotate && modal.base_stage!=BaseStage::Off {
                 ui::Orientation::Global
             } else {orientation};
