@@ -6174,6 +6174,20 @@
   }
  },
  "point_relax": {
+  "domain": {
+   "default": "points",
+   "doc": "Element domain used to select points to relax",
+   "kind": "enum",
+   "options": ["points", "edges", "primitives"]
+  },
+  "group": {
+   "default": "",
+   "doc": "Points, edges, or primitives to relax; empty relaxes all points",
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain",
+   "section": "Selection"
+  },
   "iterations": {
    "default": 10,
    "doc": "Number of relaxation passes",

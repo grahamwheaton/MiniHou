@@ -472,6 +472,25 @@
         assert!(t.node_params("attribute_create", &sel(SelectionMode::Object)).is_none());
     }
 
+    #[test]
+    fn point_relax_tab_add_uses_selected_elements_and_domain() {
+        let t = topo(&grid(4, 3));
+        assert_eq!(find_input_group_field("point_relax"), Some(("group", Some("domain"))));
+        let points = Selection { points: vec![2, 5], ..sel(Points) };
+        assert_eq!(t.node_params("point_relax", &points), Some(serde_json::json!({
+            "group": "2 5", "domain": "points"
+        })));
+        let edges = Selection { edges: vec![(6, 7)], ..sel(Edges) };
+        assert_eq!(t.node_params("point_relax", &edges), Some(serde_json::json!({
+            "group": "p6-7", "domain": "edges"
+        })));
+        let faces = Selection { tris: vec![0, 1], ..sel(Faces) };
+        assert_eq!(t.node_params("point_relax", &faces), Some(serde_json::json!({
+            "group": "0", "domain": "primitives"
+        })));
+        assert!(t.node_params("point_relax", &sel(Points)).is_none());
+    }
+
     fn pick_group_create_tags_the_selection_with_a_free_name() {
         let m = grid(4, 3);
         let t = topo(&m);
