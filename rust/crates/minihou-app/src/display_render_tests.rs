@@ -1,9 +1,13 @@
 use super::*;
 
 pub(super) fn adapter() -> Option<(wgpu::Device,wgpu::Queue)> {
-    let instance=wgpu::Instance::default();
-    let adapter=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    // One shared device/queue per test binary: creating one per test caused flaky aborts.
+    static SHARED: std::sync::OnceLock<Option<(wgpu::Device,wgpu::Queue)>> = std::sync::OnceLock::new();
+    SHARED.get_or_init(|| {
+        let instance=wgpu::Instance::default();
+        let adapter=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    }).clone()
 }
 fn scene() -> Scene {
     let (mut p,mut n,mut tri,mut edge)=(Vec::new(),Vec::new(),Vec::new(),Vec::new());
