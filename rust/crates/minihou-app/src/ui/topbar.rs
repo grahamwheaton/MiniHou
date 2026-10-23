@@ -41,6 +41,12 @@ pub fn file_menu_entries() -> Vec<(&'static str, UiAction)> {
     vec![("Open", UiAction::Open), ("Save", UiAction::Save), ("Save As", UiAction::SaveAs)]
 }
 
+/// Preferences menu entries in display order (a separator goes before "Preferences…").
+pub fn preferences_menu_entries() -> Vec<(&'static str, UiAction)> {
+    vec![("Save UI Layout", UiAction::SaveUiLayout), ("Load UI Layout", UiAction::LoadUiLayout),
+        ("Reset UI to Default", UiAction::ResetUiLayout), ("Preferences…", UiAction::OpenPreferences)]
+}
+
 pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::hover());
     ui.painter().rect_filled(bar, 0., v.theme.panel);
@@ -65,6 +71,12 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             });
             ui.menu_button("Edit", |ui| {
                 if ui.button("Clear all").clicked() { out.push(UiAction::ClearMeasurements); ui.close(); }
+            });
+            ui.menu_button("Preferences", |ui| {
+                for (i, (label, action)) in preferences_menu_entries().into_iter().enumerate() {
+                    if i == 3 { ui.separator(); }
+                    if ui.button(label).clicked() { out.push(action); ui.close(); }
+                }
             });
             separator(ui, v);
             if button(ui, "Undo", "undo", v.can_undo, false, v, None) { out.push(UiAction::Undo); }
@@ -96,6 +108,15 @@ mod tests {
         let labels: Vec<_> = e.iter().map(|(l, _)| *l).collect();
         assert_eq!(labels, ["Open", "Save", "Save As"]);
         assert!(matches!(e[0].1, UiAction::Open) && matches!(e[1].1, UiAction::Save) && matches!(e[2].1, UiAction::SaveAs));
+    }
+
+    #[test]
+    fn preferences_menu_entries_in_order() {
+        let e = preferences_menu_entries();
+        let labels: Vec<_> = e.iter().map(|(l, _)| *l).collect();
+        assert_eq!(labels, ["Save UI Layout", "Load UI Layout", "Reset UI to Default", "Preferences…"]);
+        assert!(matches!(e[0].1, UiAction::SaveUiLayout) && matches!(e[1].1, UiAction::LoadUiLayout)
+            && matches!(e[2].1, UiAction::ResetUiLayout) && matches!(e[3].1, UiAction::OpenPreferences));
     }
 
     #[test]

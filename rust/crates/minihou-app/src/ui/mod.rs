@@ -129,6 +129,12 @@ pub enum UiAction {
     RepeatLast,
     // ---- application
     OpenPreferences,
+    /// Preferences menu: copy the live layout into the one custom slot in preferences.json.
+    SaveUiLayout,
+    /// Preferences menu: replace the live layout with the custom slot (if one was saved).
+    LoadUiLayout,
+    /// Preferences menu: back to the built-in layout.
+    ResetUiLayout,
     /// Blender link bar: install the add-on into the chosen installation (index into `BlenderStatus::installs`).
     BlenderInstall(usize),
     BlenderOpen,

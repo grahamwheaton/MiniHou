@@ -616,6 +616,19 @@ impl App {
                 }
                 UiAction::ViewPreset(v) => { self.editor_state.apply(ui::EditorChange::View(v)); self.camera.set_view(standard_view(v)); }
                 UiAction::OpenPreferences => self.prefs_open = true,
+                UiAction::SaveUiLayout => {
+                    self.prefs.save_ui_layout();
+                    self.file_status = match self.prefs.save() { Ok(()) => "UI layout saved".into(), Err(e) => format!("Could not save preferences: {e}") };
+                }
+                UiAction::LoadUiLayout => {
+                    self.file_status = if self.prefs.load_ui_layout() {
+                        match self.prefs.save() { Ok(()) => "UI layout loaded".into(), Err(e) => format!("Could not save preferences: {e}") }
+                    } else { "No saved UI layout; use Preferences > Save UI Layout first".into() };
+                }
+                UiAction::ResetUiLayout => {
+                    self.prefs.reset_ui_layout();
+                    if let Err(e) = self.prefs.save() { self.file_status = format!("Could not save preferences: {e}"); }
+                }
                 UiAction::Command(name) => self.command(&name, ctx),
                 UiAction::Orbit { yaw, pitch } => self.camera.orbit_degrees(yaw, pitch),
                 UiAction::Pan { dx, dy } => self.camera.pan(dx, dy),

@@ -201,6 +201,14 @@ impl Preferences {
         gate.set_allowed(self.allow_python_nodes);
         gate.set_timeout(std::time::Duration::from_secs(u64::from(self.python_timeout_s.clamp(1, 3600))));
     }
+    /// "Save UI Layout": the live layout becomes the custom slot.
+    pub fn save_ui_layout(&mut self) { self.ui_layout_custom = Some(self.ui_layout.clone()); }
+    /// "Load UI Layout": the custom slot becomes the live layout. False when nothing was saved.
+    pub fn load_ui_layout(&mut self) -> bool {
+        match &self.ui_layout_custom { Some(layout) => { self.ui_layout = layout.clone(); true } None => false }
+    }
+    /// "Reset UI to Default": the built-in layout; the custom slot is kept.
+    pub fn reset_ui_layout(&mut self) { self.ui_layout = crate::ui::layout::UiLayout::default(); }
     pub fn add_recent(&mut self, path: PathBuf) {
         self.recent_files.retain(|p| p != &path);
         self.recent_files.insert(0, path); self.recent_files.truncate(10);
@@ -339,6 +347,20 @@ mod packed_display_tests {
         let junk = Preferences::from_json(&json!({"ui_layout": {"version": 99}, "ui_layout_custom": {"version": 99}}));
         assert_eq!((junk.ui_layout, junk.ui_layout_custom), (UiLayout::default(), None));
         let _ = fs::remove_file(path);
+    }
+    #[test] fn save_and_load_ui_layout_actions_use_the_custom_slot() {
+        use crate::ui::layout::{PanelId, UiLayout};
+        let mut p = Preferences::default();
+        assert!(!p.load_ui_layout(), "nothing saved yet");
+        assert_eq!(p.ui_layout, UiLayout::default());
+        p.ui_layout.hidden.push(PanelId::Spreadsheet);
+        let saved = p.ui_layout.clone();
+        p.save_ui_layout();
+        p.ui_layout = UiLayout::default();
+        assert!(p.load_ui_layout());
+        assert_eq!(p.ui_layout, saved);
+        let back = Preferences::from_json(&p.to_json());
+        assert_eq!(back.ui_layout_custom, Some(saved));
     }
     #[test] fn corrupt_file_is_backed_up() {
         let path = test_path("prefs-corrupt"); fs::create_dir_all(path.parent().unwrap()).unwrap(); fs::write(&path,b"{").unwrap();
