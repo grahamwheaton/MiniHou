@@ -614,3 +614,13 @@ mod tests {
         assert!(pos.x >= row_layout.label_rect.right(), "Checkbox text pos ({}) must sit at/after field column start ({})", pos.x, row_layout.label_rect.right());
     }
 }
+#[cfg(test)]
+mod wrangle_layout_tests {
+    use super::*;
+    #[test]
+    fn wrangle_code_is_labelled_and_last() {
+        let params = nodes::get("wrangle").unwrap().params;
+        assert_eq!(params.last().unwrap().name, "snippet");
+        assert_eq!(param_meta("wrangle", "snippet").unwrap()["label"], "code");
+    }
+}

@@ -29,7 +29,7 @@ pub const WRANGLE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: Non
             optional: true,
         },
     ],
-    params: crate::params!("snippet":"@P.z += sin(@P.x)";"run_over":"points";"group":""),
+    params: crate::params!("run_over":"points";"group":"";"snippet":"@P.z += sin(@P.x)"),
     cook: wrangle,
 };
 
@@ -654,6 +654,12 @@ mod tests {
         g.prim
             .insert("group_first".into(), Arc::new(Attr::i32(1, vec![1, 0])));
         g
+    }
+    #[test]
+    fn stored_snippet_value_still_resolves() {
+        let graph_params = json!({"snippet":"f@legacy = 7"});
+        let params = Params::resolve_node("wrangle", WRANGLE.params, graph_params.as_object()).unwrap();
+        assert_eq!(params.s("snippet").unwrap(), "f@legacy = 7");
     }
     fn cook(g: Geometry, run_over: &str, snippet: &str, group: &str) -> Result<Geometry> {
         let p = Params::resolve(

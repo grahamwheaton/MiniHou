@@ -10877,6 +10877,7 @@
   "snippet": {
    "default": "@P.z += sin(@P.x)",
    "doc": "VEX-like expression run over every element, e.g. '@P.z += sin(@P.x * 2) * 0.5'. See the wrangle reference.",
+   "label": "code",
    "kind": "str"
   }
  }
