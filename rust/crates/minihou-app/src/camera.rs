@@ -84,6 +84,46 @@ pub fn sanitize_clip_planes(near: f32, far: f32) -> (f32, f32) {
     (near, far.clamp(near * 1.001, 1e9))
 }
 
+/// Fraction of the orbit distance below which the perspective near plane is not allowed to go.
+const NEAR_PER_DISTANCE: f32 = 1e-3;
+
+/// The near plane actually used for a perspective projection. Depth precision near the orbit target scales with
+/// distance^2 / near, so with a fixed tiny near plane (0.01) and a far zoom the mesh edges, points and axis lines
+/// z-fight with the surfaces and floor under them and break into dashes. Keeping near at least a small fraction of the
+/// orbit distance holds the relative depth precision constant; at normal zoom (distance <= clip_start / 1e-3) it is
+/// exactly the user's Clip Start.
+pub fn depth_safe_near(near: f32, far: f32, distance: f32) -> f32 {
+    let wanted = near.max(distance.abs() * NEAR_PER_DISTANCE);
+    if wanted.is_finite() { wanted.min(far * 0.5).max(near) } else { near }
+}
+
+#[cfg(test)] mod depth_tests {
+    use super::*;
+    /// World-space depth step of a Depth32Float buffer at view distance `z` for the perspective() matrix above.
+    fn depth_step(near: f32, far: f32, z: f32) -> f32 {
+        // ndc depth = far/(near-far) * (-z) + near*far/(near-far), divided by z; derivative magnitude:
+        let slope = near * far / ((far - near) * z * z);
+        let ndc = (far * (z - near)) / ((far - near) * z);
+        (ndc.abs().max(1e-30) * f32::EPSILON) / slope
+    }
+    #[test] fn far_zoom_keeps_depth_precision_relative_to_distance() {
+        // Old behaviour: fixed near 0.01. At distance 500 one depth step is ~1.5 world units, larger than a
+        // typical edge/surface separation at that zoom: the lines z-fight into dashes.
+        let distance = 500.0;
+        let old = depth_step(0.01, 1000.0, distance);
+        assert!(old / distance > 1e-3, "reproduces the far-zoom z-fighting: step {old}");
+        let near = depth_safe_near(0.01, 1000.0, distance);
+        let new = depth_step(near, 1000.0, distance);
+        assert!(new / distance < 2e-4, "depth step {new} at distance {distance} must stay small");
+    }
+    #[test] fn normal_zoom_uses_clip_start_unchanged() {
+        for d in [0.1, 1.0, 2.6, 9.9] { assert_eq!(depth_safe_near(0.01, 1000.0, d), 0.01); }
+        assert_eq!(depth_safe_near(0.5, 1000.0, 50.0), 0.5);
+        assert!(depth_safe_near(0.01, 10.0, 1e9) <= 5.0);
+        assert_eq!(depth_safe_near(0.01, 1000.0, f32::NAN), 0.01);
+    }
+}
+
 #[cfg(test)] mod fly_tests {
     use super::*;
     fn close(a: [f32; 3], b: [f32; 3]) { for i in 0..3 { assert!((a[i]-b[i]).abs()<1e-4, "{a:?} != {b:?}"); } }
@@ -176,6 +216,7 @@ impl Camera {
     pub fn matrices(&self, aspect: f32) -> (M4, M4) {
         let view = look_at(self.eye(), self.target, self.up());
         let (near, far) = self.clip_planes();
+        let near = if self.ortho { near } else { depth_safe_near(near, far, self.dist) };
         let proj = if self.ortho { orthographic(0.8, self.dist, aspect, near, far) } else { perspective(0.8, aspect, near, far) };
         (mul(&proj, &view), view)
     }
