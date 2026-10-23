@@ -742,4 +742,35 @@ mod tests {
         assert_eq!(header["type"], "instance_result", "{header}");
         assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().p(), &[7., 0., 0.]);
     }
+
+    #[test]
+    fn fresh_blender_object_node_cooks_the_picked_object() {
+        let graph = json!({"nodes":{"blender_object1":{"type":"blender_object"},
+            "out":{"type":"output","inputs":{"geo":"blender_object1"}}},"display":"out"});
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("picker.json")).unwrap();
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let mut manager = InstanceManager::new(1, server.shared.clone(), sender);
+        let target = Geometry::points_only(vec![7., 0., 0.]).unwrap();
+        let target_arrays = link_protocol::geometry_arrays(&target);
+        let cook = |manager: &mut InstanceManager, rid: u64, params: Value| {
+            let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":rid,
+                "instance_id":"P","graph":graph,"params":params}), &target_arrays);
+            assert_eq!(header["type"], "instance_result", "{header}");
+            (header.clone(), link_protocol::decode_object(&header, &arrays).unwrap())
+        };
+        // Fresh node: the interface offers its picker.
+        let (header, _) = cook(&mut manager, 1, json!({}));
+        assert!(header["interface"].as_array().unwrap().iter().any(|p| p["name"] == "blender_object1" && p["kind"] == "object"), "{header}");
+        // The user picks Cube in Blender: the add-on sends its mesh under the picker key, then cooks.
+        let cube = Geometry::points_only(vec![1., 2., 3., 4., 5., 6.]).unwrap();
+        let mut source_arrays = Arrays::new();
+        for (k, a) in link_protocol::geometry_arrays(&cube) { source_arrays.insert(format!("0/{k}"), a); }
+        let (set, _) = manager.handle(&json!({"type":"instance_sources","request_id":2,"instance_id":"P",
+            "sources":[minihou_app::modifier_inputs::picker_key("blender_object1")]}), &source_arrays);
+        assert_eq!(set["type"], "instance_sources_set", "{set}");
+        let (_, out) = cook(&mut manager, 3, json!({"blender_object1":"Cube"}));
+        assert_eq!(out.npoints, 2, "the picked object must come back as the node's output");
+        assert_eq!(out.p(), &[1., 2., 3., 4., 5., 6.]);
+    }
 }

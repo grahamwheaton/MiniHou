@@ -879,7 +879,12 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                             client.ack(update.seq, getattr(update, "shm_slot", 0))
                             output.clear()
                             update.arrays.clear()
+                    pickers_before = {p.get("id") for p in parameters(mod) if p.get("node") == "@picker"}
                     _interface(mod, header, activate=True)
+                    # A Blender Object node new in this cook only got its picker socket now; its object was not
+                    # sent with this cook, so cook again next tick instead of caching a waiting result.
+                    new_picker = any(p.get("node") == "@picker" and p.get("id") not in pickers_before
+                                     for p in parameters(mod))
                     proxy.sync_instances(ng, names, objects=objects)
                     # scene_objects nodes: real objects, parented to this object. Only queued here (pump can run from a
                     # frame-change handler); the timer makes them.
@@ -890,7 +895,11 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     scene_objects.queue_nodes(ident, [m["node"] for m in header.get("scene", [])]
                                               + [e["node"] for e in header.get("scene_errors", [])])
                     bpy.context.view_layer.update()
-                    _digests[ident] = signature
+                    if new_picker:
+                        _digests.pop(ident, None)
+                        _source_digests.pop(ident, None)
+                    else:
+                        _digests[ident] = signature
                     ng[STATUS] = "Ready"
                     _failures.pop(ident, None)
                     cooked += 1
