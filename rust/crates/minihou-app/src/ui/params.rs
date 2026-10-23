@@ -40,10 +40,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("param_panel_resolved"),std::sync::Arc::new(minihou_core::channels::resolve_graph(&graph))));
     }
     expression_dialog(ui.ctx(), v, out);
-    let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::hover());
-    ui.painter().rect_filled(bar, 0., v.theme.panel2);
-    ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, v.theme.stroke));
-    paint_text(ui, Pos2::new(bar.left() + 10., bar.center().y), "Parameters", 12., false, v.theme.text, Align2::LEFT_CENTER);
+    // No title bar: the dock tab already names the panel.
     let id = v.selected;
     let Some(node) = v.graph.nodes.iter().find(|(name, _)| name == id).map(|(_, node)| node) else {
         ui.add_space(20.);
