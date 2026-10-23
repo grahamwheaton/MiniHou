@@ -621,6 +621,15 @@ mod subnet_graph_tests {
         assert_eq!(second.p().chunks_exact(3).map(|p|p[0]).fold(f32::NEG_INFINITY,f32::max),2.0);
     }
     #[test]
+    fn subnet_override_is_the_inner_nodes_effective_value() {
+        let doc=json!({"display":"subnet1","nodes":{"subnet1":{"type":"subnet",
+            "params":{"width":4.0},"promoted_params":[{"name":"width","node":"box1","param":"size.x","default":1.0}],
+            "inner":{"nodes":{"box1":{"type":"box","params":{"size":[1.0,1.0,1.0]}}},"output":"box1"}}}});
+        let scope=crate::channels::resolve_scope(&doc,&["subnet1".to_owned()]).unwrap();
+        assert_eq!(scope.resolved.params["box1"]["size"],json!([4.0,1.0,1.0]));
+        assert!(scope.overridden.contains(&("box1".to_owned(),"size".to_owned())));
+    }
+    #[test]
     fn subnet_promoted_channel_resolves_into_inner_node() {
         let doc=json!({"display":"subnet1","nodes":{
             "driver":{"type":"box","params":{"size":[3.0,1.0,1.0]}},

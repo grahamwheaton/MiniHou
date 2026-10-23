@@ -189,7 +189,9 @@ impl eframe::App for App {
                                     let mut scoped=v.clone(); scoped.graph=&inner_graph; scoped.doc=&inner;
                                     scoped.selected=&selected; scoped.selected_set=&selected_set;
                                     let mut actions=Actions::default();
+                                    ui::params::set_scope(ctx,Some((self.editor.doc.value(),&path)));
                                     ui::params::show(ui,&scoped,&mut actions);
+                                    ui::params::set_scope(ctx,None);
                                     for action in actions.0 {if let Some(edit)=ui::network::scoped_edit(self.editor.doc.value(),&path,action) {out.push(edit);}}
                                 }
                             } else {ui::params::show(ui, &v, &mut out);}
