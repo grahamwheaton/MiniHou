@@ -27,7 +27,7 @@ fn open_quad() -> Geometry {
 }
 
 fn run(geo: &Geometry, params: serde_json::Value) -> Result<Geometry> {
-    let p = Params::resolve(NODE.params, params.as_object())?;
+    let p = Params::resolve_node("boundary_select", NODE.params, params.as_object())?;
     cook(&[vec![Arc::new(geo.clone())]], &p)
 }
 
@@ -148,3 +148,26 @@ fn test_errors_and_missing_input() {
     assert!(run(&q, serde_json::json!({"domain": "unknown_domain"})).is_err());
 }
 
+
+#[test]
+fn test_single_output_group_with_chosen_name() {
+    let out = run(&open_quad(), serde_json::json!({"domain": "faces", "output_group_name": "rim"})).unwrap();
+    assert_eq!(edge_group_count(&out, "rim"), 4);
+    assert!(out.edge.contains_key("group_rim"));
+    assert!(!out.edge.contains_key("group_boundary"));
+    assert!(!out.edge.contains_key("edge_group_boundary"));
+}
+
+#[test]
+fn test_default_output_group_name_is_boundary() {
+    let p = Params::resolve(NODE.params, None).unwrap();
+    assert_eq!(p.s("output_group_name").unwrap(), "boundary");
+    assert!(NODE.params.iter().all(|s| s.name != "output_group"));
+}
+
+#[test]
+fn test_legacy_output_group_alias() {
+    let given = serde_json::json!({"output_group": "old"});
+    let p = Params::resolve_node("boundary_select", NODE.params, given.as_object()).unwrap();
+    assert_eq!(p.s("output_group_name").unwrap(), "old");
+}
