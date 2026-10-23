@@ -18,8 +18,6 @@ pub fn duplicate_selection_nodes(value: &Value, source: &str, split_params: Valu
     let mut next = value.clone();
     let all = nodes_mut(&mut next)?;
     let split = fresh_id(all, "split");
-    let mut split_params = split_params;
-    split_params["extract_elements"] = json!(true);
     all.insert(split.clone(), json!({"type":"split", "inputs":{"geo":source}, "params":split_params}));
     let transform = fresh_id(all, "transform");
     all.insert(transform.clone(), json!({"type":"transform", "inputs":{"geo":split},
@@ -60,7 +58,7 @@ mod tests {
         let (next, [split, transform, merge]) = duplicate_selection_nodes(
             &value, "out", json!({"group":"1 3", "group_type":"primitives"})).unwrap();
         assert_eq!(next["nodes"][&split]["inputs"]["geo"], "box1");
-        assert_eq!(next["nodes"][&split]["params"], json!({"group":"1 3","group_type":"primitives","extract_elements":true}));
+        assert_eq!(next["nodes"][&split]["params"], json!({"group":"1 3","group_type":"primitives"}));
         assert_eq!(next["nodes"][&transform]["inputs"]["geo"], split);
         assert_eq!(next["nodes"][&transform]["params"]["translate"], json!([0.0,0.0,0.0]));
         assert_eq!(next["nodes"][&merge]["inputs"]["geos"], json!(["box1",transform]));
