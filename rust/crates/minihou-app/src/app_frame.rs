@@ -232,7 +232,7 @@ impl eframe::App for App {
                         _ => {}
                     }
                 }
-                if !fly_frame && !region_frame && response.hovered() && (self.modal.is_none() && self.model_modal.is_none())
+                if !fly_frame && !region_frame && response.hovered() && (self.modal.is_none() || !self.modal.as_ref().is_some_and(|m| m.proportional)) && self.model_modal.is_none()
                     && !matches!(self.editor_state.tool, ui::Tool::LoopCut | ui::Tool::EdgeSlide) && !ui::mesh_cut::captures_wheel(ctx) {
                     let delta=ctx.input(|i| i.smooth_scroll_delta.y);
                     if delta!=0. {

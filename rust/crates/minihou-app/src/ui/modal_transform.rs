@@ -185,7 +185,9 @@ impl Modal {
                 let mut v = view_plane_motion(delta / pixels_per_unit, camera);
                 match self.constraint {
                     Constraint::Axis(axis, _) => {
-                        let direction = rightward_axis(basis[axis], camera);
+                        // Follow the pointer: the amount is the pointer's motion along the axis' own screen direction,
+                        // so the object moves with the mouse whichever way the camera faces.
+                        let direction = projected_axis(basis[axis], camera);
                         let amount = delta.dot(direction) / pixels_per_unit;
                         v = basis[axis].map(|c| c * amount);
                     }
