@@ -121,7 +121,19 @@ fn format_measurement_distance(distance: f64, units: crate::units::UnitSettings)
     let millimetres = (distance * units.unit_scale * 1000.).round();
     crate::units::format_display(millimetres * 0.001 / units.display.metres(), units.display)
 }
+fn hit_rects_id() -> egui::Id { egui::Id::new("sketch_measurement_hit_rects") }
+/// True when `pos` lies on the Clear Measurements button or a measurement label (as drawn last frame).
+pub fn measurement_ui_hit(ctx:&egui::Context, pos:Pos2) -> bool {
+    ctx.data(|d|d.get_temp::<Vec<Rect>>(hit_rects_id())).is_some_and(|r|r.iter().any(|r|r.contains(pos)))
+}
+fn clear_button_rect(rect: Rect) -> Rect { Rect::from_min_size(pos2(rect.left()+57.,rect.bottom()-88.),vec2(112.,24.)) }
 fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bool {
+    let mut hit_rects:Vec<Rect>=Vec::new();
+    let consumed=measurements_inner(ui,rect,v,out,&mut hit_rects);
+    ui.ctx().data_mut(|d|d.insert_temp(hit_rects_id(),hit_rects));
+    consumed
+}
+fn measurements_inner(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions, hit_rects:&mut Vec<Rect>) -> bool {
     let Some(rows) = v.doc.get("measurements").and_then(|x| x.as_array()) else { return false; };
     if let Some(index) = selected_measurement(ui.ctx()) {
         if index >= rows.len() { clear_measurement_selection(ui.ctx()); }
@@ -129,7 +141,7 @@ fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bo
     let p = ui.painter_at(rect);
     let mut consumed=false;
     if !rows.is_empty() {
-        let button=Rect::from_min_size(pos2(rect.left()+57.,rect.bottom()-88.),vec2(112.,24.));
+        let button=clear_button_rect(rect); hit_rects.push(button);
         let response=ui.interact(button,egui::Id::new("sketch_clear_measurements"),egui::Sense::click());
         p.rect_filled(button,3.,v.theme.panel);
         p.text(button.center(),Align2::CENTER_CENTER,"Clear Measurements",FontId::monospace(10.),v.theme.text);
@@ -155,6 +167,7 @@ fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bo
         let label=pa.lerp(pb,0.5)+vec2(8.,-8.);
         p.text(label, Align2::LEFT_BOTTOM, format!("{}{}",format_measurement_distance(length(sub(b, a)) as f64, v.units),if stale_a||stale_b {" [detached]"} else {""}), FontId::monospace(12.), color);
         let target=Rect::from_min_size(label+vec2(-4.,-20.),vec2(160.,24.));
+        hit_rects.push(target);
         let response=ui.interact(target,egui::Id::new(("measurement",index)),egui::Sense::click());
         if response.clicked() {ui.ctx().data_mut(|d|d.insert_temp(selected_id(),index));consumed=true;}
         response.context_menu(|ui| {
