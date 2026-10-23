@@ -21,6 +21,8 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
         "iterations": 10;
         "radius": 0.0;
         "update_normals": true;
+        "group": "";
+        "domain": "points";
     ),
     cook: point_relax,
 };
@@ -79,9 +81,47 @@ fn point_relax(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let iterations = p.i("iterations")?.max(0) as usize;
     let radius = p.f("radius")?;
     let update_normals = p.b("update_normals")?;
+    let group = p.s("group")?;
+    let domain = p.e("domain", &["points", "edges", "primitives"])?;
 
     let n = points.npoints;
     if n < 2 || iterations == 0 {
+        return Ok((*points).clone());
+    }
+    let selected = if group.trim().is_empty() {
+        vec![true; n]
+    } else {
+        match domain.as_str() {
+            "points" => crate::nodes::group::mask(&points, "point", &group)?,
+            "edges" => {
+                let edges = crate::topo::edges(&points.topology, n);
+                let edge_mask = crate::nodes::edge_tools::edge_mask(&points, &group)?;
+                let mut selected = vec![false; n];
+                for (i, &yes) in edge_mask.iter().enumerate() {
+                    if yes {
+                        selected[edges.points[2 * i] as usize] = true;
+                        selected[edges.points[2 * i + 1] as usize] = true;
+                    }
+                }
+                selected
+            }
+            _ => {
+                let prim_mask = crate::nodes::group::mask(&points, "prim", &group)?;
+                let mut selected = vec![false; n];
+                for (i, &yes) in prim_mask.iter().enumerate() {
+                    if yes {
+                        let start = points.topology.prim_offsets[i] as usize;
+                        let end = points.topology.prim_offsets[i + 1] as usize;
+                        for &point in &points.topology.vertex_point[start..end] {
+                            selected[point as usize] = true;
+                        }
+                    }
+                }
+                selected
+            }
+        }
+    };
+    if !selected.iter().any(|&yes| yes) {
         return Ok((*points).clone());
     }
 
@@ -175,8 +215,8 @@ fn point_relax(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                     let factor = (r - d) / d.max(1e-12) * 0.25;
                     for k in 0..3 {
                         let push = factor * diff[k];
-                        disp[i][k] += push;
-                        disp[j][k] -= push;
+                        if selected[i] { disp[i][k] += push; }
+                        if selected[j] { disp[j][k] -= push; }
                     }
                 }
             }
@@ -189,6 +229,7 @@ fn point_relax(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
         if let Some(ref tris) = surface_tris {
             for i in 0..n {
+                if !selected[i] { continue; }
                 let pt = P[i];
                 let mut best_dist_sq = f64::INFINITY;
                 let mut best_pt = pt;
@@ -215,16 +256,19 @@ fn point_relax(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
     if let Some(ref tris) = surface_tris {
         if update_normals {
-            let mut normals = Vec::with_capacity(n * 3);
-            for &ti in &last_tri_indices {
+            let mut normals = points.point.get("N")
+                .filter(|a| a.width == 3)
+                .and_then(|a| a.as_f32())
+                .filter(|v| v.len() == n * 3)
+                .map_or_else(|| vec![0.0; n * 3], |v| v.to_vec());
+            for (i, &ti) in last_tri_indices.iter().enumerate() {
+                if !selected[i] { continue; }
                 let tri = &tris[ti];
                 let e1 = [tri[1][0] - tri[0][0], tri[1][1] - tri[0][1], tri[1][2] - tri[0][2]];
                 let e2 = [tri[2][0] - tri[0][0], tri[2][1] - tri[0][1], tri[2][2] - tri[0][2]];
                 let cr = cross(e1, e2);
                 let ln = dot(cr, cr).sqrt().max(1e-20);
-                normals.push((cr[0] / ln) as f32);
-                normals.push((cr[1] / ln) as f32);
-                normals.push((cr[2] / ln) as f32);
+                for k in 0..3 { normals[i * 3 + k] = (cr[k] / ln) as f32; }
             }
             out.point.insert("N".into(), Arc::new(Attr::f32(3, normals)));
         }
