@@ -426,6 +426,10 @@
         "icon": "scatter"
       },
       {
+        "id": "points_attract",
+        "icon": "scatter"
+      },
+      {
         "id": "blend",
         "label": "Blend"
       },
@@ -635,6 +639,10 @@
       },
       {
         "id": "point_relax",
+        "icon": "scatter"
+      },
+      {
+        "id": "points_attract",
         "icon": "scatter"
       },
       {

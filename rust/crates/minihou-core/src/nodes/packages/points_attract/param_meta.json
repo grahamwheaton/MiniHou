@@ -1,0 +1,29 @@
+{
+  "domain": {
+    "default": "points",
+    "doc": "Domain of the target group",
+    "kind": "enum",
+    "options": ["points", "primitives"]
+  },
+  "group": {
+    "default": "",
+    "doc": "Target group or pattern; empty uses every other point as a target",
+    "kind": "str",
+    "pick_domain_param": "domain",
+    "pick_domain_default": "points"
+  },
+  "iterations": {
+    "default": 1,
+    "doc": "Number of attraction passes",
+    "kind": "int",
+    "min": 0,
+    "soft_max": 100
+  },
+  "strength": {
+    "default": 0.5,
+    "doc": "Fraction of the distance to the nearest target moved on each pass",
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  }
+}
