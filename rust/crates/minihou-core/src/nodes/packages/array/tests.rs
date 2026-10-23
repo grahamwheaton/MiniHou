@@ -60,6 +60,12 @@ fn endpoint_spacing_places_last_copy_at_endpoint() {
     assert_eq!(bounds(&one), ([0.,0.,0.],[1.,1.,0.]));
 }
 #[test]
+fn endpoint_spacing_spreads_evenly_in_any_direction() {
+    let out = run(Geometry::points_only(vec![0.,0.,0.]).unwrap(),
+        json!({"spacing":"endpoint","count":3, "endpoint":[0.,-2.,4.]}));
+    assert_eq!(out.p(), &[0.,0.,0., 0.,-1.,2., 0.,-2.,4.]);
+}
+#[test]
 fn legacy_fixed_count_graph_loads_with_same_geometry() {
     let old = run(quad(), json!({"fit_type":"fixed_count","count":3,"fit_length":4.0,
         "relative_offset":[0.,0.,0.], "constant_offset":[2.,0.,0.]}));

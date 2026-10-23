@@ -1,14 +1,14 @@
 {
   "mode": {"kind": "enum", "default": "line", "options": ["line", "grid", "radial"], "doc": "Arrangement of the copies: Line, Grid or Radial."},
-  "spacing": {"kind": "enum", "default": "relative", "options": ["relative", "offset", "endpoint"], "doc": "Line spacing: Relative steps by the input bounds, Offset by a fixed translation, Endpoint spreads the copies up to a point."},
-  "count": {"kind": "int", "default": 2, "min": 1, "max": 10000, "doc": "Total number of copies, including the first."},
-  "relative_offset": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Per-axis step as a multiple of the input bounds (Relative spacing)."},
-  "constant_offset": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Fixed translation per step (Offset spacing); also added in Relative spacing."},
-  "endpoint": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Position of the last copy (Endpoint spacing)."},
-  "legacy_fit_length": {"kind": "float", "default": -1.0, "doc": "Set by migration from the old Fit Length: the count comes from this length and the step. Negative disables it."},
+  "spacing": {"kind": "enum", "default": "relative", "options": ["relative", "offset", "endpoint"], "visible_when": {"mode": "line"}, "doc": "Line spacing: Relative steps by the input bounds, Offset by a fixed translation, Endpoint spreads the copies up to a point."},
+  "count": {"kind": "int", "default": 2, "min": 1, "max": 10000, "visible_when": {"mode": "line"}, "doc": "Total number of copies, including the first."},
+  "relative_offset": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "visible_when": {"mode": "line", "spacing": "relative"}, "doc": "Per-axis step as a multiple of the input bounds (Relative spacing)."},
+  "constant_offset": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "visible_when": {"mode": "line", "spacing": ["relative", "offset"]}, "doc": "Fixed translation per step (Offset spacing); also added in Relative spacing."},
+  "endpoint": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "visible_when": {"mode": "line", "spacing": "endpoint"}, "doc": "Position of the last copy (Endpoint spacing); the copies are spread evenly from the input to here."},
+  "legacy_fit_length": {"kind": "float", "default": -1.0, "visible_when": {"mode": []}, "doc": "Hidden. Set by migration from the old Fit Length: the count comes from this length and the step. Negative disables it."},
   "merge_vertices": {"kind": "bool", "default": true, "doc": "Weld adjacent copies within Merge Distance."},
-  "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "doc": "Maximum distance for welding. Zero disables welding for legacy graph compatibility."},
-  "merge_first_last": {"kind": "bool", "default": false, "doc": "Also weld the last copy with the first."},
+  "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "visible_when": {"merge_vertices": true}, "doc": "Maximum distance for welding. Zero disables welding for legacy graph compatibility."},
+  "merge_first_last": {"kind": "bool", "default": false, "visible_when": {"merge_vertices": true}, "doc": "Also weld the last copy with the first."},
   "uv_offset_u": {"kind": "float", "default": 0.0, "doc": "Shift U on each copy by its copy number."},
   "uv_offset_v": {"kind": "float", "default": 0.0, "doc": "Shift V on each copy by its copy number."}
 }

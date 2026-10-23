@@ -108,6 +108,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                     if typ == "knife" && param.name == "cuts" { continue; }
                     if typ == "attribute_create" && param.name != "group" { continue; }
                     if outputs.iter().any(|output| output.name == param.name) || output_toggles.contains(&param.name) { continue; }
+                    if !minihou_app::param_visible(typ, param_meta(typ, param.name), &v.doc["nodes"][id]["params"]) { continue; }
                     let next=param_section(typ,param.name,param_meta(typ,param.name));
                     if next.is_some() && next!=section {
                         section=next;
