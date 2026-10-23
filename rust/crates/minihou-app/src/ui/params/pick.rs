@@ -78,7 +78,7 @@ pub fn domain_edit_mode(name: &str, value: &Value) -> Option<SelectionMode> {
 pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Value) -> Option<SelectionMode> {
     let declared = pick_domain(meta, params);
     if typ == "attribute_create" && name == "group" {
-        if let Some(class) = params["attributes"].as_array().and_then(|a| a.first()).and_then(|a| a["class"].as_str()) {
+        if let Some(class) = params["attributes"].as_array().and_then(|a| a.first()).and_then(|a| a["domain"].as_str().or_else(|| a["class"].as_str())) {
             return pick_domain(Some(&json!({"pick_domain":class})), params);
         }
     }

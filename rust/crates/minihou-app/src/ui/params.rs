@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use minihou_app::value_link_ui::{self, CopiedParam, PasteMode};
 
 const DISABLED: &str = "The Rust backend does not support it yet";
+pub mod attribute_model;
 pub mod sections;
 pub use sections::*;
 pub mod output_groups;
@@ -98,6 +99,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                 let outputs: Vec<_> = spec.params.iter().filter(|param| is_output_group_field(param.name, param_meta(typ, param.name))).collect();
                 let output_toggles: Vec<_> = outputs.iter().filter_map(|param| output_group_toggle(typ, param.name, param_meta(typ, param.name))).collect();
                 let mut section=None;
+                if typ == "attribute_create" { attribute_domain_row(ui,v,out,id,flags.locked); }
                 for param in spec.params {
                     if typ == "switchif" && matches!(param.name,
                         "mergecondition" | "testinput" | "numtests" | "tests" |

@@ -332,7 +332,7 @@ impl Topology {
 }
 
 mod group_nodes;
-pub use group_nodes::{find_input_group_field, SELECTION_NODES};
+pub use group_nodes::{domain_mode, find_input_group_field, SELECTION_NODES};
 
 /// The first free `<prefix><N>` name (group1, group2, boundary1, boundary2, ...) among the document's nodes, so each viewport
 /// group or selection node gets its own unique name.

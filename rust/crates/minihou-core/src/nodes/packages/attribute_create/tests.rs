@@ -121,3 +121,22 @@ fn single_attribute_size_default_and_precision() {
     assert_eq!(locals.point["index"].as_f32().unwrap(), &[0.,1.,2.]);
     assert!(run(json!({"value":["$PT",0,0],"allow_local":false})).unwrap_err().to_string().contains("disabled"));
 }
+
+#[test]
+fn entries_accept_domain_key_without_size_or_default_and_edges() {
+    let g=Geometry::from_arrays(vec![0.;9],vec![0,1,2],vec![0,3],None).unwrap();
+    let attrs=json!([
+        {"name":"w","domain":"points","type":"float","value":[2]},
+        {"name":"col","domain":"primitives","type":"color","value":[1,0.5,0.25]},
+        {"name":"rgba","domain":"points","type":"color","size":4,"value":[1,0,0,0.5]},
+        {"name":"e","domain":"edges","type":"float","value":[4]}
+    ]);
+    let p=Params::resolve(NODE.params,json!({"attributes":attrs}).as_object()).unwrap();
+    let out=(NODE.cook)(&[vec![std::sync::Arc::new(g)]],&p).unwrap();
+    assert_eq!(out.point["w"].as_f32().unwrap(),&[2.,2.,2.]);
+    assert_eq!(out.prim["col"].as_f32().unwrap(),&[1.,0.5,0.25]);
+    assert_eq!(out.point["rgba"].width,4);
+    assert_eq!(out.point["rgba"].as_f32().unwrap()[3],0.5);
+    assert_eq!(out.edge["e"].as_f32().unwrap().len(),out.nedges());
+    out.validate().unwrap();
+}

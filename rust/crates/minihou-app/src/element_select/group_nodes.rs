@@ -18,7 +18,25 @@ pub fn find_input_group_field(node_type: &str) -> Option<(&'static str, Option<&
 /// Selection nodes that take their seeds from the viewport selection when added from the Tab menu (docs/RUST_SELECT_NODES.md).
 pub const SELECTION_NODES: [&str; 4] = ["grow", "select_path", "select_loop", "select_ring"];
 
+/// The selection mode a node `domain` value names (`points`, `edges`, `primitives`/`faces`).
+pub fn domain_mode(domain: &str) -> Option<SelectionMode> {
+    match domain {
+        "points" | "point" => Some(SelectionMode::Points),
+        "edges" | "edge" => Some(SelectionMode::Edges),
+        "primitives" | "primitive" | "faces" | "prim" => Some(SelectionMode::Faces),
+        _ => None,
+    }
+}
+
 impl Topology {
+    /// A group pattern written for `from` elements, re-expressed for `to` elements through selection conversion
+    /// (down to constituents, up only to fully contained elements). Blank text stays blank.
+    pub fn convert_group(&self, text: &str, from: SelectionMode, to: SelectionMode) -> String {
+        if text.trim().is_empty() || from == to { return text.to_owned(); }
+        let sel = self.parse_group(text, from);
+        let converted = self.convert(&sel, to);
+        self.tokens(to, &self.ids(&converted)).join(" ")
+    }
     /// The ids of `sel` in its mode's id space (points, edge ids, polygons), in selection order.
     pub(super) fn ids(&self, sel: &Selection) -> Vec<u32> {
         match sel.mode {
@@ -127,11 +145,12 @@ impl Topology {
             "grow" => serde_json::json!({"group": join(sel.mode, &ids), "domain": name}),
             "select_path" => serde_json::json!({"waypoints": join(sel.mode, &ids), "domain": name}),
             "attribute_create" => {
-                // Attribute Create has point and primitive classes, but no edge class. Use the
-                // selected edges' endpoint points so an edge selection still constrains it.
-                let (target, domain) = if sel.mode == SelectionMode::Faces {
-                    (SelectionMode::Faces, "primitives")
-                } else { (SelectionMode::Points, "points") };
+                // The Domain follows the viewport selection mode: points, edges or faces.
+                let (target, domain) = match sel.mode {
+                    SelectionMode::Faces => (SelectionMode::Faces, "primitives"),
+                    SelectionMode::Edges => (SelectionMode::Edges, "edges"),
+                    _ => (SelectionMode::Points, "points"),
+                };
                 let ids = if target == sel.mode { ids } else { self.ids(&self.convert(sel, target)) };
                 if ids.is_empty() { return None; }
                 serde_json::json!({"group": join(target, &ids), "domain": domain, "group_type": domain})
