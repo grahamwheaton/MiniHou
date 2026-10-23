@@ -346,7 +346,9 @@ fn check(c: &Value) {
     canonical_compare(name, &g, &expected, tol);
 }
 fn cases(ty: &str) {
-    let cases: Value = serde_json::from_str(include_str!("test_data/boolean_parity.json")).unwrap();
+    static PARSED: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let cases = PARSED
+        .get_or_init(|| serde_json::from_str(include_str!("test_data/boolean_parity.json")).unwrap());
     let filter = std::env::var("MINIHOU_PARITY_CASE").unwrap_or_default();
     let mut failures = vec![];
     let mut count = 0;

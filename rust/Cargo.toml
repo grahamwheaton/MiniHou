@@ -18,6 +18,9 @@ debug = 1
 [profile.test]
 debug = 1
 
+[profile.test.package.minihou-core]
+opt-level = 2
+
 # Fast test builds: same optimisation as release, without thin LTO and with incremental
 # builds and parallel codegen. The shipped release profile above is unchanged.
 [profile.testbuild]
