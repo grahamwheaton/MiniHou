@@ -303,6 +303,27 @@ fn cook(inputs: &Inputs, params: &Params) -> Result<Geometry> {
     for face in 0..g.nprims() {
         let r = range(&g, face);
         let mut made = Vec::new();
+        let source_start = vertex_source.len();
+        // The viewport fans each polygon from its first point. Starting the
+        // trimmed face at a cut point fans thin slivers along the profile,
+        // so start at the kept original point farthest from the bevelled ones.
+        let bevelled: Vec<usize> = r
+            .clone()
+            .map(|v| vp[v] as usize)
+            .filter(|p| accepted.contains_key(p))
+            .collect();
+        let anchor = if bevelled.is_empty() {
+            None
+        } else {
+            let mid = mul(
+                bevelled.iter().fold([0.0; 3], |s, &p| add(s, pos[p])),
+                1.0 / bevelled.len() as f64,
+            );
+            r.clone()
+                .map(|v| vp[v] as usize)
+                .filter(|p| !accepted.contains_key(p))
+                .max_by(|&a, &b| len(sub(pos[a], mid)).total_cmp(&len(sub(pos[b], mid))))
+        };
         for vertex in r.clone() {
             let point = vp[vertex] as usize;
             if accepted.contains_key(&point) {
@@ -330,6 +351,10 @@ fn cook(inputs: &Inputs, params: &Params) -> Result<Geometry> {
                 made.push(point);
                 vertex_source.push(vertex);
             }
+        }
+        if let Some(at) = anchor.and_then(|p| made.iter().position(|&id| id == p)) {
+            made.rotate_left(at);
+            vertex_source[source_start..].rotate_left(at);
         }
         faces.push(made);
         prim_source.push(face);
