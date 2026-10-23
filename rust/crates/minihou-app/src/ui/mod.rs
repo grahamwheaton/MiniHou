@@ -6,6 +6,7 @@ pub mod blender_ui;
 pub mod editor_state;
 pub mod geo_info;
 pub mod keymap;
+pub mod layout;
 pub mod network;
 pub mod params;
 pub mod number_step;

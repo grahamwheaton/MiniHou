@@ -51,6 +51,10 @@ pub struct Preferences {
     pub python_timeout_s: u32,
     /// Viewport inferencing (snap tolerance, markers, colours, tool keys); see docs/RUST_INFERENCE.md.
     pub inference: minihou_app::inference::InferenceSettings,
+    /// The live panel layout.
+    pub ui_layout: crate::ui::layout::UiLayout,
+    /// The one custom slot written by "Save UI Layout" and read by "Load UI Layout".
+    pub ui_layout_custom: Option<crate::ui::layout::UiLayout>,
 }
 impl Default for Preferences { fn default() -> Self {
     let limits = minihou_core::limits::Limits::default();
@@ -68,6 +72,7 @@ impl Default for Preferences { fn default() -> Self {
     node_physics_snappiness: 0.7,
     allow_python_nodes: false, python_timeout_s: 30,
     inference: Default::default(),
+    ui_layout: Default::default(), ui_layout_custom: None,
 } } }
 impl Preferences {
     pub fn path() -> PathBuf {
@@ -115,6 +120,8 @@ impl Preferences {
             "packed_proxy_style": self.viewport.packed_proxy_style.label(),
             "clip_start": self.viewport.clip_start, "clip_end": self.viewport.clip_end },
         "inference": self.inference.to_json(),
+        "ui_layout": self.ui_layout.to_json(),
+        "ui_layout_custom": self.ui_layout_custom.as_ref().map(crate::ui::layout::UiLayout::to_json),
         "security": { "allow_python_nodes": self.allow_python_nodes, "python_timeout_s": self.python_timeout_s },
         "length_unit": self.units.display.symbol(),
         "unit_scale": self.units.unit_scale,
@@ -135,6 +142,8 @@ impl Preferences {
         if let Some(x) = v.get("solver_substeps").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).filter(|n| *n > 0) { p.solver_substeps = x; }
         if let Some(x) = v.get("viewport_normal_lines").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).filter(|n| *n > 0) { p.viewport_normal_lines = x; }
         if let Some(x) = v.get("show_stats").and_then(Value::as_bool) { p.show_stats = x; }
+        if let Some(x) = v.get("ui_layout") { p.ui_layout = crate::ui::layout::UiLayout::from_json(x); }
+        p.ui_layout_custom = v.get("ui_layout_custom").and_then(crate::ui::layout::UiLayout::try_from_json);
         if let Some(x) = v.get("inference") { p.inference = minihou_app::inference::InferenceSettings::from_json(x); }
         if let Some(sec) = v.get("security") {
             // Only a literal `true` enables Python; anything else keeps it off.
@@ -313,6 +322,22 @@ mod packed_display_tests {
         p.viewport.clip_end = 5000.0;
         p.units = UnitSettings { display: LengthUnit::Cm, unit_scale: 0.1 };
         p.save_to(&path).unwrap(); p.save_to(&path).unwrap(); assert_eq!(Preferences::load_from(&path),p);
+        let _ = fs::remove_file(path);
+    }
+    #[test] fn ui_layout_custom_slot_persists_through_save_and_load() {
+        use crate::ui::layout::{PanelId, UiLayout};
+        let path = test_path("prefs-ui-layout");
+        let mut p = Preferences::default();
+        assert_eq!(p.ui_layout_custom, None);
+        let mut custom = UiLayout::default(); custom.hidden.push(PanelId::GeoInfo);
+        p.ui_layout_custom = Some(custom.clone());
+        p.save_to(&path).unwrap();
+        let loaded = Preferences::load_from(&path);
+        assert_eq!(loaded.ui_layout_custom, Some(custom));
+        assert_eq!(loaded, p);
+        // An unreadable slot is dropped and an unreadable live layout becomes the default.
+        let junk = Preferences::from_json(&json!({"ui_layout": {"version": 99}, "ui_layout_custom": {"version": 99}}));
+        assert_eq!((junk.ui_layout, junk.ui_layout_custom), (UiLayout::default(), None));
         let _ = fs::remove_file(path);
     }
     #[test] fn corrupt_file_is_backed_up() {
