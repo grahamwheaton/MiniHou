@@ -110,12 +110,16 @@ impl Scene {
             for c in 0..8 { for k in 0..3 { bbp[c*3+k] = if (c >> k) & 1 == 1 { hi[k] } else { lo[k] }; } }
         }
         let (point,line)=element_indices(g,&l.tri);
-        let provenance=preview::triangulate_geometry(g);
         let names=g.detail.get("materials").and_then(|v|v.as_array());
         let bindings=g.detail.get("material_bindings").and_then(|v|v.get("slots")).and_then(|v|v.as_array());
-        let corner_n=g.vertex.get("N").and_then(|a|a.as_f32());
-        let mut textured=Vec::with_capacity(provenance.prim.len());
-        for (ti,&slot) in provenance.material_slot.iter().enumerate() {
+        let has_named_slots = names.into_iter().flatten().chain(bindings.into_iter().flatten())
+            .any(|slot| slot.as_str().is_some_and(|name| !name.is_empty()));
+        let mut textured=Vec::new();
+        if has_named_slots {
+          let provenance=preview::triangulate_geometry(g);
+          let corner_n=g.vertex.get("N").and_then(|a|a.as_f32());
+          textured.reserve(provenance.prim.len());
+          for (ti,&slot) in provenance.material_slot.iter().enumerate() {
             let slot_index=usize::try_from(slot).ok();
             let name=slot_index.and_then(|i|bindings.and_then(|b|b.get(i)).and_then(|v|v.as_str())
                 .or_else(||names.and_then(|n|n.get(i)).and_then(|v|v.as_str()))).unwrap_or("").to_owned();
@@ -127,12 +131,27 @@ impl Scene {
             });
             let uv_sets=provenance.uv_sets.iter().map(|(name,values)| (name.clone(),std::array::from_fn(|k|[values[(ti*3+k)*2],values[(ti*3+k)*2+1]]))).collect();
             textured.push(SurfaceTri { vertices,points:[provenance.point[ti*3],provenance.point[ti*3+1],provenance.point[ti*3+2]],prim:provenance.prim[ti],slot:name,uv_sets });
+          }
         }
         let bvh_started=Instant::now();
         let pick_bvh=std::sync::Arc::new(crate::picking::Bvh::new(p,&l.tri));
         if timing { eprintln!("viewport BVH build: triangles={} ms={:.3}", l.tri.len()/3, bvh_started.elapsed().as_secs_f64()*1000.0); }
         Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,pick_bvh,nlp,nln,normal_points,bbp,center,radius,textured,cd:point_colors(g) }
     }
+}
+
+#[test]
+fn untextured_scene_has_no_surface_tris_and_keeps_render_geometry() {
+    let geo=Geometry::from_arrays(vec![0.,0.,0.,1.,0.,0.,0.,1.,0.],
+        vec![0,1,2],vec![0,3],Some(vec![true])).unwrap();
+    let scene=Scene::new(&geo);
+    let layout=preview::layout(geo.p(),&geo.topology.vertex_point,&geo.topology.prim_offsets,
+        geo.topology.closed.as_deref(),geo.npoints,usize::MAX,usize::MAX,100_000,8192);
+    assert!(scene.textured.is_empty());
+    assert!(!scene.has_textured_slots());
+    assert_eq!(scene.positions(),geo.p());
+    assert_eq!(scene.triangle_indices(),layout.tri);
+    assert_eq!(scene.edge_indices(),layout.edge);
 }
 
 #[test]
