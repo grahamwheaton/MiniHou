@@ -162,10 +162,8 @@ TOOLS: List[dict] = [
      "inputSchema": {"type": "object", "required": ["path"], "additionalProperties": False, "properties": {
          "path": {"type": "string"}, "create": {"type": "boolean"}}}},
     {"name": "node_library",
-     "description": "Node libraries: Python files of @node functions the engine hot-loads as new node types (for "
-                    "anything a wrangle can't do: new topology, multi-input logic, simulations). Lists the node "
-                    "folder, loaded files, their node types and any load errors (file and line), plus a guide to "
-                    "writing a node. Write the file with your own file tools; it is live within a second.",
+     "description": "Show the running engine's node libraries. Python backends report loaded files, node types and errors; "
+                    "the Rust backend summarises .py and .json libraries separately because it cannot load them.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "wrangle_reference",
      "description": "The wrangle snippet language (VEX-like expressions over points, primitives or vertices): syntax, "
@@ -557,17 +555,41 @@ class McpServer:
             lib = None
         if lib:
             lines = [f"Node folder(s): {', '.join(lib['dirs'])}"]
-            for f in lib["files"]:
-                lines.append(f"  {f['file']}: " + (f"ERROR {f['error']}" if f["error"] else ", ".join(f["nodes"])))
-            if not lib["files"]:
-                lines.append("  (no node files yet)")
+            if lib.get("backend") == "rust":
+                for key, label in (("python", "Python .py"), ("json", "JSON .json")):
+                    group = lib[key]
+                    lines.append(f"{label}: {group['count']} file(s). {group['summary']}.")
+                    lines.extend(f"  {path}" for path in group["files"])
+            else:
+                for f in lib["files"]:
+                    lines.append(f"  {f['file']}: " + (f"ERROR {f['error']}" if f["error"] else ", ".join(f["nodes"])))
+                if not lib["files"]:
+                    lines.append("  (no node files yet)")
         else:
             lines = [f"Engine not running; its node folder will be {self.workspace / 'nodes'}"]
-        return "\n".join(lines) + "\n\n" + AUTHORING_GUIDE
+        return "\n".join(lines) + ("" if lib and lib.get("backend") == "rust" else "\n\n" + AUTHORING_GUIDE)
 
     def tool_wrangle_reference(self) -> str:
         from .wrangle import reference
-        return reference()
+        try:
+            engine = self.engine.get("/api/state").get("engine") or {}
+        except EngineDown:
+            return "Engine not running; local Python reference follows.\n\n" + reference()
+        if engine.get("backend") != "rust":
+            return reference()
+        caps = engine.get("wrangle") or {}
+        if not caps:
+            raise ToolError("running Rust backend did not report wrangle capabilities")
+        return ("Rust wrangle reference (running backend):\n"
+                "Assignments to @attributes; statements separated by newlines or semicolons. "
+                "Read components with .x/.y/.z/.w or .r/.g/.b/.a. "
+                "Arithmetic: +, -, *, /; scalar expressions also support % and **.\n"
+                f"Local variables: {'yes' if caps['local_variables'] else 'no'}; "
+                f"new attributes: {'yes' if caps['temp_attributes'] else 'no'}.\n"
+                f"Attribute prefixes: {', '.join(caps['prefixes'])}.\n"
+                f"Vector constructors: {', '.join(caps['vector_constructors'])}.\n"
+                f"Functions: {', '.join(caps['functions'])}.\n"
+                f"Constants: {', '.join(caps['constants'])}.")
 
     # -- engine process --------------------------------------------------------
     def _start_engine(self, graph: Path) -> str:

@@ -80,6 +80,21 @@ class ProtocolTests(unittest.TestCase):
         _, err = call(self.m, "inspect_node")                                 # missing argument
         self.assertTrue(err)
 
+    def test_rust_wrangle_reference_uses_running_capabilities(self):
+        class RustEngine:
+            def get(self, path):
+                assert path == "/api/state"
+                return {"engine": {"backend": "rust", "wrangle": {
+                    "backend": "rust", "local_variables": False, "temp_attributes": True,
+                    "prefixes": ["f", "i", "u", "v", "p"],
+                    "vector_constructors": ["set", "{}"],
+                    "functions": ["sin", "atan2"], "constants": ["PI", "E"]}}}
+        text, error = call(McpServer(RustEngine()), "wrangle_reference")
+        self.assertFalse(error, text)
+        self.assertIn("atan2", text)
+        self.assertIn("Local variables: no", text)
+        self.assertNotIn("normalize", text)
+
 
 class ToolTests(unittest.TestCase):
     """Every tool against a real engine (Session + HTTP API), as an AI would use them."""

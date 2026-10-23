@@ -126,8 +126,28 @@ fn files(root: &Path) -> Vec<String> {
 }
 fn library(root: &Path) -> Value {
     let dir = root.join("nodes");
-    let files=std::fs::read_dir(&dir).ok().into_iter().flatten().flatten().filter(|e|e.path().extension().is_some_and(|e|e=="py"||e=="json")).map(|e|json!({"file":e.path(),"nodes":[],"error":"Python node-library loading is not available in the Rust core"})).collect::<Vec<_>>();
-    json!({"dirs":[dir],"files":files,"backend":"rust","supported":false})
+    let mut python = Vec::new();
+    let mut systems = Vec::new();
+    for entry in std::fs::read_dir(&dir).ok().into_iter().flatten().flatten() {
+        let path = entry.path();
+        match path.extension().and_then(|ext| ext.to_str()) {
+            Some("py") => python.push(path),
+            Some("json") => systems.push(path),
+            _ => {}
+        }
+    }
+    python.sort();
+    systems.sort();
+    let files = python.iter().chain(&systems).map(|path| json!({"file":path,"nodes":[],"error":null})).collect::<Vec<_>>();
+    json!({"dirs":[dir],"files":files,"backend":"rust","supported":false,
+        "python":{"count":python.len(),"files":python,"supported":false,"summary":"Python node libraries are not loaded by the Rust core"},
+        "json":{"count":systems.len(),"files":systems,"supported":false,"summary":"JSON system libraries are not loaded by the Rust core"}})
+}
+fn wrangle_capabilities() -> Value {
+    json!({"backend":"rust","local_variables":false,"temp_attributes":true,
+        "prefixes":["f","i","u","v","p"],"vector_constructors":["set","{}"],
+        "functions":["sin","cos","atan2","abs","round","sqrt","min","max","clamp","smoothstep","fit","rand","noise"],
+        "constants":["PI","E"]})
 }
 fn validate_edit_cook(value: &Value, frame: f64, fps: f64) -> Result<()> {
     let graph = Graph::from_value(value)?;
@@ -160,15 +180,23 @@ mod tests {
         .is_err());
     }
     #[test]
-    fn http_library_explicitly_reports_unavailable_python_files() {
+    fn http_library_summarises_python_and_json_separately() {
         let listing = library(&workspace());
         assert_eq!(listing["supported"], false);
+        assert!(listing["python"]["summary"].as_str().unwrap().contains("Python"));
+        assert!(listing["json"]["summary"].as_str().unwrap().contains("JSON"));
         for entry in listing["files"].as_array().unwrap() {
-            assert!(entry["error"]
-                .as_str()
-                .unwrap()
-                .contains("not available in the Rust core"));
+            assert!(entry["error"].is_null());
         }
+    }
+    #[test]
+    fn rust_state_reports_actual_wrangle_capabilities() {
+        let caps = wrangle_capabilities();
+        assert_eq!(caps["backend"], "rust");
+        assert_eq!(caps["local_variables"], false);
+        assert_eq!(caps["temp_attributes"], true);
+        assert!(caps["functions"].as_array().unwrap().contains(&json!("atan2")));
+        assert!(!caps["functions"].as_array().unwrap().contains(&json!("dot")));
     }
     #[test]
     fn opt_in_cook_validation_rejects_bad_wrangle() {
@@ -412,7 +440,7 @@ impl App {
                 s["root"] = json!(root);
                 s["ops"] = json!(http_ops::OPS);
                 s["link"] = json!({"port":if self.link.is_some(){Some(8765)}else{None},"clients":self.blender.clients});
-                s["engine"] = json!({"engine":"rust","backend":"rust","pid":std::process::id(),"version":"0.1.0 (rust)","python_nodes":false,"capabilities":["instances_v1","scene_objects_v1"]});
+                s["engine"] = json!({"engine":"rust","backend":"rust","pid":std::process::id(),"version":"0.1.0 (rust)","python_nodes":false,"capabilities":["instances_v1","scene_objects_v1"],"wrangle":wrangle_capabilities()});
                 s
             }
             ("GET", "/api/files") => {
