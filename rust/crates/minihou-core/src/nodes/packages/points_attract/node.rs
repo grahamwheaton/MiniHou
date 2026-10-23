@@ -95,3 +95,7 @@ fn points_attract(inputs: &Inputs, params: &Params) -> Result<Geometry> {
     output.set_p(positions);
     Ok(output)
 }
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
