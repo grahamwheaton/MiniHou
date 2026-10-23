@@ -1,4 +1,4 @@
-//! Perspective-correct projected Knife from minihou/nodes/knife.py.
+﻿//! Perspective-correct projected Knife from minihou/nodes/knife.py.
 use super::{GEO, Inputs, NodeSpec, edge_tools as edges, model::*};
 use crate::{
     error::{Error, Result},
@@ -415,7 +415,7 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 }
                 cuts.sort_by(f64::total_cmp);
                 cuts.dedup();
-                let mut pieces = Vec::new();
+                let mut pieces: Vec<(V2, V2)> = Vec::new();
                 for c in cuts.windows(2) {
                     let Some(hit) = clip(
                         add2(seg.a, mul2(delta, c[0])),
@@ -440,7 +440,12 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                         }
                     });
                     if !occluded {
-                        pieces.push(hit);
+                        // Join touching visible pieces: a split at another face's silhouette
+                        // must not leave a point in the middle of an unbroken cut.
+                        match pieces.last_mut() {
+                            Some(last) if len2(sub2(last.1, hit.0)) < 1e-9 => last.1 = hit.1,
+                            _ => pieces.push(hit),
+                        }
                     }
                 }
                 pieces
@@ -1031,6 +1036,46 @@ mod tests {
         assert_eq!(out.npoints,6);
         let extra=out.p().chunks_exact(3).skip(4).map(|q|(q[0],q[1])).collect::<Vec<_>>();
         assert!(extra.iter().any(|&(x,y)|x==-1.&&y==-0.5)&&extra.iter().any(|&(x,y)|x==1.&&y==0.5),"{extra:?}");
+    }
+    #[test]
+    fn cube_face_diagonal_cut_adds_no_points() {
+        let g=Geometry::from_arrays(
+            vec![-1.,-1.,-1.,1.,-1.,-1.,1.,1.,-1.,-1.,1.,-1.,-1.,-1.,1.,1.,-1.,1.,1.,1.,1.,-1.,1.,1.],
+            vec![4,5,6,7, 1,0,3,2, 0,4,7,3, 5,1,2,6, 7,6,2,3, 0,1,5,4],
+            vec![0,4,8,12,16,20,24],None).unwrap();
+        let matrix=[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.];
+        for (a,b) in [([-1.,-1.],[1.,1.]),([-1.,1.],[1.,-1.]),([1.,1.],[-1.,-1.])] {
+            for through in [false,true] {
+                let cuts=json!([{"matrix":matrix,"a":a,"b":b,"through":through}]).to_string();
+                let p=Params::resolve(KNIFE.params,json!({"cuts":cuts,"cut_through":through}).as_object()).unwrap();
+                let out=knife(&[vec![Arc::new(g.clone())]],&p).unwrap(); out.validate().unwrap();
+                assert_eq!(out.npoints,8,"{a:?}->{b:?} through={through}: {:?}",out.p());
+            }
+        }
+        // Perspective view at an angle, stroke snapped from corner to corner of the +z face.
+        for eye in [[3.,2.5,4.],[-2.,3.,5.],[1.3,-2.7,3.9]] {
+            let f={let d=sub([0.,0.,0.],eye);let l=len(d);mul(d,1./l)};
+            let s={let c=cross(f,[0.,1.,0.]);let l=len(c);mul(c,1./l)};
+            let u=cross(s,f);
+            let (n,fa,t)=(0.1f64,100.0f64,1.0f64);
+            // column-major: m[col*4+row]
+            let rows=[[s[0]/t,s[1]/t,s[2]/t,-dot(s,eye)/t],[u[0]/t,u[1]/t,u[2]/t,-dot(u,eye)/t],
+                [-f[0]*(fa+n)/(n-fa)*-1.,-f[1]*(fa+n)/(n-fa)*-1.,-f[2]*(fa+n)/(n-fa)*-1.,dot(f,eye)*(fa+n)/(n-fa)*-1.+2.*fa*n/(n-fa)],
+                [f[0],f[1],f[2],-dot(f,eye)]];
+            let mut m=[0.;16]; for r in 0..4 { for c in 0..4 { m[c*4+r]=rows[r][c]; } }
+            for (i,j) in [(4,6),(5,7),(6,4)] {
+                for through in [false,true] {
+                    let snap=|k:usize| json!({"screen":[0.,0.],"snap":{"point_count":8,"element":[k],"params":[1.]}});
+                    let cuts=json!([{"matrix":m,"points":[snap(i),snap(j)],"through":through}]).to_string();
+                    let p=Params::resolve(KNIFE.params,json!({"cuts":cuts}).as_object()).unwrap();
+                    let out=knife(&[vec![Arc::new(g.clone())]],&p).unwrap(); out.validate().unwrap();
+                    // Cutting through also cuts hidden faces for real; only the front face must stay clean.
+                    let front=out.p().chunks_exact(3).skip(8).filter(|q|(q[2]-1.).abs()<1e-5).count();
+                    assert_eq!(front,0,"eye {eye:?} {i}->{j} through={through}: {:?}",out.p());
+                    if !through { assert_eq!(out.npoints,8,"eye {eye:?} {i}->{j}: {:?}",out.p()); }
+                }
+            }
+        }
     }
     #[test]
     fn cut_endpoint_on_internal_diagonal_is_kept() {
