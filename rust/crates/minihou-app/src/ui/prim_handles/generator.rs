@@ -87,7 +87,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: col_pos,
                 world_dir: col_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "columns", min: 3, max: 4096, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "columns", default: 32, min: 3, max: 4096, step_scale: 1.0 },
                 label: Some(format!("Cols: {columns}")),
             });
 
@@ -98,7 +98,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: row_pos,
                 world_dir: row_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "rows", min: 2, max: 4096, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "rows", default: 16, min: 2, max: 4096, step_scale: 1.0 },
                 label: Some(format!("Rows: {rows}")),
             });
         }
@@ -180,7 +180,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: col_pos,
                 world_dir: col_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "columns", min: 3, max: 4096, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "columns", default: 24, min: 3, max: 4096, step_scale: 1.0 },
                 label: Some(format!("Cols: {columns}")),
             });
 
@@ -191,7 +191,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: row_pos,
                 world_dir: row_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "rows", min: 1, max: 4096, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "rows", default: 1, min: 1, max: 4096, step_scale: 1.0 },
                 label: Some(format!("Rows: {rows}")),
             });
         }
@@ -248,7 +248,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: col_pos,
                 world_dir: col_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "columns", min: 3, max: 4096, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "columns", default: 32, min: 3, max: 4096, step_scale: 1.0 },
                 label: Some(format!("Cols: {columns}")),
             });
 
@@ -259,7 +259,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: row_pos,
                 world_dir: row_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "rows", min: 3, max: 4096, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "rows", default: 12, min: 3, max: 4096, step_scale: 1.0 },
                 label: Some(format!("Rows: {rows}")),
             });
         }
@@ -305,7 +305,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: col_pos,
                 world_dir: col_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "columns", min: 2, max: 20000, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "columns", default: 10, min: 2, max: 20000, step_scale: 1.0 },
                 label: Some(format!("{columns} cols")),
             });
 
@@ -317,7 +317,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: row_pos,
                 world_dir: row_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "rows", min: 2, max: 20000, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "rows", default: 10, min: 2, max: 20000, step_scale: 1.0 },
                 label: Some(format!("{rows} rows")),
             });
         }
@@ -349,7 +349,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: pts_pos,
                 world_dir: pts_dir,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "divisions", min: 3, max: 100000, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "divisions", default: 32, min: 3, max: 100000, step_scale: 1.0 },
                 label: Some(format!("{divisions} pts")),
             });
         }
@@ -389,7 +389,7 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 world_pos: mid_pos,
                 world_dir: dir_f32,
                 shape: GripShape::Circle,
-                action: GripAction::IntStep { param: "points", min: 2, max: 1000000, step_scale: 1.0 },
+                action: GripAction::IntStep { param: "points", default: 10, min: 2, max: 1000000, step_scale: 1.0 },
                 label: Some(format!("{points} pts")),
             });
         }

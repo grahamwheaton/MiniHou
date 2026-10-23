@@ -78,7 +78,7 @@ pub enum GripAction {
     BoxFace { axis: usize, sign: f64 },
     BoxCorner,
     SphereRadius,
-    IntStep { param: &'static str, min: i64, max: i64, step_scale: f32 },
+    IntStep { param: &'static str, default: i64, min: i64, max: i64, step_scale: f32 },
     TubeRadiusTop,
     TubeRadiusBottom,
     TubeHeight,
@@ -297,7 +297,7 @@ mod tests {
             screen_dir: Vec2::new(0.0, 10.0),
             span: 10.0,
             start_params,
-            action: GripAction::IntStep { param: "columns", min: 3, max: 4096, step_scale: 1.0 },
+            action: GripAction::IntStep { param: "columns", default: 32, min: 3, max: 4096, step_scale: 1.0 },
             world_dir: [0.0, 1.0, 0.0],
             camera: CameraInfo::default(),
             rect: Rect::NOTHING,
@@ -307,6 +307,39 @@ mod tests {
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].0, "columns");
         assert_eq!(edits[0].1.as_i64().unwrap(), 34);
+    }
+
+    #[test]
+    fn primitive_count_drags_start_at_displayed_defaults() {
+        for (node_type, rows, columns) in [
+            ("sphere", 16, 32),
+            ("tube", 1, 24),
+            ("torus", 12, 32),
+        ] {
+            let params = json!({});
+            let (grips, ring) = handles_for_node("primitive", node_type, &params);
+            assert_eq!(ring.unwrap().label, format!("{rows} x {columns}"));
+            for (param, start) in [("rows", rows), ("columns", columns)] {
+                let grip = grips.iter().find(|grip| matches!(grip.action,
+                    GripAction::IntStep { param: name, .. } if name == param)).unwrap();
+                let GripAction::IntStep { min, .. } = &grip.action else { unreachable!() };
+                let drag = PrimDrag {
+                    node: "primitive".into(),
+                    start_pointer: pos2(100.0, 100.0),
+                    screen_dir: Vec2::X,
+                    span: 10.0,
+                    start_params: params.clone(),
+                    action: grip.action.clone(),
+                    world_dir: grip.world_dir,
+                    camera: CameraInfo::default(),
+                    rect: Rect::NOTHING,
+                };
+                for (delta, expected) in [(0.0, start), (20.0, start + 2), (-20.0, (start - 2).max(*min))] {
+                    let edits = compute_edits_for_drag(&drag, pos2(100.0 + delta, 100.0), false);
+                    assert_eq!(edits, vec![(param, json!(expected))], "{node_type} {param} at {delta}px");
+                }
+            }
+        }
     }
 
     #[test]
