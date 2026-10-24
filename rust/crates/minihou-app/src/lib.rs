@@ -110,6 +110,7 @@ fn foreach_method_and_domain_metadata() {
     assert_eq!(param_meta("for_each", "domain").unwrap()["default"], "points");
     assert_eq!(param_meta("for_each", "domain").unwrap()["options"],
         serde_json::json!(["points", "edges", "faces", "instances"]));
+}
 
 /// Whether the parameters panel shows a parameter. Metadata `visible_when` maps parameter names to the value (or list of
 /// values) they must hold; every condition must match. Parameters missing from `params` use their declared default.
