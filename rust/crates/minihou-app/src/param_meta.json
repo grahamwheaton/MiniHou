@@ -9,7 +9,10 @@
    "doc": "Fixed translation per step (Offset spacing); also added in Relative spacing.",
    "kind": "vec3",
    "visible_when": {
-    "mode": "line",
+    "mode": [
+     "line",
+     "grid"
+    ],
     "spacing": [
      "relative",
      "offset"
@@ -26,6 +29,36 @@
     "mode": "line"
    }
   },
+  "count_x": {
+   "default": 2,
+   "doc": "Grid copies along X.",
+   "kind": "int",
+   "max": 10000,
+   "min": 1,
+   "visible_when": {
+    "mode": "grid"
+   }
+  },
+  "count_y": {
+   "default": 2,
+   "doc": "Grid copies along Y.",
+   "kind": "int",
+   "max": 10000,
+   "min": 1,
+   "visible_when": {
+    "mode": "grid"
+   }
+  },
+  "count_z": {
+   "default": 1,
+   "doc": "Grid copies along Z. The grid holds at most 10000 copies in all.",
+   "kind": "int",
+   "max": 10000,
+   "min": 1,
+   "visible_when": {
+    "mode": "grid"
+   }
+  },
   "endpoint": {
    "default": [
     1.0,
@@ -35,7 +68,10 @@
    "doc": "Position of the last copy (Endpoint spacing); the copies are spread evenly from the input to here.",
    "kind": "vec3",
    "visible_when": {
-    "mode": "line",
+    "mode": [
+     "line",
+     "grid"
+    ],
     "spacing": "endpoint"
    }
   },
@@ -88,13 +124,16 @@
    "doc": "Per-axis step as a multiple of the input bounds (Relative spacing).",
    "kind": "vec3",
    "visible_when": {
-    "mode": "line",
+    "mode": [
+     "line",
+     "grid"
+    ],
     "spacing": "relative"
    }
   },
   "spacing": {
    "default": "relative",
-   "doc": "Line spacing: Relative steps by the input bounds, Offset by a fixed translation, Endpoint spreads the copies up to a point.",
+   "doc": "Spacing for Line and Grid (per axis in Grid): Relative steps by the input bounds, Offset by a fixed translation, Endpoint spreads the copies up to a point.",
    "kind": "enum",
    "options": [
     "relative",
@@ -102,7 +141,10 @@
     "endpoint"
    ],
    "visible_when": {
-    "mode": "line"
+    "mode": [
+     "line",
+     "grid"
+    ]
    }
   },
   "uv_offset_u": {
@@ -286,7 +328,7 @@
   },
   "attributes": {
    "default": null,
-   "doc": "Attribute entries with Name, Domain, Type, and Value; the value channels follow the type.",
+   "doc": "Repeatable attribute entries with Name, Class, Type, Size, Default, and Value.",
    "kind": "json"
   },
   "class": {
@@ -307,11 +349,10 @@
   },
   "domain": {
    "default": "points",
-   "doc": "Domain of the selection group: points, edges or faces. Changing it converts the selection.",
+   "doc": "Geometry domain receiving the new attribute.",
    "kind": "enum",
    "options": [
     "points",
-    "edges",
     "primitives",
     "vertices",
     "detail"
@@ -6271,7 +6312,11 @@
    "default": "points",
    "doc": "Element domain used to select points to relax",
    "kind": "enum",
-   "options": ["points", "edges", "primitives"]
+   "options": [
+    "points",
+    "edges",
+    "primitives"
+   ]
   },
   "group": {
    "default": "",
@@ -6299,6 +6344,38 @@
    "default": true,
    "doc": "Take N from the surface where each point lands",
    "kind": "bool"
+  }
+ },
+ "points_attract": {
+  "domain": {
+   "default": "points",
+   "doc": "Domain of the target group",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Target group or pattern; empty uses every other point as a target",
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
+  },
+  "iterations": {
+   "default": 1,
+   "doc": "Number of attraction passes",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 100
+  },
+  "strength": {
+   "default": 0.5,
+   "doc": "Fraction of the distance to the nearest target moved on each pass",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
   }
  },
  "points_to_surface": {
@@ -10978,7 +11055,6 @@
   "snippet": {
    "default": "@P.z += sin(@P.x)",
    "doc": "VEX-like expression run over every element, e.g. '@P.z += sin(@P.x * 2) * 0.5'. See the wrangle reference.",
-   "label": "code",
    "kind": "str"
   }
  }

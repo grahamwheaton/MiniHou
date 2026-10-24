@@ -1,4 +1,4 @@
-//! Array copies following Blender 5.2's geometry-nodes Array (Line shape with Relative, Offset and Endpoint spacing).
+//! Array copies following Blender 5.2's geometry-nodes Array (Line and Grid shapes with Relative, Offset and Endpoint spacing).
 use std::{collections::{BTreeSet, HashMap}, sync::Arc};
 use serde_json::{Map, Value};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry, Topology},
@@ -10,6 +10,7 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
     params: crate::params!(
         "mode": "line"; "spacing": "relative"; "count": 2;
         "relative_offset": [1., 0., 0.]; "constant_offset": [0., 0., 0.]; "endpoint": [1., 0., 0.];
+        "count_x": 2; "count_y": 2; "count_z": 1;
         "legacy_fit_length": -1.0;
         "merge_vertices": true; "merge_distance": 0.0; "merge_first_last": false;
         "uv_offset_u": 0.0; "uv_offset_v": 0.0
@@ -183,9 +184,38 @@ fn line_layout(g: &Geometry, p: &Params) -> Result<Layout> {
     Ok(Layout { xf, pairs: chain(count) })
 }
 
+/// Grid: copies on a lattice. Each axis steps by the matching component of the spacing vector: Relative multiplies
+/// the input size on that axis (plus the constant offset), Offset is a distance, Endpoint is the far corner.
+fn grid_layout(g: &Geometry, p: &Params) -> Result<Layout> {
+    let rel = p.v3("relative_offset")?;
+    let cst = p.v3("constant_offset")?;
+    let end = p.v3("endpoint")?;
+    if !finite3(rel) || !finite3(cst) || !finite3(end) { return Err(Error::new("array offsets must be finite")); }
+    let n = [checked_count(p, "count_x")?, checked_count(p, "count_y")?, checked_count(p, "count_z")?];
+    let total = n[0].checked_mul(n[1]).and_then(|v| v.checked_mul(n[2])).filter(|&v| v <= MAX_COUNT)
+        .ok_or_else(|| Error::new(format!("array grid needs at most {MAX_COUNT} copies")))?;
+    let size = bounds(g);
+    let step: [f64; 3] = match p.e("spacing", &["relative", "offset", "endpoint"])?.as_str() {
+        "relative" => std::array::from_fn(|a| rel[a] * size[a] + cst[a]),
+        "offset" => cst,
+        _ => std::array::from_fn(|a| if n[a] > 1 { end[a] / (n[a] - 1) as f64 } else { 0. }),
+    };
+    let mut xf = Vec::with_capacity(total);
+    let mut pairs = Vec::new();
+    let id = |i: usize, j: usize, k: usize| (k * n[1] + j) * n[0] + i;
+    for k in 0..n[2] { for j in 0..n[1] { for i in 0..n[0] {
+        xf.push(Affine::translate([i as f64 * step[0], j as f64 * step[1], k as f64 * step[2]]));
+        if i > 0 { pairs.push((id(i-1,j,k), id(i,j,k))); }
+        if j > 0 { pairs.push((id(i,j-1,k), id(i,j,k))); }
+        if k > 0 { pairs.push((id(i,j,k-1), id(i,j,k))); }
+    } } }
+    Ok(Layout { xf, pairs })
+}
+
 fn layout(g: &Geometry, p: &Params) -> Result<Layout> {
     match p.e("mode", &["line", "grid", "radial"])?.as_str() {
         "line" => line_layout(g, p),
+        "grid" => grid_layout(g, p),
         other => Err(Error::new(format!("array mode {other:?} is not available yet"))),
     }
 }

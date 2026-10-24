@@ -137,3 +137,21 @@ fn registered_array_output_can_feed_transform_node() {
     let moved = (transform.cook)(&[vec![Arc::new(out)]], &p).unwrap();
     assert_eq!(bounds(&moved), ([0.,0.,2.],[2.,1.,2.]));
 }
+#[test]
+fn grid_counts_and_positions_per_axis() {
+    let pt = || Geometry::points_only(vec![0.,0.,0.]).unwrap();
+    let out = run(pt(), json!({"mode":"grid","spacing":"offset","count_x":3,"count_y":2,"count_z":2,"constant_offset":[1.,2.,3.]}));
+    assert_eq!(out.npoints, 12);
+    assert_eq!(&out.p()[..9], &[0.,0.,0., 1.,0.,0., 2.,0.,0.]);
+    assert_eq!(&out.p()[9..12], &[0.,2.,0.]);
+    assert_eq!(&out.p()[33..36], &[2.,2.,3.]);
+    let end = run(pt(), json!({"mode":"grid","spacing":"endpoint","count_x":5,"count_y":3,"count_z":1,"endpoint":[8.,4.,9.]}));
+    assert_eq!(end.npoints, 15);
+    assert_eq!(bounds(&end), ([0.,0.,0.],[8.,4.,0.]));
+    let rel = run(quad(), json!({"mode":"grid","count_x":2,"count_y":3,"count_z":1,"relative_offset":[1.,1.,1.]}));
+    assert_eq!((rel.nprims(), bounds(&rel)), (6, ([0.,0.,0.],[2.,3.,0.])));
+    // Neighbours along both axes weld: a 2 x 2 grid of unit quads shares 9 points.
+    let welded = run(quad(), json!({"mode":"grid","count_x":2,"count_y":2,"count_z":1,"relative_offset":[1.,1.,1.],"merge_distance":0.001}));
+    assert_eq!(welded.npoints, 9);
+    assert!(run_err(pt(), json!({"mode":"grid","count_x":100,"count_y":100,"count_z":2})).contains("at most"));
+}
