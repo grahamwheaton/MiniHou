@@ -9,6 +9,8 @@ bl_info = {
 }
 
 import json
+import os
+import subprocess
 
 import bpy
 from bpy.app.handlers import persistent
@@ -41,12 +43,34 @@ def _restore_endpoint_timer():
     return None
 
 
+_app_start_tried = False
+
+
+def _start_app_once(prefs):
+    """Launch the MiniHou app (once per session) with the scene's graph, when an exe path is set."""
+    global _app_start_tried
+    if _app_start_tried or not prefs.auto_start_app or not prefs.minihou_app:
+        return
+    scene = bpy.context.scene
+    graph = bpy.path.abspath(scene.minihou_graph_path) if scene.minihou_graph_path else ""
+    exe = bpy.path.abspath(prefs.minihou_app)
+    if not graph or not os.path.isfile(graph) or not os.path.isfile(exe):
+        return
+    _app_start_tried = True
+    try:
+        subprocess.Popen([exe, graph], cwd=os.path.dirname(graph), stdin=subprocess.DEVNULL,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except OSError as exc:
+        print(f"[minihou] auto-start: {exc}")
+
+
 def _auto_connect_timer():
     try:
         addon = bpy.context.preferences.addons.get(__package__)
         wm = bpy.context.window_manager
         if addon and wm:
             runtime.get_runtime().poll_auto_connect(addon.preferences.auto_connect_minihou, wm.minihou_port)
+            _start_app_once(addon.preferences)
     except Exception as exc:
         # Keep polling through file loads and temporarily restricted Blender contexts.
         print(f"[minihou] auto-connect: {exc}")
@@ -71,6 +95,10 @@ class MINIHOU_Preferences(bpy.types.AddonPreferences):
         description="Prepared Python 3.11+ executable with MiniHou and numpy; never Blender's executable")
     project_root: StringProperty(name="MiniHou Project Folder", subtype="DIR_PATH",
         description="Folder containing minihou/__main__.py and the node library")
+    minihou_app: StringProperty(name="MiniHou App", subtype="FILE_PATH",
+        description="The minihou-app executable. Pick it once; builds can have new names")
+    auto_start_app: BoolProperty(name="Start MiniHou with Blender", default=True,
+        description="Launch the MiniHou App above when Blender opens, with the scene's graph")
 
     def draw(self, context):
         self.layout.prop(self, "auto_connect_minihou")
@@ -80,6 +108,8 @@ class MINIHOU_Preferences(bpy.types.AddonPreferences):
             self.layout.prop(self, "manual_port")
             self.layout.prop(context.scene, "minihou_http_port", text="Editor Port")
         self.layout.prop(self, "show_sidebar")
+        self.layout.prop(self, "minihou_app")
+        self.layout.prop(self, "auto_start_app")
         self.layout.label(text="Advanced: launch an external Python engine from Blender")
         self.layout.prop(self, "external_python")
         self.layout.prop(self, "project_root")
