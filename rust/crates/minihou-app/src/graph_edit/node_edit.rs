@@ -41,6 +41,14 @@ pub fn rename(value: &Value, old: &str, new: &str) -> Option<Value> {
     }
     if value["display"]==old {value["display"]=json!(new);}
     if let Some(xs)=value["display"].as_array_mut() {for x in xs {if x==old {*x=json!(new)}}}
+    if let Some(zones)=value.get_mut("zones").and_then(Value::as_object_mut) {
+        for zone in zones.values_mut() {
+            for boundary in ["start","end"] {if zone[boundary]==old {zone[boundary]=json!(new);}}
+            if let Some(members)=zone["members"].as_array_mut() {
+                for member in members {if member==old {*member=json!(new);}}
+            }
+        }
+    }
     Some(value)
 }
 

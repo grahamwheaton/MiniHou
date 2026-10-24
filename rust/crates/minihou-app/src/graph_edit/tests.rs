@@ -483,3 +483,68 @@
         assert_eq!(v["display"], "box1");
         validated(v).unwrap();
     }
+    #[test] fn adding_for_each_creates_unique_atomic_pairs_and_round_trips() {
+        let base=json!({"version":1,"display":"out","nodes":{
+            "source":{"type":"box"},"out":{"type":"output","inputs":{"geo":"source"}}
+        }});
+        let (first,start,end,zone)=add_for_each(&base,Some("source"),Some([30.,40.])).unwrap();
+        assert_eq!(first["nodes"][&start]["inputs"]["geo"],"source");
+        assert_eq!(first["nodes"][&end]["inputs"],json!({"generated":start,"begin":start}));
+        assert_eq!(first["nodes"]["out"]["inputs"]["geo"],end);
+        assert_eq!(first["zones"][&zone]["members"],json!([]));
+        let (second,start2,end2,zone2)=add_for_each(&first,Some(&end),None).unwrap();
+        assert_ne!(start,start2);assert_ne!(end,end2);assert_ne!(zone,zone2);
+        assert_eq!(second["nodes"]["out"]["inputs"]["geo"],end2);
+        let mut doc=validated(base.clone()).unwrap();
+        let mut history=minihou_app::History::default();
+        history.replace(&mut doc,validated(first.clone()).unwrap());
+        assert_eq!(doc.value(),&first);
+        history.undo(&mut doc).unwrap();assert_eq!(doc.value(),&base);
+        history.redo(&mut doc).unwrap();assert_eq!(doc.value(),&first);
+        let reloaded=minihou_app::Document::parse(validated(second.clone()).unwrap().text().to_owned()).unwrap();
+        assert_eq!(reloaded.value(),&second);
+        assert_eq!(minihou_core::Graph::from_value(reloaded.value()).unwrap().zones.len(),2);
+    }
+    #[test] fn for_each_wire_insert_and_zone_rename_keep_references() {
+        let base=json!({"version":1,"display":"out","nodes":{
+            "source":{"type":"box"},"a":{"type":"transform","inputs":{"geo":"source"}},
+            "b":{"type":"transform","inputs":{"geo":"source"}},
+            "out":{"type":"output","inputs":{"geo":"a"}}
+        }});
+        let wire=WireRef{from:"source".into(),to:"a".into(),port:"geo".into()};
+        let (next,end)=add_for_each_on_wire(&base,&wire,[20.,30.]).unwrap();
+        assert_eq!(next["nodes"]["a"]["inputs"]["geo"],end);
+        assert_eq!(next["nodes"]["b"]["inputs"]["geo"],"source");
+        assert_eq!(next["display"],"out");
+        let start=next["zones"]["for_each_zone1"]["start"].as_str().unwrap();
+        let renamed=rename(&next,start,"beginning").unwrap();
+        assert_eq!(renamed["zones"]["for_each_zone1"]["start"],"beginning");
+        assert_eq!(renamed["nodes"][&end]["inputs"]["begin"],"beginning");
+        validated(renamed).unwrap();
+    }
+    #[test] fn adding_a_body_node_preserves_the_zone_pairing_and_display() {
+        let base=json!({"version":1,"display":"out","nodes":{
+            "source":{"type":"box"},"out":{"type":"output","inputs":{"geo":"source"}}
+        }});
+        let (zone_doc,start,end,zone)=add_for_each(&base,Some("source"),None).unwrap();
+        let (body,id)=add(&zone_doc,"transform",Some(&start)).unwrap();
+        assert_eq!(body["zones"][&zone]["members"],json!([id]));
+        assert_eq!(body["nodes"][&end]["inputs"]["generated"],id);
+        assert_eq!(body["nodes"][&end]["inputs"]["begin"],start);
+        assert_eq!(body["display"],"out");
+        let graph=minihou_core::Graph::from_value(&body).unwrap();
+        assert!(graph.cook(Some("out")).is_ok());
+    }
+    #[test] fn adding_for_each_after_a_start_creates_a_nested_zone() {
+        let base=json!({"version":1,"display":"out","nodes":{
+            "source":{"type":"box"},"out":{"type":"output","inputs":{"geo":"source"}}
+        }});
+        let (outer,start,end,outer_zone)=add_for_each(&base,Some("source"),None).unwrap();
+        let (nested,inner_start,inner_end,inner_zone)=add_for_each(&outer,Some(&start),None).unwrap();
+        assert_eq!(nested["zones"][&inner_zone]["parent"],outer_zone);
+        assert_eq!(nested["zones"][&outer_zone]["members"],json!([inner_start,inner_end]));
+        assert_eq!(nested["nodes"][&end]["inputs"]["generated"],inner_end);
+        assert_eq!(nested["nodes"][&end]["inputs"]["begin"],start);
+        let graph=minihou_core::Graph::from_value(&nested).unwrap();
+        assert!(graph.cook(Some("out")).is_ok());
+    }
