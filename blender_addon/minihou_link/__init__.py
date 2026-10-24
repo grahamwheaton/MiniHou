@@ -77,7 +77,10 @@ def _press_button(obj, mod, action, mode):
     with bpy.context.temp_override(object=obj, active_object=obj):
         if action == "Reload":
             bpy.ops.minihou.reload_modifier(modifier_name=mod.name)
-        elif action in {"Open", "Add input"}:      # Add input is done in MiniHou's own editor
+        elif action == "Add input":                # a float input named Input N; rename it in MiniHou or here
+            count = len(modifiers.parameters(mod)) + 1
+            bpy.ops.minihou.add_input("EXEC_DEFAULT", modifier=mod.name, input_name=f"Input {count}", kind="float")
+        elif action == "Open":
             bpy.ops.minihou.edit_network(modifier_name=mod.name)
         if mode == "Unpack":
             bpy.ops.minihou.extract_graph(modifier_name=mod.name)
