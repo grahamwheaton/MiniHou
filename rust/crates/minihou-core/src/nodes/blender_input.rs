@@ -109,6 +109,8 @@ fn object(p: &Params, store: &ExternalInputs) -> Result<Geometry> { cook_object(
 fn build_object(p: &Params, data: &ExternalInput) -> Result<Geometry> {
     let ExternalInput::Object { geo, matrix, info }=data else { return Err(Error::new("invalid input")); };
     let mut out=(**geo).clone();
+    // A Blender object with no points (empty, or no mesh data yet) has no P: pass it through untouched.
+    if !geo.point.contains_key("P") { return Ok(out); }
     if p.b("join_edges")? && geo.topology.has_open() && !info["components"].as_array().is_some_and(|a| a.iter().any(|v| v=="curves")) {
         out=join_edges(geo)?;
     }
@@ -274,5 +276,14 @@ fn join_edges(g: &Geometry) -> Result<Geometry> {
         assert_eq!(Error::waiting("x").waiting_text(),Some("x"));
         assert_eq!(Error::new("x").waiting_text(),None);
         assert_eq!(Error::waiting("x").in_node("a","b").waiting_text(),None);
+    }
+    #[test]
+    fn object_without_p_attribute_passes_through_without_panic() {
+        let mut g=Geometry::from_arrays(vec![0.;3],vec![],vec![0],None).unwrap();
+        g.point.remove("P");
+        let mut store=ExternalInputs::new();
+        store.insert("object:E".into(),ExternalInput::Object{geo:Arc::new(g),matrix:Some([2.,0.,0.,5.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.]),info:serde_json::json!({})});
+        let p=Params::resolve(BLENDER_OBJECT.params,serde_json::json!({"object":"E"}).as_object()).unwrap();
+        assert!(cook_object("n",&p,&store).is_ok());
     }
 }
