@@ -110,7 +110,8 @@ fn build_object(p: &Params, data: &ExternalInput) -> Result<Geometry> {
     let ExternalInput::Object { geo, matrix, info }=data else { return Err(Error::new("invalid input")); };
     let mut out=(**geo).clone();
     // A Blender object with no points (empty, or no mesh data yet) has no P: pass it through untouched.
-    if !geo.point.contains_key("P") { return Ok(out); }
+    // Downstream nodes read P through Geometry::p(), so the empty object gets an empty P rather than none.
+    if !geo.point.contains_key("P") { out.point.insert("P".into(), Arc::new(Attr::f32(3, Vec::new()))); return Ok(out); }
     if p.b("join_edges")? && geo.topology.has_open() && !info["components"].as_array().is_some_and(|a| a.iter().any(|v| v=="curves")) {
         out=join_edges(geo)?;
     }
