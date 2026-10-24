@@ -88,6 +88,21 @@ fn legacy_fit_length_graph_becomes_endpoint_with_same_geometry() {
     assert_eq!((p.s("spacing").unwrap(), p.f("legacy_fit_length").unwrap()), ("offset".into(), -1.0));
 }
 #[test]
+fn migration_rule_old_graphs_match_current_line_graphs() {
+    // Fixed Count keeps its offsets and count.
+    let old = run(quad(), json!({"fit_type":"fixed_count","count":4,"relative_offset":[1.,0.,0.],"constant_offset":[0.5,0.,0.]}));
+    let new = run(quad(), json!({"spacing":"relative","count":4,"relative_offset":[1.,0.,0.],"constant_offset":[0.5,0.,0.]}));
+    assert_eq!((old.p(), old.topology.vertex_point.clone()), (new.p(), new.topology.vertex_point.clone()));
+    // Fit Length 3 with a unit step is four copies whose last copy sits at the endpoint (3, 0, 0).
+    let old = run(quad(), json!({"fit_type":"fit_length","fit_length":3.0}));
+    let new = run(quad(), json!({"spacing":"endpoint","count":4,"endpoint":[3.,0.,0.]}));
+    assert_eq!(params(&json!({"fit_type":"fit_length","fit_length":3.0})).s("spacing").unwrap(), "endpoint");
+    assert_eq!((old.p(), old.topology.vertex_point.clone()), (new.p(), new.topology.vertex_point.clone()));
+    let old = run(quad(), json!({"fit_type":"fit_length","fit_length":5.0,"relative_offset":[0.,1.,0.],"constant_offset":[0.,1.,0.]}));
+    let new = run(quad(), json!({"spacing":"endpoint","count":3,"endpoint":[0.,4.,0.]}));
+    assert_eq!(old.p(), new.p());
+}
+#[test]
 fn removed_fit_curve_reports_error() {
     assert!(run_err(quad(), json!({"fit_type":"fit_curve"})).contains("removed"));
 }
