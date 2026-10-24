@@ -150,7 +150,8 @@ fn simplify_group(positions: &[[f32;3]], input: &[Tri], target: usize) -> (Vec<T
         let mut candidates=Vec::with_capacity(edges.len());
         for (&(a,b),&count) in &edges {
             if count!=2 || locked.contains(&a) || locked.contains(&b) { continue; }
-            let mut q=quadrics[&a]; q.add(quadrics[&b]);
+            // A vertex whose triangles are all degenerate has no plane, so its quadric is empty rather than missing.
+            let mut q=quadrics.get(&a).copied().unwrap_or_default(); q.add(quadrics.get(&b).copied().unwrap_or_default());
             let ca=q.cost(positions[a as usize]); let cb=q.cost(positions[b as usize]);
             let (keep,remove,cost)=if ca<=cb {(a,b,ca)} else {(b,a,cb)};
             candidates.push((cost,keep,remove));
