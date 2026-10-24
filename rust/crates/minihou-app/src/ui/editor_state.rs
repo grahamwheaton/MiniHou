@@ -80,8 +80,9 @@ impl Default for Proportional { fn default() -> Self { Self { enabled: false, fa
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct Overlays { pub enabled: bool, pub points: bool, pub lines: bool, pub faces: bool, pub point_size: f32, pub line_width: f32, pub grid: bool, pub axes: bool, pub wireframe: bool, pub stats: bool, pub normals: bool, pub bounds: bool }
-impl Default for Overlays { fn default() -> Self { Self { enabled: true, points: true, lines: true, faces: true, point_size: 4., line_width: 2., grid: true, axes: true, wireframe: true, stats: true, normals: false, bounds: false } } }
+pub struct Overlays { pub enabled: bool, pub points: bool, pub lines: bool, pub faces: bool, pub point_size: f32, pub line_width: f32, pub grid: bool, pub axes: bool, pub wireframe: bool, pub stats: bool, pub normals: bool, pub bounds: bool, pub uv_preview: bool, pub uv_checker_cells: u32 }
+impl Overlays { pub fn uv_preview_active(&self) -> bool { self.enabled && self.uv_preview } }
+impl Default for Overlays { fn default() -> Self { Self { enabled: true, points: true, lines: true, faces: true, point_size: 4., line_width: 2., grid: true, axes: true, wireframe: true, stats: true, normals: false, bounds: false, uv_preview: false, uv_checker_cells: 16 } } }
 
 /// Standard views (numpad keys in Blender).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

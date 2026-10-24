@@ -157,7 +157,7 @@ impl Preferences {
         }
         if let Some(view) = v.get("viewport") {
             if let Some(value)=view.get("overlays") { if let Ok(mut o)=serde_json::from_value::<crate::ui::Overlays>(value.clone()) {
-                o.point_size=o.point_size.clamp(1.,16.); o.line_width=o.line_width.clamp(1.,10.); p.viewport.show_grid=o.grid; p.viewport.show_axes=o.axes; p.show_stats=o.stats; p.viewport.overlays=o;
+                o.point_size=o.point_size.clamp(1.,16.); o.line_width=o.line_width.clamp(1.,10.); o.uv_checker_cells=o.uv_checker_cells.clamp(1,256); p.viewport.show_grid=o.grid; p.viewport.show_axes=o.axes; p.show_stats=o.stats; p.viewport.overlays=o;
             } }
             if let Some(x)=view.get("xray").and_then(Value::as_bool) { p.viewport.xray=x; }
             if let Some(x)=view.get("object_visibility").and_then(Value::as_str) { p.viewport.object_visibility=crate::viewport::ObjectVisibility::parse(x); }
@@ -218,6 +218,28 @@ impl Preferences {
 #[cfg(test)]
 mod packed_display_tests {
     use super::*;
+
+    #[test]
+    fn uv_preview_defaults_legacy_round_trip_and_master_toggle() {
+        let old = Preferences::from_json(&json!({"viewport":{"overlays":{"enabled":true,"points":false}}}));
+        assert!(!old.viewport.overlays.uv_preview);
+        assert_eq!(old.viewport.overlays.uv_checker_cells, 16);
+        let mut p = Preferences::default();
+        p.viewport.overlays.uv_preview = true;
+        p.viewport.overlays.uv_checker_cells = 42;
+        let mut loaded = Preferences::from_json(&p.to_json());
+        assert_eq!(loaded.viewport.overlays, p.viewport.overlays);
+        loaded.viewport.overlays.enabled = false;
+        assert!(!loaded.viewport.overlays.uv_preview_active());
+        assert!(loaded.viewport.overlays.uv_preview);
+        loaded.viewport.overlays.enabled = true;
+        assert!(loaded.viewport.overlays.uv_preview_active());
+        for (input, expected) in [(0, 1), (1000, 256)] {
+            let mut value = p.to_json();
+            value["viewport"]["overlays"]["uv_checker_cells"] = json!(input);
+            assert_eq!(Preferences::from_json(&value).viewport.overlays.uv_checker_cells, expected);
+        }
+    }
 
     #[test]
     fn packed_display_defaults_and_round_trip() {
