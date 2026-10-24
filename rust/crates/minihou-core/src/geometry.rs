@@ -239,8 +239,9 @@ impl Geometry {
         Self::from_arrays(p, Vec::new(), vec![0], None)
     }
 
+    /// Point positions. Geometry without a `P` attribute has no points, so this is empty rather than a panic.
     pub fn p(&self) -> &[f32] {
-        self.point.get("P").and_then(|a| a.as_f32()).expect("geometry has no P")
+        self.point.get("P").and_then(|a| a.as_f32()).unwrap_or(&[])
     }
 
     pub fn set_p(&mut self, p: Vec<f32>) {
