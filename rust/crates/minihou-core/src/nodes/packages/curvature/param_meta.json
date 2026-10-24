@@ -1,0 +1,4 @@
+{
+  "name": {"kind": "str", "default": "curvature", "doc": "Name of the float point attribute to write."},
+  "mode": {"kind": "enum", "default": "signed", "options": ["signed", "convex", "concave"], "doc": "Signed curvature, positive convex curvature only, or positive magnitude of concave curvature only."}
+}

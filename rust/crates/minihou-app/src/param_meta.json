@@ -1,4 +1,50 @@
 {
+  "ambient_occlusion": {
+   "domain": {
+    "default": "points",
+    "doc": "Write one occlusion value per point or per face.",
+    "kind": "enum",
+    "options": [
+     "points",
+     "faces"
+    ]
+   },
+   "max_distance": {
+    "default": 10.0,
+    "doc": "Maximum distance at which a triangle occludes a ray.",
+    "kind": "float",
+    "min": 1e-06
+   },
+   "name": {
+    "default": "ao",
+    "doc": "Name of the float attribute to write.",
+    "kind": "str"
+   },
+   "samples": {
+    "default": 32,
+    "doc": "Number of deterministic hemisphere rays per element.",
+    "kind": "int",
+    "max": 4096,
+    "min": 1
+   }
+  },
+ "curvature": {
+  "mode": {
+   "default": "signed",
+   "doc": "Signed curvature, positive convex curvature only, or positive magnitude of concave curvature only.",
+   "kind": "enum",
+   "options": [
+    "signed",
+    "convex",
+    "concave"
+   ]
+  },
+  "name": {
+   "default": "curvature",
+   "doc": "Name of the float point attribute to write.",
+   "kind": "str"
+  }
+ },
  "array": {
   "constant_offset": {
    "default": [

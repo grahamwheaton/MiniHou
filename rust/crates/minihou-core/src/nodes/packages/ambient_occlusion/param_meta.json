@@ -1,0 +1,6 @@
+{
+  "domain": {"kind": "enum", "default": "points", "options": ["points", "faces"], "doc": "Write one occlusion value per point or per face."},
+  "name": {"kind": "str", "default": "ao", "doc": "Name of the float attribute to write."},
+  "samples": {"kind": "int", "default": 32, "min": 1, "max": 4096, "doc": "Number of deterministic hemisphere rays per element."},
+  "max_distance": {"kind": "float", "default": 10.0, "min": 0.000001, "doc": "Maximum distance at which a triangle occludes a ray."}
+}

@@ -1,0 +1,5 @@
+id = "curvature"
+name = "Curvature"
+category = "Attributes"
+description = "Estimate signed point curvature from the one-ring mesh neighbours."
+keywords = "curvature convex concave laplacian bend"

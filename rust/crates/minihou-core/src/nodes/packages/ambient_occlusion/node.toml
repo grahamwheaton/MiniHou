@@ -1,0 +1,5 @@
+id = "ambient_occlusion"
+name = "Ambient Occlusion"
+category = "Attributes"
+description = "Estimate the unoccluded hemisphere around mesh points or faces."
+keywords = "ambient occlusion ao ray shading"
