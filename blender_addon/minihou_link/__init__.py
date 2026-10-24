@@ -64,6 +64,50 @@ def _start_app_once(prefs):
         print(f"[minihou] auto-start: {exc}")
 
 
+def _set_button(mod, name, choice):
+    from . import proxy
+    params = modifiers.parameters(mod)
+    proxy.write_values(mod, mod.node_group, params, {name: choice})
+
+
+def _press_button(obj, mod, action, mode):
+    """Run a pressed Actions or Mode button, then return it to Idle so the next press counts."""
+    from . import embed
+    ng = mod.node_group
+    with bpy.context.temp_override(object=obj, active_object=obj):
+        if action == "Reload":
+            bpy.ops.minihou.reload_modifier(modifier_name=mod.name)
+        elif action in {"Open", "Add input"}:      # Add input is done in MiniHou's own editor
+            bpy.ops.minihou.edit_network(modifier_name=mod.name)
+        if mode == "Unpack":
+            bpy.ops.minihou.extract_graph(modifier_name=mod.name)
+        elif mode == "Pack" and embed.mode(ng) != embed.EMBEDDED or mode == "Relink" and embed.mode(ng) != embed.LINKED:
+            bpy.ops.minihou.switch_embed_mode(modifier_name=mod.name)
+
+
+def _poll_buttons():
+    """Dispatch pressed MiniHou buttons on each modifier. Runs on a Blender timer, on the UI thread."""
+    from . import proxy
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        for mod in obj.modifiers:
+            if not modifiers.is_modifier(mod):
+                continue
+            values = proxy.read_values(mod, mod.node_group, modifiers.parameters(mod))
+            action, mode = values.get("Actions", "Idle"), values.get("Mode", "Idle")
+            if action == "Idle" and mode == "Idle":
+                continue
+            for name, choice in (("Actions", action), ("Mode", mode)):
+                if choice != "Idle":
+                    _set_button(mod, name, "Idle")
+            try:
+                _press_button(obj, mod, action, mode)
+            except Exception as exc:
+                print(f"[minihou] button {action}/{mode}: {exc}")
+    return 0.25
+
+
 def _auto_connect_timer():
     try:
         addon = bpy.context.preferences.addons.get(__package__)
@@ -518,10 +562,14 @@ def register():
     bpy.types.OBJECT_MT_modifier_add.append(_add_modifier_menu)
     if not bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.register(_auto_connect_timer, first_interval=2.0, persistent=True)
+    if not bpy.app.timers.is_registered(_poll_buttons):
+        bpy.app.timers.register(_poll_buttons, first_interval=1.0, persistent=True)
 
 
 def unregister():
     bpy.types.OBJECT_MT_modifier_add.remove(_add_modifier_menu)
+    if bpy.app.timers.is_registered(_poll_buttons):
+        bpy.app.timers.unregister(_poll_buttons)
     if bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.unregister(_auto_connect_timer)
     input_define_ui.unregister()

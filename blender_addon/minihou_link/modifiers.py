@@ -509,12 +509,13 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     path = os.path.abspath(bpy.path.abspath(graph_path)) if graph_path.strip() else ""
     if path and not path.lower().endswith((".json", ".minihou")):
         raise ValueError("Graph must name a .minihou or .json file; leave Graph empty to start a new modifier")
-    # Actions and Mode are menu inputs: Blender shows them as the modifier's buttons.
+    # Actions and Mode are menu inputs shown as buttons. "Idle" is the resting value: a press sets
+    # the choice and the dispatcher resets it to Idle, so pressing the same button again still counts.
     starter_inputs = [
-        {"id": "input_1", "name": "Actions", "kind": "menu", "default": "Open",
-         "options": ["Open", "Reload", "Add input"]},
-        {"id": "input_2", "name": "Mode", "kind": "menu", "default": "Pack",
-         "options": ["Pack", "Unpack", "Relink"]}]
+        {"id": "input_1", "name": "Actions", "kind": "menu", "default": "Idle",
+         "options": ["Idle", "Open", "Reload", "Add input"]},
+        {"id": "input_2", "name": "Mode", "kind": "menu", "default": "Idle",
+         "options": ["Idle", "Pack", "Unpack", "Relink"]}]
     starter = {"nodes": {"input": {"type": "modifier_input", "modifier_inputs": starter_inputs},
                            "transform": {"type": "transform", "inputs": {"geo": "input"}},
                            "output": {"type": "output", "inputs": {"geo": "transform"}}},
