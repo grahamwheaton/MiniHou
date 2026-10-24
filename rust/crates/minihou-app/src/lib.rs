@@ -110,6 +110,38 @@ fn foreach_method_and_domain_metadata() {
     assert_eq!(param_meta("for_each", "domain").unwrap()["default"], "points");
     assert_eq!(param_meta("for_each", "domain").unwrap()["options"],
         serde_json::json!(["points", "edges", "faces", "instances"]));
+
+/// Whether the parameters panel shows a parameter. Metadata `visible_when` maps parameter names to the value (or list of
+/// values) they must hold; every condition must match. Parameters missing from `params` use their declared default.
+pub fn param_visible(node_type: &str, meta: Option<&Value>, params: &Value) -> bool {
+    let Some(conditions) = meta.and_then(|m| m["visible_when"].as_object()) else { return true };
+    conditions.iter().all(|(name, expected)| {
+        let current = params.get(name).cloned().or_else(|| minihou_core::nodes::get(node_type)
+            .and_then(|s| s.params.iter().find(|p| p.name == name)).map(|p| (p.default)())).unwrap_or(Value::Null);
+        match expected {
+            Value::Array(options) => options.contains(&current),
+            value => *value == current,
+        }
+    })
+}
+#[cfg(test)]
+#[test]
+fn visible_when_fixture_hides_parameters_by_mode() {
+    let fixture: Value = serde_json::from_str(r#"{
+        "count": {"kind": "int"},
+        "endpoint": {"kind": "vec3", "visible_when": {"mode": "line", "spacing": "endpoint"}},
+        "relative_offset": {"kind": "vec3", "visible_when": {"mode": "line", "spacing": ["relative", "offset"]}}
+    }"#).unwrap();
+    let shown = |name: &str, params: Value| param_visible("array", fixture.get(name), &params);
+    assert!(shown("count", serde_json::json!({})));
+    assert!(!shown("endpoint", serde_json::json!({})), "default spacing is relative");
+    assert!(shown("endpoint", serde_json::json!({"spacing": "endpoint"})));
+    assert!(!shown("endpoint", serde_json::json!({"mode": "grid", "spacing": "endpoint"})));
+    assert!(shown("relative_offset", serde_json::json!({"spacing": "offset"})));
+    assert!(!shown("relative_offset", serde_json::json!({"spacing": "endpoint"})));
+    // The shipped Array metadata uses the same rule.
+    assert!(!param_visible("array", param_meta("array", "endpoint"), &serde_json::json!({})));
+    assert!(param_visible("array", param_meta("array", "endpoint"), &serde_json::json!({"spacing": "endpoint"})));
 }
 pub fn metadata_kind(meta: &Value, default: &Value) -> ParamKind {
     match meta["kind"].as_str() {

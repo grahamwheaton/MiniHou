@@ -223,6 +223,14 @@ mod packages {
     pub(super) fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {
         subnet::public_params(node)
     }
+    pub(crate) fn array_migrate(given: &serde_json::Map<String, serde_json::Value>) -> crate::error::Result<Option<serde_json::Map<String, serde_json::Value>>> {
+        array::migrate(given)
+    }
+}
+
+/// Bring older Array parameters (the legacy `fit_type`) up to the current Line spacing.
+pub(crate) fn array_migrate(given: &serde_json::Map<String, serde_json::Value>) -> crate::error::Result<Option<serde_json::Map<String, serde_json::Value>>> {
+    packages::array_migrate(given)
 }
 
 pub fn subnet_public_params(node: &serde_json::Value) -> Vec<&serde_json::Value> {

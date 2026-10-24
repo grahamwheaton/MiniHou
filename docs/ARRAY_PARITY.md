@@ -1,21 +1,32 @@
-# Array node parity (Blender 5.2 Array Legacy modifier)
+# Array node parity (Blender 5.2 Array)
 
-Reference: [Blender 5.2 manual](https://docs.blender.org/manual/en/5.2/modeling/modifiers/generate/array_legacy.html) and [Blender v5.2.0 `MOD_array.cc`](https://github.com/blender/blender/blob/v5.2.0/source/blender/modifiers/intern/MOD_array.cc). Blender 5.2 also has a newer Array modifier; the options requested here are the **Legacy** modifier's options.
+The MiniHou Array node follows Blender 5.2's node-based **Array** modifier (Line, Grid and Radial shapes), not the
+Array (Legacy) modifier. Parameters are shown by mode through `visible_when` in `param_meta.json`.
 
 | Blender option | Status | Node behaviour / reason |
 | --- | --- | --- |
-| Fixed Count, Count | Implemented | `fit_type=fixed_count`, `count`; includes the source copy. |
-| Fit Length, Length | Implemented | `fit_type=fit_length`, `fit_length`; uses the step translation length and keeps at least one copy. |
-| Fit Curve, Curve | Deferred | Needs a curve object/path input and its evaluated length. |
-| Relative Offset X/Y/Z | Implemented | `relative_offset` multiplies the input bounds on each axis. |
-| Constant Offset X/Y/Z | Implemented | `constant_offset` adds a translation per step. |
-| Object Offset | Differs | `object_offset` input uses a single transform carrier: its point position and, for a packed instance, its `packed_xform` matrix. MiniHou geometry has no Blender object transform; the source object's inverse world transform is unavailable. |
-| Offset enable switches | Differs | Zero vectors disable relative/constant components; connecting `object_offset` enables its component. Separate Blender switches are not exposed. |
-| Merge Vertices, Distance | Differs | `merge_vertices` and positive `merge_distance` weld neighboring copies and touching caps. Distance zero disables welding to preserve existing graphs, while Blender can weld exact matches at zero. |
-| First and Last Copies | Implemented | `merge_first_last` welds the last copy against the first when merging is enabled. Caps are excluded. |
-| UV Offset U/V | Differs | `uv_offset_u` / `uv_offset_v` shift float2 corner attributes named `uv` or `uv_*` by copy index. Blender identifies UV maps by mesh metadata and accepts other names. |
-| Cap Start, End | Implemented | Optional `start_cap` and `end_cap` inputs sit one step before/after the array; touching cap vertices can weld. |
-| Other attributes / materials | Differs | Point, corner, edge and primitive data are copied through MiniHou's geometry merge. Welded points and edges retain the first surviving source attributes. Blender also remaps vertex groups and handles some mesh specific data that MiniHou does not model. |
-| Geometry output | Implemented | One `geometry` output, keeping existing downstream graphs and groups. |
+| Shape: Line | Implemented | `mode=line`, `count` copies including the first. |
+| Line spacing: Relative | Implemented | `spacing=relative`; `relative_offset` multiplies the input size per axis. `constant_offset` is also added so migrated legacy graphs keep their shape. |
+| Line spacing: Offset | Implemented | `spacing=offset`; `constant_offset` is the step. |
+| Line spacing: Endpoint | Implemented | `spacing=endpoint`; the last copy sits at `endpoint`, the rest are spread evenly. |
+| Shape: Grid | Implemented | `mode=grid`, `count_x`, `count_y`, `count_z` (at most 10,000 copies in all). The same spacing modes apply per axis: Relative uses the input size on that axis, Offset a distance, Endpoint the far corner. Neighbours along each axis can weld. |
+| Shape: Radial | Implemented | `mode=radial`; `radial_mode` Count (`count`) or Distance (`distance`, arc length between copies); `radius`, `axis` (X, Y, Z), `angle` in degrees, `align_rotation` (on by default). A full turn spaces copies evenly; a partial angle puts the last copy at the end of the arc. Copy 0 sits at `radius` along the next axis (X about Z, Y about X, Z about Y). |
+| Randomize | Implemented | `random_seed`, `random_position` (per axis, either way), `random_rotation` (degrees per axis, about each copy's origin), `random_scale` with `uniform_scale`, `random_uv`. Each copy draws from a stable hash of (seed, copy number, channel): adding copies never changes existing ones. Copy 0 is randomised too. |
+| Pack / instances | Implemented | `pack` outputs one shared source and one instance point per copy (`packed_xform` holds rotation and scale). UV offsets, random UV and welding are off while packed. Unpack gives the same geometry as the unpacked array without UV offsets or welding. |
+| Merge, Distance | Differs | `merge_vertices` and a positive `merge_distance` weld neighbouring copies. Distance zero disables welding to keep older graphs unchanged. |
+| Merge first and last | Implemented | `merge_first_last` also welds the last copy to the first. |
+| UV Offset U/V | Differs | `uv_offset_u` / `uv_offset_v` shift float2 corner attributes named `uv` or `uv_*` by the copy number. |
+| Copy index output | Implemented | `output_copy_index` writes the point attribute `copy_index` (copy number; also on instance points when packed). |
+| Copy fraction output | Implemented | `output_copy_fraction` writes the point attribute `copy_fraction`, 0 for the first copy and 1 for the last. |
+| Per-copy group | Differs | `output_copies_group` writes the face attribute `array_copies` holding each face's copy number (one attribute instead of one group per copy). Not written when packed. |
+| Object Offset, Start/End Caps | Removed | Dropped in favour of the Blender 5.2 Array options. The node has one `geo` input. |
+| Copy to Curves | Not yet | Planned separately. |
+| Viewport gizmos | Not yet | Planned separately. |
 
-The node limits copies to 10,000 to bound allocations. Blender uses a mesh vertex budget instead. UV layers are MiniHou corner float2 attributes; Blender mesh UV map metadata is not represented separately.
+## Older graphs
+
+Graphs saved with the legacy `fit_type` still load. Fixed Count keeps its offsets and count (Relative spacing).
+Fit Length becomes Endpoint spacing: the count comes from the old length and step, and the last copy lands where it did
+before, so the geometry is unchanged. Other `fit_type` values report an error.
+
+The node limits copies to 10,000 to bound allocations. UV layers are MiniHou corner float2 attributes.
