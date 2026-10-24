@@ -299,4 +299,34 @@ impl App {
             Err(e) => { self.file_status = format!("Open failed: {e}"); false },
         }
     }
+    pub(super) fn new_graph(&mut self) -> bool {
+        if self.link.as_ref().is_some_and(|link| link.live_active()) {
+            self.file_status = "Disconnect the live Blender modifier before opening another document.".into();
+            return false;
+        }
+        let replacement = empty_start_document().and_then(|doc| Self::new_document(doc, PathBuf::from("untitled.json"), self.state.clone(), false));
+        match replacement {
+            Ok(mut app) => {
+                app.target = self.target.take(); app.http = std::mem::take(&mut self.http);
+                app.link = self.link.take(); app.blender = self.blender.clone();
+                app.http_time = self.http_time;
+                let (frame, fps) = app.link.as_ref().map_or(app.http_time, |l| (l.frame, l.fps));
+                app.send(Edit::Time { frame, fps });
+                *self = app;
+                true
+            }
+            Err(e) => { self.file_status = format!("New graph failed: {e}"); false }
+        }
+    }
+}
+
+fn empty_start_document() -> Result<Document> {
+    Document::parse(include_str!("default_graph.json").to_owned())
+}
+
+#[cfg(test)]
+#[test]
+fn new_graph_uses_empty_start_document() {
+    let doc = empty_start_document().unwrap();
+    assert!(doc.graph().nodes.is_empty());
 }
