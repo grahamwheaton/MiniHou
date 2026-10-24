@@ -213,7 +213,8 @@ def _set_file(ng, path):
 
 
 def frozen(ng) -> bool:
-    return bool(ng.get(FREEZE, True))
+    """Freeze result is always on: every network keeps its last cooked mesh."""
+    return True
 
 
 def _blend_dir() -> str:

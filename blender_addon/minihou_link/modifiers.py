@@ -512,10 +512,7 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     starter = {"nodes": {"input": {"type": "modifier_input"},
                            "transform": {"type": "transform", "inputs": {"geo": "input"}},
                            "output": {"type": "output", "inputs": {"geo": "transform"}}},
-               "display": "output", "exposed": [
-                   {"name": "Translate", "node": "transform", "param": "translate"},
-                   {"name": "Scale", "node": "transform", "param": "uniform_scale"},
-                   {"name": "Rotate", "node": "transform", "param": "rotate"}]}
+               "display": "output", "exposed": []}
     header = _connection(host, port).describe(path, None if path else starter)
     mod = obj.modifiers.new("MiniHou", "NODES")
     ng = bpy.data.node_groups.new("MiniHou " + os.path.basename(path), "GeometryNodeTree")

@@ -157,30 +157,13 @@ def draw(layout, mod):
     col.operator("minihou.switch_embed_mode", icon="ARROW_LEFTRIGHT",
                  text="Switch to Linked File" if info["mode"] == embed.EMBEDDED else "Switch to Embedded"
                  ).modifier_name = mod.name
-    on = embed.frozen(ng)
-    box.operator("minihou.toggle_freeze", text=f"Freeze result: {'On' if on else 'Off'}", icon="FREEZE",
-                 depress=on).modifier_name = mod.name
     verts, cost = embed.frozen_cost(ng)
-    if verts and on:
+    if verts:
         box.label(text=f"Saved cooked mesh: {verts:,} points, ~{embed.human_size(cost)}")
 
 
-class MINIHOU_OT_toggle_freeze(_NetworkOp, bpy.types.Operator):
-    bl_idname = "minihou.toggle_freeze"
-    bl_label = "Toggle Freeze Result"
-    bl_description = ("Freeze result: the .blend keeps the last cooked mesh so it opens correctly without MiniHou. "
-                      "Off: the cooked mesh is not saved (smaller file); the object shows its input until MiniHou cooks")
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        def go(context, mod, ng):
-            ng[embed.FREEZE] = not embed.frozen(ng)
-            return "Freeze result " + ("on" if ng[embed.FREEZE] else "off")
-        return self.run(context, go)
-
-
 _classes = (MINIHOU_OT_embed_from_file, MINIHOU_OT_extract_graph, MINIHOU_OT_switch_embed_mode,
-            MINIHOU_OT_resolve_embed, MINIHOU_OT_toggle_freeze)
+            MINIHOU_OT_resolve_embed)
 
 
 def register():
