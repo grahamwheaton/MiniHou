@@ -165,6 +165,24 @@
     "radial"
    ]
   },
+  "output_copies_group": {
+   "default": false,
+   "doc": "Write each face's copy number to the face attribute array_copies, so every copy can be picked out.",
+   "kind": "bool",
+   "visible_when": {
+    "pack": false
+   }
+  },
+  "output_copy_fraction": {
+   "default": false,
+   "doc": "Write the position along the array, 0 for the first copy and 1 for the last, to the point attribute copy_fraction.",
+   "kind": "bool"
+  },
+  "output_copy_index": {
+   "default": false,
+   "doc": "Write the copy number (0 for the first) to the point attribute copy_index.",
+   "kind": "bool"
+  },
   "pack": {
    "default": false,
    "doc": "Output one shared copy of the input and one instance point per copy instead of real geometry. UV offsets and welding are off while packed; Unpack gives the real copies.",

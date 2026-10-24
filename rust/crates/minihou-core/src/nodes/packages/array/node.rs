@@ -14,7 +14,7 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
         "radial_mode": "count"; "distance": 1.0; "radius": 1.0; "axis": "z"; "angle": 360.0; "align_rotation": true;
         "random_seed": 0; "random_position": [0., 0., 0.]; "random_rotation": [0., 0., 0.];
         "random_scale": 0.0; "uniform_scale": true; "random_uv": 0.0;
-        "pack": false;
+        "pack": false; "output_copy_index": false; "output_copy_fraction": false; "output_copies_group": false;
         "legacy_fit_length": -1.0;
         "merge_vertices": true; "merge_distance": 0.0; "merge_first_last": false;
         "uv_offset_u": 0.0; "uv_offset_v": 0.0
@@ -310,6 +310,9 @@ fn layout(g: &Geometry, p: &Params) -> Result<Layout> {
     }
 }
 
+/// The copy number and its position along the array, 0 for the first copy and 1 for the last.
+fn fraction(k: usize, count: usize) -> f32 { if count > 1 { k as f32 / (count - 1) as f32 } else { 0. } }
+
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = NODE.one(inputs, 0)?;
     let dist = p.f("merge_distance")?;
@@ -325,17 +328,28 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         let positions = xf.iter().flat_map(|x| x.t).collect::<Vec<f64>>();
         if positions.iter().any(|v| !v.is_finite() || v.abs() > f32::MAX as f64) { return Err(Error::new("array position exceeds float32 range")); }
         let matrices: Vec<M3> = xf.iter().map(|x| x.m).collect();
+        let mut attrs = crate::geometry::AttrTable::new();
+        if p.b("output_copy_index")? { attrs.insert("copy_index".into(), Arc::new(Attr::i32(1, (0..count as i32).collect()))); }
+        if p.b("output_copy_fraction")? {
+            attrs.insert("copy_fraction".into(), Arc::new(Attr::f32(1, (0..count).map(|k| fraction(k, count)).collect())));
+        }
         return packed::instance_geometry(std::slice::from_ref(&g), &vec![0; count],
-            positions.into_iter().map(|v| v as f32).collect(), &matrices, Default::default());
+            positions.into_iter().map(|v| v as f32).collect(), &matrices, attrs);
     }
     let estimated = g.npoints.checked_mul(count).ok_or_else(|| Error::new("array point count overflow"))?;
     if estimated > crate::geometry::MAX_ELEMENTS { return Err(Error::new("array exceeds geometry point limit")); }
     let mut parts = Vec::with_capacity(count);
+    let (want_index, want_fraction, want_group) =
+        (p.b("output_copy_index")?, p.b("output_copy_fraction")?, p.b("output_copies_group")?);
     for (k, x) in xf.iter().enumerate() {
-        parts.push(Arc::new(transformed(&g, *x, {
+        let mut part = transformed(&g, *x, {
             let r = random.uv(k);
             [uv[0] * k as f32 + r[0], uv[1] * k as f32 + r[1]]
-        })?));
+        })?;
+        if want_index { part.point.insert("copy_index".into(), Arc::new(Attr::i32(1, vec![k as i32; g.npoints]))); }
+        if want_fraction { part.point.insert("copy_fraction".into(), Arc::new(Attr::f32(1, vec![fraction(k, count); g.npoints]))); }
+        if want_group { part.prim.insert("array_copies".into(), Arc::new(Attr::i32(1, vec![k as i32; g.nprims()]))); }
+        parts.push(Arc::new(part));
     }
     let mut merged = (MERGE.cook)(&[parts.clone()], p)?;
     restore_edge_attributes(&mut merged, &parts)?;

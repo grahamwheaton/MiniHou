@@ -246,3 +246,25 @@ fn pack_makes_one_instance_per_copy_and_unpacks_to_the_plain_array() {
     // UV offsets are off while packed.
     assert_eq!(real.vertex["uv"].as_f32().unwrap(), &quad().vertex["uv"].as_f32().unwrap().repeat(5)[..]);
 }
+#[test]
+fn optional_copy_index_output() {
+    assert!(!run(quad(), json!({"count":3})).point.contains_key("copy_index"));
+    let out = run(quad(), json!({"count":3,"output_copy_index":true}));
+    assert_eq!(out.point["copy_index"].data, AttrData::I32(vec![0,0,0,0, 1,1,1,1, 2,2,2,2]));
+    let inst = run(quad(), json!({"count":3,"pack":true,"output_copy_index":true}));
+    assert_eq!(inst.point["copy_index"].data, AttrData::I32(vec![0,1,2]));
+}
+#[test]
+fn optional_copy_fraction_output() {
+    assert!(!run(quad(), json!({"count":3})).point.contains_key("copy_fraction"));
+    let out = run(Geometry::points_only(vec![0.,0.,0.]).unwrap(), json!({"count":5,"output_copy_fraction":true}));
+    assert_eq!(out.point["copy_fraction"].data, AttrData::F32(vec![0.,0.25,0.5,0.75,1.]));
+    let one = run(Geometry::points_only(vec![0.,0.,0.]).unwrap(), json!({"count":1,"output_copy_fraction":true}));
+    assert_eq!(one.point["copy_fraction"].data, AttrData::F32(vec![0.]));
+}
+#[test]
+fn optional_array_copies_group_numbers_each_copy() {
+    assert!(!run(quad(), json!({"count":3})).prim.contains_key("array_copies"));
+    let out = run(quad(), json!({"mode":"grid","count_x":2,"count_y":2,"count_z":1,"output_copies_group":true,"merge_distance":0.001}));
+    assert_eq!(out.prim["array_copies"].data, AttrData::I32(vec![0,1,2,3]));
+}
