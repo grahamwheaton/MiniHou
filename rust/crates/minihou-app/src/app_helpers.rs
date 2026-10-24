@@ -202,6 +202,20 @@ pub(super) fn transform_keeps_measurement_point_identity() {
 pub(super) fn pushpull_starts_now(mode: ui::SelectionMode, selection: &picking::Selection) -> bool {
     mode == ui::SelectionMode::Faces && selection.mode == ui::SelectionMode::Faces && !selection.tris.is_empty()
 }
+/// Face-mode Extrude and Inset keep the original face ids selected through the cooks
+/// (both cook through `model::extrude`, whose front face keeps the source prim ids), so a
+/// following E/I starts the modal on that face instead of the no-selection default node.
+pub(super) fn keeps_face_selection(kind: ui::modal_model::Kind, mode: ui::SelectionMode) -> bool {
+    matches!(kind, ui::modal_model::Kind::Extrude | ui::modal_model::Kind::Inset) && mode == ui::SelectionMode::Faces
+}
+/// Extrude/Inset/Bevel keys: true starts the interactive modal, false adds the node with
+/// its default parameters (object mode or nothing selected).
+pub(super) fn model_key_starts_modal(kind: ui::modal_model::Kind, mode: ui::SelectionMode, selection: &picking::Selection) -> bool {
+    use ui::modal_model::Kind;
+    let has_selection = if matches!(kind, Kind::Extrude | Kind::Bevel) { !selection.is_empty() }
+        else { mode == ui::SelectionMode::Faces && !selection.tris.is_empty() };
+    mode != ui::SelectionMode::Object && has_selection
+}
 /// The active node after undo/redo: kept when it still exists, else the displayed node.
 pub(super) fn surviving_selection(value: &Value, selected: &str, display: &str) -> String {
     if value["nodes"].get(selected).is_some() { selected.to_owned() } else { display.to_owned() }

@@ -48,7 +48,7 @@ impl App {
             self.file_status=format!("Could not add {}",kind.node()); return;
         };
         self.model_before_selection=Some((self.selection.clone(),self.stashed_selection.clone()));
-        self.extrude_keep=(kind==ModelKind::Extrude && self.editor_state.selection==ui::SelectionMode::Faces).then(||self.selection.clone());
+        self.extrude_keep=keeps_face_selection(kind,self.editor_state.selection).then(||self.selection.clone());
         self.finish_history();
         let before=self.editor.doc.clone();
         self.editor.doc=doc;

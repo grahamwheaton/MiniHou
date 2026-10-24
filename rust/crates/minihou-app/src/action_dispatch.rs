@@ -300,9 +300,7 @@ impl App {
                     self.file_status="Push / Pull: hover a face and click to pick it".into();
                     return;
                 }
-                let has_selection=if matches!(kind,ModelKind::Extrude | ModelKind::Bevel) { !self.selection.is_empty() }
-                    else { self.editor_state.selection==ui::SelectionMode::Faces && !self.selection.tris.is_empty() };
-                if self.editor_state.selection==ui::SelectionMode::Object || !has_selection {
+                if !model_key_starts_modal(kind,self.editor_state.selection,&self.selection) {
                     let after=self.selected.clone(); self.add_node(ctx,kind.node(),Some(&after),false);
                 } else { self.start_model_modal(ctx,kind); }
             }

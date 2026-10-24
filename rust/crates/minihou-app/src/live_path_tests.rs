@@ -299,6 +299,48 @@ fn extrude_keeps_original_face_selected() {
 }
 
 #[test]
+fn e_after_inset_starts_the_extrude_modal_on_the_inner_face() {
+    use crate::ui::{modal_model::{Kind, State}, SelectionMode};
+    let doc = json!({"version":1,"display":"out","nodes":{
+        "box1":{"type":"box"},
+        "in1":{"type":"inset","inputs":{"geo":"box1"},"params":{"group":"0","amount":0.1}},
+        "out":{"type":"output","inputs":{"geo":"in1"}}}});
+    let s0 = Scene::new(&cook(&doc, "box1"));
+    let topo = element_select::Topology::new(s0.positions(), s0.triangle_indices(), s0.edge_indices());
+    let tris: Vec<u32> = (0..s0.triangle_indices().len() as u32 / 3).filter(|&t| topo.poly_of_tri(t) == Some(0)).collect();
+    let sel = crate::picking::Selection { mode: SelectionMode::Faces, tris: tris.clone(), ..Default::default() };
+    // Inset keeps the face selection through its cooks, like Extrude.
+    assert!(crate::keeps_face_selection(Kind::Inset, SelectionMode::Faces));
+    assert!(crate::keeps_face_selection(Kind::Extrude, SelectionMode::Faces));
+    let scene = Scene::new(&cook(&doc, "out"));
+    let kept = crate::keep_extrude_selection(&sel, &scene).expect("selection kept after inset");
+    // The kept ids are the inset's inner face: same centre, smaller area.
+    let (p0, p1) = (s0.positions(), scene.positions());
+    let stats = |p: &[f32], idx: &[u32]| { let mut c = [0f32; 3]; let mut area = 0f32;
+        for &t in &tris { let ids: [u32; 3] = idx[t as usize * 3..t as usize * 3 + 3].try_into().unwrap();
+            let v = ids.map(|i| [p[i as usize * 3], p[i as usize * 3 + 1], p[i as usize * 3 + 2]]);
+            let (u, w) = ([0, 1, 2].map(|k| v[1][k] - v[0][k]), [0, 1, 2].map(|k| v[2][k] - v[0][k]));
+            let n = [u[1]*w[2]-u[2]*w[1], u[2]*w[0]-u[0]*w[2], u[0]*w[1]-u[1]*w[0]];
+            area += (n[0]*n[0]+n[1]*n[1]+n[2]*n[2]).sqrt() / 2.;
+            for k in 0..3 { c[k] += (v[0][k] + v[1][k] + v[2][k]) / 3. / tris.len() as f32; } }
+        (c, area) };
+    let ((c0, a0), (c1, a1)) = (stats(p0, s0.triangle_indices()), stats(p1, scene.triangle_indices()));
+    assert!((0..3).all(|k| (c0[k] - c1[k]).abs() < 1e-4), "{c0:?} vs {c1:?}");
+    assert!(a1 < a0 * 0.95 && a1 > 0.);
+    // E now starts the modal (not the fixed-distance default node) ...
+    assert!(crate::model_key_starts_modal(Kind::Extrude, SelectionMode::Faces, &kept));
+    // ... while an empty selection (the old post-inset state) took the default path.
+    let empty = crate::picking::Selection { mode: SelectionMode::Faces, ..Default::default() };
+    assert!(!crate::model_key_starts_modal(Kind::Extrude, SelectionMode::Faces, &empty));
+    // The modal distance starts at 0 and comes from the mouse, or from typed input.
+    let mut s = State::new(Kind::Extrude, eframe::egui::pos2(0., 0.), 0.01);
+    s.screen_axis = eframe::egui::vec2(0., -1.);
+    assert_eq!(s.value, 0.);
+    s.move_to(eframe::egui::pos2(0., -20.), false, false); assert!((s.value - 0.2).abs() < 1e-5);
+    s.key_event(eframe::egui::Key::Num3, false); assert_eq!(s.value, 3.);
+}
+
+#[test]
 fn undo_of_a_removed_node_selects_the_node_that_fed_it() {
     let old=json!({"nodes":{"box1":{"type":"box"},"pp":{"type":"pushpull","inputs":{"geo":"box1"}},"other":{"type":"box"},"out":{"type":"output","inputs":{"geo":"pp"}}}});
     let new=json!({"nodes":{"box1":{"type":"box"},"other":{"type":"box"},"out":{"type":"output","inputs":{"geo":"box1"}}}});
