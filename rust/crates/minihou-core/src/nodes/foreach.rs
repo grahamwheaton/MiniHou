@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::{Inputs,NodeSpec,GEO};
 use crate::{error::{Error,Result},geometry::{AttrData,Geometry},params::Params};
 pub const FOR_EACH:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"for_each",inputs:GEO,params:crate::params!(
-    "body":"";"params":"{}";"piece":"connectivity";"attribute":"class";"max_pieces":1000),cook:for_each};
+    "body":"";"params":"{}";"piece":"connectivity";"method":"connected";"domain":"points";"attribute":"class";"max_pieces":1000),cook:for_each};
 thread_local!{static DEPTH:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};}
 struct Depth;
 impl Drop for Depth{fn drop(&mut self){DEPTH.with(|d|d.set(d.get()-1));}}
@@ -43,6 +43,23 @@ fn for_each(inputs:&Inputs,p:&Params)->Result<Geometry>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    use serde_json::json;
+    #[test]
+    fn method_defaults_and_legacy_graph_round_trip() {
+        let defaults = Params::resolve(FOR_EACH.params, None).unwrap();
+        assert_eq!(defaults.s("method").unwrap(), "connected");
+        assert_eq!(defaults.s("domain").unwrap(), "points");
+        for piece in ["connectivity", "attribute", "primitive"] {
+            let saved = json!({"display":"each","nodes":{
+                "input":{"type":"point"},
+                "each":{"type":"for_each","inputs":{"geo":"input"},
+                    "params":{"body":"null","piece":piece}}
+            }});
+            let graph = crate::graph::Graph::from_value(&saved).unwrap();
+            assert_eq!(graph.to_value(), saved);
+            if piece != "attribute" { let _ = graph.cook(None).unwrap(); }
+        }
+    }
     #[test]
     fn primitive_pieces_duplicate_shared_points_and_clear_iteration(){
         let g=Geometry::from_arrays(vec![0.,0.,0.,1.,0.,0.,2.,0.,0.],vec![0,1,1,2],vec![0,2,4],Some(vec![false,false])).unwrap();

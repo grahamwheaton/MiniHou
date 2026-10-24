@@ -2482,6 +2482,19 @@
   }
  },
  "for_each": {
+  "method": {
+   "default": "connected",
+   "doc": "Connected pieces, shared attribute values, or individual elements of the chosen domain",
+   "kind": "enum",
+   "options": ["connected", "attribute", "domain"]
+  },
+  "domain": {
+   "default": "points",
+   "doc": "Element domain for Method = Domain; Points is the default",
+   "enabled_if": {"method": "domain"},
+   "kind": "enum",
+   "options": ["points", "edges", "faces", "instances"]
+  },
   "attribute": {
    "default": "class",
    "doc": "piece = attribute: a primitive attribute (e.g. from connectivity or a wrangle)",
@@ -2506,7 +2519,7 @@
   },
   "piece": {
    "default": "connectivity",
-   "doc": "connectivity: each connected piece; attribute: primitives sharing a value of 'attribute'; primitive: every primitive alone",
+   "doc": "Legacy saved-graph mode. Use Method for new graphs.",
    "kind": "enum",
    "options": [
     "connectivity",

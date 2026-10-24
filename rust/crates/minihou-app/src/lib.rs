@@ -102,6 +102,15 @@ fn missing_metadata_uses_declared_parameter() {
     assert_eq!(fallback["kind"], "int");
     assert!(param_meta_from(&empty, "grid", "unknown").is_none());
 }
+#[cfg(test)]
+#[test]
+fn foreach_method_and_domain_metadata() {
+    assert_eq!(param_meta("for_each", "method").unwrap()["options"],
+        serde_json::json!(["connected", "attribute", "domain"]));
+    assert_eq!(param_meta("for_each", "domain").unwrap()["default"], "points");
+    assert_eq!(param_meta("for_each", "domain").unwrap()["options"],
+        serde_json::json!(["points", "edges", "faces", "instances"]));
+}
 pub fn metadata_kind(meta: &Value, default: &Value) -> ParamKind {
     match meta["kind"].as_str() {
         Some("int") => ParamKind::Integer,

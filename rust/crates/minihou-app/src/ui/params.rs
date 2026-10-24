@@ -120,6 +120,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                 let mut section=None;
                 if typ == "attribute_create" { attribute_domain_row(ui,v,out,id,flags.locked); }
                 for param in spec.params {
+                    if typ == "for_each" && param.name == "piece" { continue; }
                     if typ == "switchif" && matches!(param.name,
                         "mergecondition" | "testinput" | "numtests" | "tests" |
                         "enable" | "test_type" | "type" | "enable_value" | "expr") { continue; }
