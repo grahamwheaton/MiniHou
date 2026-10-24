@@ -270,7 +270,9 @@ impl eframe::App for App {
                     }
                 }
                 if !fly_frame && !region_frame && response.hovered() && (self.modal.is_none() || !self.modal.as_ref().is_some_and(|m| m.proportional)) && self.model_modal.is_none()
-                    && !matches!(self.editor_state.tool, ui::Tool::LoopCut | ui::Tool::EdgeSlide) && !ui::mesh_cut::captures_wheel(ctx) {
+                    && !matches!(self.editor_state.tool, ui::Tool::LoopCut | ui::Tool::EdgeSlide)
+                    && !(self.editor_state.tool == ui::Tool::Knife && ctx.input(|i| i.modifiers.ctrl))
+                    && !ui::mesh_cut::captures_wheel(ctx) {
                     let delta=ctx.input(|i| i.smooth_scroll_delta.y);
                     if delta!=0. {
                         let pos=ctx.input(|i|i.pointer.hover_pos());
