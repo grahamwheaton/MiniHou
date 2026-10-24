@@ -115,6 +115,9 @@ impl Gpu {
         }];
         const TEX_ATTRS:[wgpu::VertexAttribute;5]=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x3,3=>Float32x2,4=>Float32];
         let tex_bufs=[wgpu::VertexBufferLayout {array_stride:std::mem::size_of::<TexVertex>() as u64,step_mode:wgpu::VertexStepMode::Vertex,attributes:&TEX_ATTRS}];
+        const UV_INST_ATTRS:[wgpu::VertexAttribute;4]=wgpu::vertex_attr_array![5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4];
+        let uv_inst_bufs=[wgpu::VertexBufferLayout {array_stride:std::mem::size_of::<TexVertex>() as u64,step_mode:wgpu::VertexStepMode::Vertex,attributes:&TEX_ATTRS},
+            wgpu::VertexBufferLayout {array_stride:std::mem::size_of::<InstanceVertex>() as u64,step_mode:wgpu::VertexStepMode::Instance,attributes:&UV_INST_ATTRS}];
 
         let mk = |label, vs, fs, bufs: &[wgpu::VertexBufferLayout], topo, bias: i32, blend: bool, compare, depth_write: bool, color_write| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -162,6 +165,8 @@ impl Gpu {
         let pipe_uv_preview=mk("UV preview","vs_tex","fs_uv_preview",&tex_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
         let pipe_uv_preview_bias=mk("UV preview+bias","vs_tex","fs_uv_preview",&tex_bufs,T::TriangleList,2,false,C::LessEqual,true,W::ALL);
         let pipe_uv_preview_xray=mk("UV preview xray","vs_tex","fs_uv_preview_xray",&tex_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
+        let pipe_uv_inst=mk("UV packed full geometry","vs_uv_inst","fs_uv_preview",&uv_inst_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
+        let pipe_uv_inst_xray=mk("UV packed xray","vs_uv_inst","fs_uv_preview_xray",&uv_inst_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
         let pipe_surf_bias = mk("surf+bias", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 2, false, C::LessEqual, true, W::ALL);
         let pipe_wire = mk("wire", "vs_wire", "fs_wire", &wire_bufs, T::LineList, -1, true, C::LessEqual, false, W::ALL);
         let pipe_wire_all = mk("all edges", "vs_wire", "fs_wire", &wire_bufs, T::LineList, 0, true, C::Always, false, W::ALL);
@@ -308,7 +313,7 @@ impl Gpu {
         let mut out=Self {
             packed:Vec::new(),packed_cut_cache:std::sync::Mutex::new(None),pipe_inst_surf,pipe_inst_wire,pipe_inst_wire_all,pipe_inst_wire_hidden,
             pipe_inst_ghost_wire,pipe_inst_depth,pipe_inst_xray,pipe_inst_ghost,pipe_inst_mask,
-            tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,pipe_uv_preview,pipe_uv_preview_bias,pipe_uv_preview_xray,tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
+            tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,pipe_uv_preview,pipe_uv_preview_bias,pipe_uv_preview_xray,pipe_uv_inst,pipe_uv_inst_xray,uv_batch:UvBatch::empty(),uv_packed:Vec::new(),tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
             pipe_floor,z_axis,pipe_z_axis,
             face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,pipe_face_markers_xray,
             elements:Elements::new(device,sc,&[],&[]),element_points:Vec::new(),pipe_elements,pipe_elements_ghost,
@@ -356,6 +361,7 @@ impl Gpu {
             edge_world: edge_world_of(sc,edge),
         };
         out.upload_packed(device,sc);
+        out.upload_uv_preview(device,sc);
         out
     }
 }

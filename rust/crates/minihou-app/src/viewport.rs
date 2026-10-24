@@ -22,6 +22,7 @@ use elements::{Element, Elements, points_visible, split_point_crosses};
 mod gpu_setup;
 mod mesh_buffers;
 mod textures;
+mod uv_preview;
 mod overlays;
 mod camera_grid;
 mod draw;
@@ -31,6 +32,7 @@ use uploads::{MeshSource, MeshChunk, upload_chunks, box_chunks, capped_normal_ve
 pub use camera_grid::Target;
 use camera_grid::{DEPTH, inverse_projection};
 use textures::TextureBatch;
+use uv_preview::{UvBatch, PackedUvGpu};
 use mesh_buffers::{Boxes, Partition, edge_world_of, sharp_edges, sharp_edges_indices, index_buffer, object_mask_indices, packed_cut};
 
 const SKETCHUP_CREASE_DEGREES: f32 = 30.0;
@@ -72,6 +74,8 @@ pub struct Overlay { pub grid: bool, pub axes: bool, pub geometry: crate::ui::Ov
 struct TexVertex { p:[f32;3], n:[f32;3], color:[f32;3], uv:[f32;2], valid:f32 }
 #[derive(Clone)]
 struct SurfaceTri { vertices:[TexVertex;3], points:[u32;3], prim:u32, slot:String, uv_sets:BTreeMap<String,[[f32;2];3]> }
+#[derive(Clone)]
+struct UvTri { vertices:[TexVertex;3], points:[u32;3] }
 
 pub struct Scene {
     p: Vec<f32>, n: Vec<f32>, point: Vec<u32>, line: Vec<u32>, tri: Vec<u32>, edge: Vec<u32>,
@@ -81,7 +85,7 @@ pub struct Scene {
     /// The eight corners of the bounding box.
     bbp: [f32; 24],
     pub center: [f32;3], pub radius: f32,
-    textured:Vec<SurfaceTri>,
+    textured:Vec<SurfaceTri>, uv_triangles:Vec<UvTri>,
     /// Per-point display colour from the `Cd` attribute (point, vertex or primitive domain, averaged onto points); None without Cd.
     cd:Option<Vec<f32>>,
     packed_sources:Vec<PackedSource>,
@@ -133,6 +137,8 @@ pub struct Gpu {
     pipe_inst_xray:wgpu::RenderPipeline,pipe_inst_ghost:wgpu::RenderPipeline,pipe_inst_mask:wgpu::RenderPipeline,
     tex_bgl:wgpu::BindGroupLayout, default_tex_bind:wgpu::BindGroup, pipe_tex:wgpu::RenderPipeline, pipe_tex_bias:wgpu::RenderPipeline, pipe_tex_xray:wgpu::RenderPipeline,
     pipe_uv_preview:wgpu::RenderPipeline, pipe_uv_preview_bias:wgpu::RenderPipeline, pipe_uv_preview_xray:wgpu::RenderPipeline,
+    pipe_uv_inst:wgpu::RenderPipeline, pipe_uv_inst_xray:wgpu::RenderPipeline,
+    uv_batch:UvBatch, uv_packed:Vec<PackedUvGpu>,
     tex_batches:Vec<TextureBatch>, texture_status:Vec<String>,
     gpu_images:HashMap<String,(wgpu::TextureView,usize,u64)>, gpu_tick:u64,
     pipe_surf: wgpu::RenderPipeline, pipe_surf_bias: wgpu::RenderPipeline, pipe_wire: wgpu::RenderPipeline,
@@ -258,7 +264,7 @@ fn cube(extra:bool) -> Geometry {
         }).collect();
         let scene=Scene {p,n:vec![0.,0.,1.].repeat(4),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],
             point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
-            nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:1.5,textured,cd:None,packed_sources:Vec::new(),auto_lod:None};
+            nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:1.5,textured,uv_triangles:Vec::new(),cd:None,packed_sources:Vec::new(),auto_lod:None};
         let mut gpu=Gpu::new(&device,&scene);
         let mut registry=Registry::new(".");
         // The red F has a top bar and left stem. A V mirror puts its bar at the bottom.
@@ -373,7 +379,7 @@ fn cube(extra:bool) -> Geometry {
             pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
             nlp: Vec::new(), nln: Vec::new(), normal_points:Vec::new(), bbp: [0.0; 24],
             center: [0.0, 0.0, 0.0], radius: 1.5,
-            textured:Vec::new(), cd:None,packed_sources:Vec::new(),auto_lod:None,
+            textured:Vec::new(), uv_triangles:Vec::new(), cd:None,packed_sources:Vec::new(),auto_lod:None,
         };
 
         let gpu = Gpu::new(&device, &scene);

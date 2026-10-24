@@ -27,7 +27,7 @@ fn scene() -> Scene {
         nlp.extend_from_slice(p); nlp.extend((0..3).map(|k| p[k]+n[k]*0.2));
         nln.extend_from_slice(n); nln.extend_from_slice(n);
     }
-    Scene { p,n,tri,edge,point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),nlp,nln,normal_points:(0..8).collect(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new(),cd:None,packed_sources:Vec::new(),auto_lod:None }
+    Scene { p,n,tri,edge,point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),nlp,nln,normal_points:(0..8).collect(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new(),uv_triangles:Vec::new(),cd:None,packed_sources:Vec::new(),auto_lod:None }
 }
 pub(super) fn render(device:&wgpu::Device,queue:&wgpu::Queue,gpu:&Gpu,mode:Mode,overlay:Overlay,outline:bool)->Vec<[u8;4]> {
     render_selection(device,queue,gpu,mode,overlay,outline,crate::ui::SelectionMode::Object)
@@ -102,6 +102,37 @@ fn uv_preview_shader_renders_checker_missing_and_minified_uvs() {
     assert!(missing[0]>missing[1]+70 && missing[2]>missing[1]+40,"missing {missing:?}");
     let minified=sample([[0.,0.],[100.,0.],[100.,100.],[0.,100.]],1.);
     assert!(minified[0]>dark[0]+30 && minified[0]<light[0]-30,"minified {minified:?}");
+}
+
+#[test]
+fn packed_uv_preview_renders_full_source_at_each_instance_transform() {
+    let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping packed UV preview test");return;};
+    use minihou_core::{geometry::Attr,nodes::packed::instance_geometry,math::IDENTITY};
+    use std::sync::Arc;
+    let camera=Camera::frame([0.;3],2.5);
+    let (_,view)=camera.matrices(1.);
+    let right=[view[0][0],view[1][0],view[2][0]];
+    let up=[view[0][1],view[1][1],view[2][1]];
+    let mut p=Vec::new();
+    for (x,y) in [(-0.45,-0.65),(0.45,-0.65),(0.45,0.65),(-0.45,0.65)] {
+        p.extend((0..3).map(|k|right[k]*x+up[k]*y));
+    }
+    let mut source=minihou_core::Geometry::from_arrays(p,vec![0,1,2,3],vec![0,4],None).unwrap();
+    source.point.insert("uv".into(),Arc::new(Attr::f32(2,vec![0.01,0.01].repeat(4))));
+    let positions=[-0.6,0.6].into_iter().flat_map(|x|right.map(|v|v*x)).collect();
+    let packed=instance_geometry(&[Arc::new(source)],&[0,0],positions,&[IDENTITY;2],Default::default()).unwrap();
+    let scene=Scene::new(&packed);
+    let gpu=Gpu::new(&device,&scene);
+    assert_eq!(gpu.uv_packed.len(),1);
+    assert_eq!(gpu.uv_packed[0].total,2);
+    assert_eq!(gpu.uv_packed[0].batch.chunks.iter().map(|c|c.total).sum::<u32>(),6);
+    let options=Overlay {geometry:crate::ui::Overlays {uv_preview:true,lines:false,points:false,wireframe:false,..Default::default()},..Default::default()};
+    let checked=render(&device,&queue,&gpu,Mode::SmoothShaded,options,false);
+    let plain=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {geometry:crate::ui::Overlays {uv_preview:false,..options.geometry},..options},false);
+    for x in [46,82] {
+        let index=64*128+x;
+        assert!(checked[index][0]>plain[index][0]+20,"instance at {x}: {:?} vs {:?}",checked[index],plain[index]);
+    }
 }
 
 #[test]
@@ -204,7 +235,7 @@ fn random_objects_and_normal_matcap_headless() {
     for half in [0..64,64..128] {
         assert!((0..128).flat_map(|y|half.clone().map(move |x|y*128+x)).filter(|&i|single[i]!=random[i]).count()>50);
     }
-    let mut plane=Scene {p:Vec::new(),n:Vec::new(),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new(),cd:None,packed_sources:Vec::new(),auto_lod:None};
+    let mut plane=Scene {p:Vec::new(),n:Vec::new(),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new(),uv_triangles:Vec::new(),cd:None,packed_sources:Vec::new(),auto_lod:None};
     let cam=Camera::frame([0.;3],2.5); let (_,view)=cam.matrices(1.);
     let right=[view[0][0],view[1][0],view[2][0]];
     let up=[view[0][1],view[1][1],view[2][1]];
@@ -384,6 +415,8 @@ fn mhl1_image_asset_and_seam_geometry_render_together_headless() {
     let (header,arrays)=link_protocol::read_message(&mut std::io::Cursor::new(frame),2*1024*1024).unwrap();
     let geometry=link_protocol::decode_object(&header,&arrays).unwrap();
     let scene=Scene::new(&geometry);
+    assert_eq!(scene.uv_triangles.len(),2);
+    assert!(scene.uv_triangles.iter().all(|t|t.vertices.iter().all(|v|v.valid==1.)));
     let png=include_bytes!("test_data/blender_orientation_source.png");
     let hash=format!("sha256:{:x}",Sha256::digest(&png));
     let mut service=Service::default();service.manifest("peer1:object:Seam",1,serde_json::json!({
@@ -392,7 +425,10 @@ fn mhl1_image_asset_and_seam_geometry_render_together_headless() {
     service.begin("x",&hash,png.len()).unwrap();service.chunk("x",0,png).unwrap();service.end("x").unwrap();
     let mut registry=Registry::new(".");service.bind("peer1:object:Seam",&mut registry).unwrap();
     let mut gpu=Gpu::new(&device,&scene);gpu.upload_textures(&device,&queue,&scene,&mut registry);
+    assert_eq!(gpu.uv_batch.chunks.iter().map(|c|c.total).sum::<u32>(),6);
     let pixels=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:true,geometry:crate::ui::Overlays {points:false,lines:false,wireframe:false,..Default::default()},..Default::default()},false);
+    let checked=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:true,geometry:crate::ui::Overlays {uv_preview:true,points:false,lines:false,wireframe:false,..Default::default()},..Default::default()},false);
+    assert!(changed(&pixels,&checked)>100);
     for (x,y,channel) in [(56,56,0),(80,48,1),(48,80,2)] {
         let p=pixels[y*128+x];assert!(u16::from(p[channel])>u16::from(p[(channel+1)%3])+40 && u16::from(p[channel])>u16::from(p[(channel+2)%3])+40,"{x},{y}: {p:?}");
     }

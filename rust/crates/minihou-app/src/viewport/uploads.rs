@@ -208,6 +208,7 @@ impl Gpu {
         self.bb_chunks=box_chunks(device,sc,limit);
         self.bb_p=buf("bb_p",bytemuck::cast_slice(if self.bb_chunks.is_empty() {&sc.bbp[..]} else {&[0.;3][..]}),wgpu::BufferUsages::VERTEX);
         self.upload_packed(device,sc);
+        self.upload_uv_preview(device,sc);
         if std::env::var_os("MINIHOU_VIEWPORT_TIMING").is_some() {
             eprintln!("viewport Gpu::upload: points={} triangles={} ms={:.3}", sc.p.len()/3, sc.tri.len()/3, started.elapsed().as_secs_f64()*1000.0);
         }
@@ -228,10 +229,12 @@ impl Gpu {
         self.mask_chunks = self.mesh_source.as_ref().map_or_else(Vec::new, |source| upload_chunks(device,source,&indices,3,&[],self.chunk_limit()));
         self.partition_tri=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_tri},3,&ranges);
         for batch in &mut self.tex_batches {batch.repartition(device,&ranges);}
+        self.uv_batch.repartition(device,&ranges);
         self.partition_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.current_edge},2,&ranges);
         self.sharp_edge=Partition::new(device,if self.mesh_source.is_some() {&[]} else {&self.sharp_edge_indices},2,&ranges);
         self.object_mask_points = Some(ranges.clone());
         self.update_packed_instances(device);
+        self.update_uv_packed_instances(device);
         self.rebuild_chunks(device);
         self.boxes=None;
         let (mut p,mut n)=(Vec::with_capacity(scene.nlp.len()),Vec::with_capacity(scene.nln.len()));

@@ -102,6 +102,20 @@ fn vs_tex(@location(0) p:vec3<f32>, @location(1) n:vec3<f32>, @location(2) color
     return o;
 }
 
+@vertex
+fn vs_uv_inst(@location(0) p:vec3<f32>,@location(1) n:vec3<f32>,@location(2) color:vec3<f32>,
+    @location(3) uv:vec2<f32>,@location(4) valid:f32,
+    @location(5) r0:vec4<f32>,@location(6) r1:vec4<f32>,@location(7) r2:vec4<f32>,@location(8) tint:vec4<f32>)->VOut {
+    let world=instance_position(p,r0,r1,r2);
+    var o:VOut;
+    o.pos=u.view_proj*vec4<f32>(world,1.0);
+    o.vpos=(u.view*vec4<f32>(world,1.0)).xyz;
+    o.vnorm=(u.view*vec4<f32>(instance_normal(n,r0,r1,r2),0.0)).xyz;
+    o.vcolor=color*tint.rgb;
+    o.uv=uv;o.uv_valid=valid;
+    return o;
+}
+
 fn textured(i:VOut,front:bool)->vec3<f32> {
     var rgb:vec3<f32>;
     if (i.uv_valid < 0.5) {
