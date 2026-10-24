@@ -449,6 +449,13 @@
     "first"
    ]
   },
+  "selection": {
+   "default": "",
+   "doc": "Optional selected elements or group in the chosen domain; empty selects all",
+   "kind": "str",
+   "pick_domain_param": "domain",
+   "pick_domain_default": "points"
+  },
   "name": {
    "default": "Cd",
    "doc": "Attribute to move (wildcards promote several)",
@@ -2555,6 +2562,19 @@
   }
  },
  "for_each": {
+  "method": {
+   "default": "connected",
+   "doc": "Connected pieces, shared attribute values, or individual elements of the chosen domain",
+   "kind": "enum",
+   "options": ["connected", "attribute", "domain"]
+  },
+  "domain": {
+   "default": "points",
+   "doc": "Element domain for Method = Domain; Points is the default",
+   "enabled_if": {"method": "domain"},
+   "kind": "enum",
+   "options": ["points", "edges", "faces", "instances"]
+  },
   "attribute": {
    "default": "class",
    "doc": "piece = attribute: a primitive attribute (e.g. from connectivity or a wrangle)",
@@ -2579,7 +2599,7 @@
   },
   "piece": {
    "default": "connectivity",
-   "doc": "connectivity: each connected piece; attribute: primitives sharing a value of 'attribute'; primitive: every primitive alone",
+   "doc": "Legacy saved-graph mode. Use Method for new graphs.",
    "kind": "enum",
    "options": [
     "connectivity",
@@ -2587,6 +2607,16 @@
     "primitive"
    ]
   }
+ },
+ "for_each_index": {
+  "name": {"default":"source_index","doc":"Integer point and detail attribute receiving the typed Index socket","kind":"str"}
+ },
+ "for_each_start": {
+  "method": {"default":"connected","doc":"How to partition the input geometry","kind":"enum","options":["connected","attribute","domain"]},
+  "domain": {"default":"points","doc":"Points, edges, faces or native instances","kind":"enum","options":["points","edges","faces","instances"]},
+  "selection": {"default":"","doc":"Optional selected elements or group; empty selects all","kind":"str","pick_domain_param":"domain","pick_domain_default":"points"},
+  "attribute": {"default":"class","doc":"Attribute whose equal values belong to one iteration","kind":"str","enabled_if":{"method":"attribute"}},
+  "max_pieces": {"default":1000,"doc":"Maximum number of elements to process","kind":"int","min":1,"max":10000}
  },
  "fractal": {
   "frequency": {

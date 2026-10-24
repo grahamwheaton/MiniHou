@@ -605,6 +605,9 @@
         "id": "for_each"
       },
       {
+        "id": "for_each_index"
+      },
+      {
         "id": "solver"
       },
       {

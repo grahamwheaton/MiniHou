@@ -99,6 +99,12 @@ pub(super) fn canvas_ports(v: &View, positions: &[(String, Pos2)]) -> Vec<(AddCo
             }
         }
     }
+    for zone in &v.graph.zones {
+        if let Some(rect)=zone_bounds(zone,positions) {
+            ports.push((AddConnection::Input{node:zone.start.clone(),port:"geo".into()},pos2(rect.center().x,rect.top())));
+            ports.push((AddConnection::Output(zone.end.clone()),pos2(rect.center().x,rect.bottom())));
+        }
+    }
     ports
 }
 

@@ -9,6 +9,26 @@ pub enum AddConnection {
 
 /// One atomic add/connect/position edit. Failed connections never leave a loose node.
 pub fn add_connected(value: &Value, ty: &str, connection: &AddConnection, pos: [f32; 2]) -> Option<(Value, String)> {
+    if ty == "for_each" {
+        return match connection {
+            AddConnection::Output(source) => {
+                let (mut next,_,end,_)=add_for_each(value,
+                    (value["nodes"][source]["type"]=="output").then_some(source.as_str()),Some(pos))?;
+                if value["nodes"][source]["type"]!="output" {
+                    nodes(value)?.get(source)?;
+                    let start=next["zones"].as_object()?.values().find(|z|z["end"]==end)?["start"].as_str()?.to_owned();
+                    next["nodes"][&start]["inputs"]=json!({"geo":source});
+                    if let Some(display)=value.get("display") {next["display"]=display.clone();}
+                }
+                Some((next,end))
+            },
+            AddConnection::Input{node,port} => {
+                let (next,_,end,_)=add_for_each(value,None,Some(pos))?;
+                let next=connect(&next,&end,node,Some(port))?;
+                Some((next,end))
+            },
+        };
+    }
     let spec = nodes::get(ty)?;
     if !pos.iter().all(|v| v.is_finite()) { return None; }
     let (mut next, id) = match connection {
@@ -36,9 +56,104 @@ pub fn add_connected(value: &Value, ty: &str, connection: &AddConnection, pos: [
 }
 
 pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, String)> {
+    if ty == "for_each" {
+        let (next,_,end,_)=add_for_each(value,after,None)?;
+        return Some((next,end));
+    }
     let mut repaired = value.clone();
     repair_output_hangs(&mut repaired);
     add_impl(&repaired, ty, after, true)
+}
+
+/// The user-facing Add For Each edit. The legacy one-node `for_each` remains loadable,
+/// but new edits always create the paired zone and its two boundaries together.
+pub fn add_for_each(value:&Value, after:Option<&str>, pos:Option<[f32;2]>) -> Option<(Value,String,String,String)> {
+    let mut next=value.clone();
+    let anchor=after.filter(|id|nodes(&next).is_some_and(|all|all.contains_key(*id)));
+    let parent=anchor.and_then(|anchor| {
+        let zones=value.get("zones")?.as_object()?;
+        let depth=|id:&str| {let mut n=0;let mut current=id.to_owned();while let Some(zone)=zones.get(&current) {
+            let Some(p)=zone["parent"].as_str() else {break};n+=1;current=p.to_owned();
+            if n>zones.len() {break;}
+        }n};
+        zones.iter().filter_map(|(id,zone)| {
+            let inside=zone["start"]==anchor || zone["members"].as_array().is_some_and(|m|m.iter().any(|v|v==anchor));
+            let scope=if inside {Some(id.as_str())} else if zone["end"]==anchor {zone["parent"].as_str()} else {None}?;
+            Some((scope.to_owned(),depth(scope)))
+        }).max_by_key(|(_,depth)|*depth).map(|(id,_)|id)
+    });
+    let terminal=anchor.is_some_and(|id|next["nodes"][id]["type"]=="output");
+    let source=if terminal {anchor.and_then(|id|next["nodes"][id]["inputs"]["geo"].as_str())}
+        else {anchor}.map(str::to_owned);
+    let placement=pos.or_else(||anchor.and_then(|id|next["nodes"][id]["pos"].as_array())
+        .and_then(|p|Some([p.first()?.as_f64()? as f32+280.,p.get(1)?.as_f64()? as f32])))
+        .unwrap_or([0.,0.]);
+    if !placement.iter().all(|n|n.is_finite()) {return None;}
+    let (start,end)={
+        let all=nodes_mut(&mut next)?;
+        let start=fresh_id(all,"for_each_start");
+        all.insert(start.clone(),json!({"type":"for_each_start"}));
+        let end=fresh_id(all,"for_each_end");
+        all.insert(end.clone(),json!({"type":"for_each_end"}));
+        (start,end)
+    };
+    let zone=(1..).map(|n|format!("for_each_zone{n}"))
+        .find(|id|next["zones"].get(id).is_none())?;
+    if let Some(source)=&source {
+        next["nodes"][&start]["inputs"]=json!({"geo":source});
+    }
+    next["nodes"][&end]["inputs"]=json!({"generated":start,"begin":start});
+    next["nodes"][&start]["pos"]=json!([placement[0],placement[1]]);
+    next["nodes"][&end]["pos"]=json!([placement[0],placement[1]+180.]);
+    if !next["zones"].is_object() {next["zones"]=json!({});}
+    next["zones"][&zone]=json!({"kind":"for_each","start":start,"end":end,"members":[]});
+    if let Some(parent)=parent {
+        next["zones"][&zone]["parent"]=json!(parent);
+        let members=next["zones"][&parent]["members"].as_array_mut()?;
+        members.push(json!(start));members.push(json!(end));
+    }
+    if let Some(anchor)=anchor {
+        if terminal {
+            next["nodes"][anchor]["inputs"]["geo"]=json!(end);
+        } else if let Some(source)=&source {
+            for (id,node) in next["nodes"].as_object_mut()?.iter_mut() {
+                if id==&start || id==&end {continue;}
+                if let Some(inputs)=node.get_mut("inputs").and_then(Value::as_object_mut) {
+                    for (port,input) in inputs.iter_mut() {
+                        if port=="begin" {continue;}
+                        if input.as_str()==Some(source) {*input=json!(end);}
+                        else if let Some(refs)=input.as_array_mut() {
+                            for item in refs {if item.as_str()==Some(source) {*item=json!(end);}}
+                        }
+                    }
+                }
+            }
+            if next["display"]==source.as_str() {next["display"]=json!(end);}
+        }
+    } else {next["display"]=json!(end);}
+    Some((next,start,end,zone))
+}
+
+/// Insert a new zone into one exact noodle, leaving its other branches alone.
+pub fn add_for_each_on_wire(value:&Value, wire:&WireRef, pos:[f32;2]) -> Option<(Value,String)> {
+    let old=nodes(value)?;
+    let target=old.get(&wire.to)?;
+    old.get(&wire.from)?;
+    let input=target.get("inputs")?.get(&wire.port)?;
+    let connected=input.as_str()==Some(&wire.from) || input.as_array().is_some_and(|a|a.iter().any(|v|v==&wire.from));
+    if !connected {return None;}
+    let (mut next,start,end,_)=add_for_each(value,None,Some(pos))?;
+    next["nodes"][&start]["inputs"]=json!({"geo":wire.from});
+    let input=&mut next["nodes"][&wire.to]["inputs"][&wire.port];
+    if input.as_str()==Some(&wire.from) {*input=json!(end);}
+    else if let Some(refs)=input.as_array_mut() {
+        let found=refs.iter_mut().find(|v|*v==&wire.from)?;
+        *found=json!(end);
+    }
+    if let Some(display)=value.get("display") {next["display"]=display.clone();}
+    else {next.as_object_mut()?.remove("display");}
+    validated(next.clone()).ok()?;
+    Some((next,end))
 }
 
 /// Add a Merge below a node selection without splicing any existing consumers.
@@ -104,6 +219,16 @@ fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Optio
     let spec = nodes::get(ty)?;
     let original = value;
     let mut value = value.clone();
+    let body_zone=after.and_then(|anchor| {
+        let zones=original.get("zones")?.as_object()?;
+        let depth=|id:&str| {let mut depth=0;let mut current=id.to_owned();
+            while let Some(parent)=zones.get(&current).and_then(|z|z["parent"].as_str()) {
+                depth+=1;current=parent.to_owned();if depth>zones.len(){break;}
+            }depth};
+        zones.iter().filter(|(_,zone)|zone["start"]==anchor ||
+            zone["members"].as_array().is_some_and(|members|members.iter().any(|m|m==anchor)))
+            .max_by_key(|(id,_)|depth(id)).map(|(id,_)|id.clone())
+    });
     let displayed = minihou_app::display_nodes(&value);
     let all = nodes_mut(&mut value)?;
     let id = fresh_id(all, ty);
@@ -136,7 +261,8 @@ fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Optio
             // Explicit noodle adds use add_impl without splicing existing wires.
             for consumer in all.values_mut() {
                 if let Some(inputs) = consumer.get_mut("inputs").and_then(Value::as_object_mut) {
-                    for input in inputs.values_mut() {
+                    for (port,input) in inputs.iter_mut() {
+                        if port=="begin" {continue;}
                         if input.as_str() == Some(after) { *input = json!(id); spliced = true; }
                         else if let Some(refs) = input.as_array_mut() {
                             for source in refs {
@@ -156,9 +282,14 @@ fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Optio
         if let Some(index) = next.iter().position(|item| item == source) { next[index] = id.clone(); }
         else if !spliced { next = vec![id.clone()]; }
     } else { next = vec![id.clone()]; }
-    value["display"] = if next.len() == 1 { json!(next[0]) } else { json!(next) };
+    if body_zone.is_none() {
+        value["display"] = if next.len() == 1 { json!(next[0]) } else { json!(next) };
+    }
     if splice && ty != "output" {
         if let Some(source) = source { position_in_stream(original, &mut value, source, &id, false); }
+    }
+    if let Some(zone)=body_zone {
+        value["zones"][&zone]["members"].as_array_mut()?.push(json!(id));
     }
     Some((value, id))
 }

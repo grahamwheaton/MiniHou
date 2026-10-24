@@ -515,7 +515,30 @@ impl App {
                 }
                 UiAction::AddNode { node_type, after, tab_menu } => self.add_node(ctx, &node_type, after.as_deref(), tab_menu),
                 UiAction::AddNetworkNode { node_type, pos, wire } => {
-                    if let Some((mut value, id)) = graph_edit::add(self.editor.doc.value(), &node_type, None) {
+                    if node_type == "for_each" {
+                        let inserted=wire.as_ref().and_then(|edge|graph_edit::add_for_each_on_wire(self.editor.doc.value(),edge,pos));
+                        let on_wire=inserted.is_some();
+                        let created=inserted.or_else(||graph_edit::add_for_each(self.editor.doc.value(),None,Some(pos))
+                            .map(|(value,_,end,_)|(value,end)));
+                        if let Some((mut value,id))=created {
+                            let before=ui::network::position_add(ctx,&self.editor.path,self.editor.doc.value(),&mut value,None);
+                            if let Some(start)=value["zones"].as_object().and_then(|zones|zones.values().find(|zone|zone["end"]==id))
+                                .and_then(|zone|zone["start"].as_str()).map(str::to_owned) {
+                                value["nodes"][&start]["pos"]=json!(pos);
+                            }
+                            value["nodes"][&id]["pos"]=json!([pos[0],pos[1]+180.]);
+                            self.finish_history();
+                            let original=self.editor.doc.clone();
+                            if let Some(before)=before {self.editor.doc=before;}
+                            if self.commit_document(value,"add for_each") {
+                                ui::network::restore_positions(ctx,&self.editor.path,self.editor.doc.value());
+                                self.selected=id.clone();
+                                self.selected_set=std::collections::BTreeSet::from([id.clone()]);
+                                self.display=if on_wire {Graph::from_value(self.editor.doc.value()).ok()
+                                    .and_then(|g|g.main_output().ok()).unwrap_or(id)} else {id};
+                            } else {self.editor.doc=original;}
+                        }
+                    } else if let Some((mut value, id)) = graph_edit::add(self.editor.doc.value(), &node_type, None) {
                         if node_type == "subnet" { subnet_edit::initialize(&mut value, &id); }
                         if node_type == "boundary_select" {
                             let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary");

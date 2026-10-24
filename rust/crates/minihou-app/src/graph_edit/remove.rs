@@ -15,19 +15,41 @@ pub fn clear_measurements(value:&Value)->Option<Value> {
 
 pub fn delete(value: &Value, id: &str) -> Option<Value> {
     let mut value = value.clone();
+    nodes(&value)?.get(id)?;
+    let mut removed=HashSet::from([id.to_owned()]);
+    if let Some(zones)=value.get("zones").and_then(Value::as_object) {
+        loop {
+            let before=removed.len();
+            for zone in zones.values() {
+                if zone["start"].as_str().is_some_and(|id|removed.contains(id)) ||
+                    zone["end"].as_str().is_some_and(|id|removed.contains(id)) {
+                    for id in [zone["start"].as_str(),zone["end"].as_str()].into_iter().flatten() {removed.insert(id.to_owned());}
+                    for id in zone["members"].as_array().into_iter().flatten().filter_map(Value::as_str) {removed.insert(id.to_owned());}
+                }
+            }
+            if removed.len()==before {break;}
+        }
+    }
     let all = nodes_mut(&mut value)?;
-    all.remove(id)?;
+    for id in &removed {all.remove(id);}
     for node in all.values_mut() {
         let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) else { continue };
         inputs.retain(|_, source| match source {
-            Value::String(s) => s != id,
-            Value::Array(a) => { a.retain(|x| x.as_str() != Some(id)); !a.is_empty() }
+            Value::String(s) => !removed.contains(s),
+            Value::Array(a) => { a.retain(|x| x.as_str().is_none_or(|s| !removed.contains(s))); !a.is_empty() }
             _ => true,
         });
     }
     let first = all.keys().next().cloned();
+    if let Some(zones)=value.get_mut("zones").and_then(Value::as_object_mut) {
+        zones.retain(|_,zone| {
+            if zone["start"].as_str().is_some_and(|id|removed.contains(id)) || zone["end"].as_str().is_some_and(|id|removed.contains(id)) {return false;}
+            if let Some(members)=zone["members"].as_array_mut() {members.retain(|m|m.as_str().is_none_or(|id|!removed.contains(id)));}
+            true
+        });
+    }
     let mut displayed = minihou_app::display_nodes(&value);
-    displayed.retain(|item| item != id);
+    displayed.retain(|item| !removed.contains(item));
     if displayed.is_empty() { if let Some(first) = first { displayed.push(first); } }
     if displayed.is_empty() { value.as_object_mut()?.remove("display"); }
     else { value["display"] = if displayed.len() == 1 { json!(displayed[0]) } else { json!(displayed) }; }

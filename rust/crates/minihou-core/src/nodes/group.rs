@@ -135,7 +135,7 @@ fn create(inputs:&Inputs,p:&Params)->Result<Geometry>{
 }
 
 /// Edge selection text: edge ids, `a-b` point pairs (either order), `*`, `^` exclusion, and edge group names.
-fn edge_mask(g:&Geometry,e:&crate::topo::Edges,pattern:&str)->Result<Vec<bool>>{
+pub(super) fn edge_mask(g:&Geometry,e:&crate::topo::Edges,pattern:&str)->Result<Vec<bool>>{
     let n=e.len();let tokens:Vec<_>=pattern.split(|c:char|c==','||c.is_whitespace()).filter(|s|!s.is_empty()).collect();
     if tokens.is_empty(){return Ok(vec![true;n]);}
     let mut sel=vec![tokens.iter().all(|t|t.starts_with('^'));n];

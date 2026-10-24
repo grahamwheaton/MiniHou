@@ -125,6 +125,18 @@ fn position_add_impl(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
     for (id, at) in network_layout::layout(&next_graph, |id| lookup.get(id).copied()) {
         next["nodes"][&id]["pos"] = serde_json::json!([at.x, at.y]);
     }
+    // A new For Each is one framed pair. Place both boundaries at the Tab menu
+    // cursor rather than letting the ordinary single-card placement split them.
+    if after.is_none() {
+        if let Some(at)=add_pos {
+            let pair=next["zones"].as_object().and_then(|zones|zones.iter().find(|(id,_)|old["zones"].get(*id).is_none()))
+                .and_then(|(_,zone)|Some((zone["start"].as_str()?.to_owned(),zone["end"].as_str()?.to_owned())));
+            if let Some((start,end))=pair {
+                next["nodes"][&start]["pos"]=serde_json::json!([at.x,at.y]);
+                next["nodes"][&end]["pos"]=serde_json::json!([at.x,at.y+180.0]);
+            }
+        }
+    }
     crate::graph_edit::validated(before).ok()
 }
 

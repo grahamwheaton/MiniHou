@@ -78,7 +78,7 @@ impl Run<'_> {
             return Err(Error::new(SUPERSEDED));
         }
         let spec = nodes::get(&def.node_type).expect("validated by key_of");
-        if def.node_type == "loop_end" {
+        if matches!(def.node_type.as_str(), "loop_end" | "for_each_end") {
             let t0 = Instant::now();
             let (plan, graph, budget, resolved) = (self.plan, self.graph, self.budget.clone(), self.resolved);
             let (geo,times) = plan.cook_end(graph, resolved, id, budget, &mut |src, output| self.get_output(src, output))?;
@@ -129,7 +129,7 @@ impl Run<'_> {
                 Err(e) if e.waiting_text().is_some() => vec![Arc::new(Geometry::default())],
                 other => vec![Arc::new(other.map_err(|e|e.in_node(id,&def.node_type))?)],
             },
-            None=>run_node_outputs(id, def, spec, &inputs, self.resolved.params.get(id))?.0.into_iter().map(Arc::new).collect(),
+            None=>run_node_outputs(id, def, spec, &inputs, self.resolved.params.get(id))?.into_geometries()?,
         } };
         let geo = outputs.first().cloned().ok_or_else(|| Error::new(format!("node '{id}' produced no outputs")))?;
         let sidecar = if def.bypass {

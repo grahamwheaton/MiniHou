@@ -78,6 +78,21 @@ fn apply_one(g: &mut Value, op: &Value, kind: &str) -> Result<Value> {
             let mut removed = ids(&op["id"])?;
             let mut seen = HashSet::new();
             removed.retain(|id| seen.insert(id.clone()));
+            if let Some(zones)=g.get("zones").and_then(Value::as_object) {
+                loop {
+                    let before=seen.len();
+                    for zone in zones.values() {
+                        if zone["start"].as_str().is_some_and(|id|seen.contains(id)) ||
+                            zone["end"].as_str().is_some_and(|id|seen.contains(id)) {
+                            for id in [zone["start"].as_str(),zone["end"].as_str()].into_iter().flatten()
+                                .chain(zone["members"].as_array().into_iter().flatten().filter_map(Value::as_str)) {
+                                if seen.insert(id.to_owned()) {removed.push(id.to_owned());}
+                            }
+                        }
+                    }
+                    if seen.len()==before {break;}
+                }
+            }
             removed.extend(
                 object(&g["nodes"])?
                     .iter()
@@ -95,6 +110,16 @@ fn apply_one(g: &mut Value, op: &Value, kind: &str) -> Result<Value> {
                 rewire(g, id, None);
                 g["nodes"].as_object_mut().unwrap().remove(id);
                 entries(g).retain(|e| e["node"] != id.as_str());
+            }
+            if let Some(zones)=g.get_mut("zones").and_then(Value::as_object_mut) {
+                zones.retain(|_,zone| {
+                    if zone["start"].as_str().is_some_and(|id|removed.contains(&id.to_owned())) ||
+                        zone["end"].as_str().is_some_and(|id|removed.contains(&id.to_owned())) {return false;}
+                    if let Some(members)=zone["members"].as_array_mut() {
+                        members.retain(|m|m.as_str().is_none_or(|id|!removed.contains(&id.to_owned())));
+                    }
+                    true
+                });
             }
             let d = crate::display_nodes(g)
                 .into_iter()
@@ -143,6 +168,14 @@ fn apply_one(g: &mut Value, op: &Value, kind: &str) -> Result<Value> {
             for n in g["nodes"].as_object_mut().unwrap().values_mut() {
                 if n["input_owner"] == old {
                     n["input_owner"] = json!(new);
+                }
+            }
+            if let Some(zones)=g.get_mut("zones").and_then(Value::as_object_mut) {
+                for zone in zones.values_mut() {
+                    for field in ["start","end"] {if zone[field]==old {zone[field]=json!(new);}}
+                    if let Some(members)=zone["members"].as_array_mut() {
+                        for member in members {if member==old {*member=json!(new);}}
+                    }
                 }
             }
             Ok(json!({"id":new}))

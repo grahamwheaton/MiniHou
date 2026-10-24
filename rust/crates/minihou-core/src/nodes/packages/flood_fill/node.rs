@@ -118,7 +118,7 @@ fn angle(a: &[f64;3], b: &[f64;3]) -> f64 {
 }
 
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    Ok(cook_multi(inputs, p)?.0.remove(0))
+    cook_multi(inputs, p)?.0.remove(0).into_geometry()
 }
 
 fn cook_multi(inputs: &Inputs, p: &Params) -> Result<NodeOutputs> {
