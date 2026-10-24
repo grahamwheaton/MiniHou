@@ -148,7 +148,7 @@ impl Gpu {
         let use_cd=overlay.object_color==ObjectColor::Single && self.vcd.is_some() && !mode.matcap();
         let u = Uniforms { view_proj,view,inv_view_proj:inverse_projection(view_proj),base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if is_shaded_wire {1.} else {0.}],
             flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,if sketchup_clean {2} else {mode.matcap() as u32}],
-            object_color:(overlay.object_color==ObjectColor::Random || use_cd) as u32,_pad_color:[0;3],
+            object_color:(overlay.object_color==ObjectColor::Random || use_cd) as u32,_pad_color:[overlay.geometry.uv_checker_cells.clamp(1,256),0,0],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
             element_size:[target.size[0] as f32,target.size[1] as f32,viewport_point_size(overlay.geometry.point_size, selection_mode),overlay.geometry.line_width],
             element_flags:[(overlay.geometry.points || selection_mode==crate::ui::SelectionMode::Points) as u32,overlay.geometry.lines as u32,points_visible(&overlay.geometry,selection_mode) as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],

@@ -159,6 +159,9 @@ impl Gpu {
         let pipe_tex=mk("textured surface","vs_tex","fs_tex",&tex_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
         let pipe_tex_bias=mk("textured surface+bias","vs_tex","fs_tex",&tex_bufs,T::TriangleList,2,false,C::LessEqual,true,W::ALL);
         let pipe_tex_xray=mk("textured xray","vs_tex","fs_tex_xray",&tex_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
+        let pipe_uv_preview=mk("UV preview","vs_tex","fs_uv_preview",&tex_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
+        let pipe_uv_preview_bias=mk("UV preview+bias","vs_tex","fs_uv_preview",&tex_bufs,T::TriangleList,2,false,C::LessEqual,true,W::ALL);
+        let pipe_uv_preview_xray=mk("UV preview xray","vs_tex","fs_uv_preview_xray",&tex_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
         let pipe_surf_bias = mk("surf+bias", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 2, false, C::LessEqual, true, W::ALL);
         let pipe_wire = mk("wire", "vs_wire", "fs_wire", &wire_bufs, T::LineList, -1, true, C::LessEqual, false, W::ALL);
         let pipe_wire_all = mk("all edges", "vs_wire", "fs_wire", &wire_bufs, T::LineList, 0, true, C::Always, false, W::ALL);
@@ -305,7 +308,7 @@ impl Gpu {
         let mut out=Self {
             packed:Vec::new(),packed_cut_cache:std::sync::Mutex::new(None),pipe_inst_surf,pipe_inst_wire,pipe_inst_wire_all,pipe_inst_wire_hidden,
             pipe_inst_ghost_wire,pipe_inst_depth,pipe_inst_xray,pipe_inst_ghost,pipe_inst_mask,
-            tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
+            tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,pipe_uv_preview,pipe_uv_preview_bias,pipe_uv_preview_xray,tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
             pipe_floor,z_axis,pipe_z_axis,
             face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,pipe_face_markers_xray,
             elements:Elements::new(device,sc,&[],&[]),element_points:Vec::new(),pipe_elements,pipe_elements_ghost,

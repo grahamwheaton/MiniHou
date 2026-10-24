@@ -58,6 +58,53 @@ fn outline(p:&&[u8;4])->bool { object_outline(p) }
 pub(super) fn changed(a:&[[u8;4]],b:&[[u8;4]])->usize { a.iter().zip(b).filter(|(a,b)| a!=b).count() }
 
 #[test]
+fn uv_preview_shader_renders_checker_missing_and_minified_uvs() {
+    let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping UV preview shader test");return;};
+    let scene=scene();
+    let gpu=Gpu::new(&device,&scene);
+    let camera=Camera::frame([0.;3],2.5);
+    let (_,view)=camera.matrices(1.);
+    let right=[view[0][0],view[1][0],view[2][0]];
+    let up=[view[0][1],view[1][1],view[2][1]];
+    let positions=[[-1.,-1.],[1.,-1.],[1.,1.],[-1.,1.]];
+    let sample=|uvs:[[f32;2];4],valid:f32| -> [u8;4] {
+        let vertices:Vec<TexVertex>=[0usize,1,2,0,2,3].map(|i|TexVertex {
+            p:std::array::from_fn(|k|right[k]*positions[i][0]+up[k]*positions[i][1]),
+            n:[0.,0.,1.],color:[0.72;3],uv:uvs[i],valid,
+        }).to_vec();
+        let buffer=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("synthetic UV preview"),contents:bytemuck::cast_slice(&vertices),usage:wgpu::BufferUsages::VERTEX});
+        let (target,texture)=Target::new_headless(&device,[128,128]);
+        gpu.draw_raw(&device,&queue,&target,&camera,Mode::SmoothShaded,Overlay {geometry:crate::ui::Overlays {uv_preview:true,..Default::default()},..Default::default()},crate::ui::SelectionMode::Object,false);
+        let output=device.create_buffer(&wgpu::BufferDescriptor {label:Some("UV preview pixels"),size:128*128*4,usage:wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
+        let mut encoder=device.create_command_encoder(&Default::default());
+        {
+            let mut pass=encoder.begin_render_pass(&wgpu::RenderPassDescriptor {label:Some("UV preview synthetic pass"),color_attachments:&[Some(wgpu::RenderPassColorAttachment {view:&target.color,depth_slice:None,resolve_target:None,ops:wgpu::Operations {load:wgpu::LoadOp::Clear(wgpu::Color::BLACK),store:wgpu::StoreOp::Store}})],depth_stencil_attachment:Some(wgpu::RenderPassDepthStencilAttachment {view:&target.depth,depth_ops:Some(wgpu::Operations {load:wgpu::LoadOp::Clear(1.),store:wgpu::StoreOp::Store}),stencil_ops:None}),timestamp_writes:None,occlusion_query_set:None});
+            pass.set_pipeline(&gpu.pipe_uv_preview);
+            pass.set_bind_group(0,&gpu.bind,&[]);
+            pass.set_bind_group(1,&gpu.default_tex_bind,&[]);
+            pass.set_vertex_buffer(0,buffer.slice(..));
+            pass.draw(0..6,0..1);
+        }
+        encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo {texture:&texture,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},wgpu::TexelCopyBufferInfo {buffer:&output,layout:wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(512),rows_per_image:Some(128)}},wgpu::Extent3d {width:128,height:128,depth_or_array_layers:1});
+        queue.submit([encoder.finish()]);
+        let (tx,rx)=std::sync::mpsc::channel();
+        output.slice(..).map_async(wgpu::MapMode::Read,move |r|tx.send(r).unwrap());
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
+        let pixels=output.slice(..).get_mapped_range();
+        let at=(64*128+54)*4;
+        let value=[pixels[at],pixels[at+1],pixels[at+2],pixels[at+3]];
+        drop(pixels);output.unmap();value
+    };
+    let light=sample([[0.01,0.01];4],1.);
+    let dark=sample([[0.08,0.01];4],1.);
+    assert!(light[0]>dark[0]+50,"light {light:?}, dark {dark:?}");
+    let missing=sample([[0.01,0.01];4],0.);
+    assert!(missing[0]>missing[1]+70 && missing[2]>missing[1]+40,"missing {missing:?}");
+    let minified=sample([[0.,0.],[100.,0.],[100.,100.],[0.,100.]],1.);
+    assert!(minified[0]>dark[0]+30 && minified[0]<light[0]-30,"minified {minified:?}");
+}
+
+#[test]
 fn display_modes_and_object_visibility_headless() {
     let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping display render test"); return; };
     let scene=scene(); let mut gpu=Gpu::new(&device,&scene);

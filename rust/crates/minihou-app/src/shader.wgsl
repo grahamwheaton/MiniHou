@@ -14,7 +14,7 @@ struct U {
     encode_srgb: u32,
     matcap: u32, // 0: off, 1: existing captures, 2: SketchUp clean
     object_color: u32,
-    _pad0: u32,
+    uv_checker_cells: u32,
     _pad1: u32,
     _pad2: u32,
     floor: vec4<f32>,
@@ -114,6 +114,23 @@ fn textured(i:VOut,front:bool)->vec3<f32> {
 }
 @fragment fn fs_tex(i:VOut,@builtin(front_facing) front:bool)->@location(0) vec4<f32> { return out_color(textured(i,front)); }
 @fragment fn fs_tex_xray(i:VOut,@builtin(front_facing) front:bool)->@location(0) vec4<f32> { return vec4<f32>(out_color(textured(i,front)).rgb,0.32); }
+
+// UV preview bypasses materials, object colours, lighting and matcaps. Derivatives
+// soften checker boundaries and fade high-frequency cells to their average.
+fn uv_checker(i:VOut)->vec3<f32> {
+    let grid=i.uv*f32(u.uv_checker_cells);
+    let footprint=max(fwidth(grid),vec2<f32>(0.0001));
+    let f=fract(grid);
+    let border=min(f,vec2<f32>(1.0)-f);
+    let edge=smoothstep(vec2<f32>(0.0),footprint*0.5,border);
+    let parity=((i32(floor(grid.x))+i32(floor(grid.y))) & 1)==0;
+    let contrast=select(-1.0,1.0,parity)*edge.x*edge.y*
+        (1.0-smoothstep(0.5,1.5,max(footprint.x,footprint.y)));
+    if (i.uv_valid<0.5) { return vec3<f32>(0.8,0.16,0.55); }
+    return vec3<f32>(0.56+0.34*contrast);
+}
+@fragment fn fs_uv_preview(i:VOut)->@location(0) vec4<f32> { return out_color(uv_checker(i)); }
+@fragment fn fs_uv_preview_xray(i:VOut)->@location(0) vec4<f32> { return vec4<f32>(out_color(uv_checker(i)).rgb,0.32); }
 
 fn shade_surf(i: VOut, front: bool) -> vec3<f32> {
     // The unit vector from this point to the eye (view space: the eye is at the origin). In a perspective view it is NOT

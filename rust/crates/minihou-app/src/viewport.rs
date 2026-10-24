@@ -132,6 +132,7 @@ pub struct Gpu {
     pipe_inst_ghost_wire:wgpu::RenderPipeline,pipe_inst_depth:wgpu::RenderPipeline,
     pipe_inst_xray:wgpu::RenderPipeline,pipe_inst_ghost:wgpu::RenderPipeline,pipe_inst_mask:wgpu::RenderPipeline,
     tex_bgl:wgpu::BindGroupLayout, default_tex_bind:wgpu::BindGroup, pipe_tex:wgpu::RenderPipeline, pipe_tex_bias:wgpu::RenderPipeline, pipe_tex_xray:wgpu::RenderPipeline,
+    pipe_uv_preview:wgpu::RenderPipeline, pipe_uv_preview_bias:wgpu::RenderPipeline, pipe_uv_preview_xray:wgpu::RenderPipeline,
     tex_batches:Vec<TextureBatch>, texture_status:Vec<String>,
     gpu_images:HashMap<String,(wgpu::TextureView,usize,u64)>, gpu_tick:u64,
     pipe_surf: wgpu::RenderPipeline, pipe_surf_bias: wgpu::RenderPipeline, pipe_wire: wgpu::RenderPipeline,
