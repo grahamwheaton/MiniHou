@@ -147,7 +147,22 @@ impl App {
         if let Err(e)=self.prefs.save() { self.file_status=format!("Could not save preferences: {e}"); }
     }
 }
+/// Every panic is appended to `minihou-app.log` beside the exe, so a double-clicked build still leaves a record.
+fn install_panic_log() {
+    let default=std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let log=std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("minihou-app.log")))
+            .unwrap_or_else(|| "minihou-app.log".into());
+        if let Ok(mut file)=std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+            use std::io::Write;
+            let _=writeln!(file,"{info}\n{}\n",std::backtrace::Backtrace::force_capture());
+        }
+        default(info);
+    }));
+}
+
 fn main() {
+    install_panic_log();
     if let Err(e)=window_setup::run() {
         eprintln!("{e}");
         // A double-clicked build has no terminal: say why it did not start.
