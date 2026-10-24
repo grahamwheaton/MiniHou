@@ -383,6 +383,15 @@ mod tests {
         let x=(h.overlays.right()-232.).clamp(6.,662.);
         let points=click(Pos2::new(x+60.,h.overlays.bottom()+4.+28.+9.*24.+12.));
         assert!(points.0.iter().any(|a|matches!(a,UiAction::Editor(EditorChange::Overlays(o)) if !o.points && o.enabled && o.lines && o.faces)));
+        let uv=click(Pos2::new(x+60.,h.overlays.bottom()+4.+28.+19.*24.+12.));
+        assert!(uv.0.iter().any(|a|matches!(a,UiAction::Editor(EditorChange::Overlays(o)) if o.uv_preview && o.uv_checker_cells==16)));
+        assert!(super::popovers::UV_PREVIEW_TOOLTIP.contains("No UVs"));
+        assert!(super::popovers::UV_PREVIEW_TOOLTIP.contains("Shaded modes only"));
+        let cell=Pos2::new(x+185.,h.overlays.bottom()+4.+28.+20.*24.+12.);
+        frame(vec![Event::PointerMoved(cell),Event::PointerButton {pos:cell,button:PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
+        let changed=frame(vec![Event::PointerMoved(cell+Vec2::new(30.,0.))]);
+        frame(vec![Event::PointerButton {pos:cell+Vec2::new(30.,0.),button:PointerButton::Primary,pressed:false,modifiers:Default::default()}]);
+        assert!(changed.0.iter().any(|a|matches!(a,UiAction::Editor(EditorChange::Overlays(o)) if o.uv_checker_cells>16 && o.uv_checker_cells<=256)));
     }
 
     #[test]

@@ -21,7 +21,7 @@ pub(super) fn caret_button(ui: &mut egui::Ui, th: &Theme, whole: Rect, id: &'sta
 }
 
 #[allow(clippy::too_many_arguments)] // one compact painter call keeps the menu rows consistent
-fn pop_row(ui: &mut egui::Ui, r: Rect, id: impl std::hash::Hash, label: &str, selected: bool, check: bool, key: &str, th: &Theme) -> bool {
+fn pop_row_response(ui: &mut egui::Ui, r: Rect, id: impl std::hash::Hash, label: &str, selected: bool, check: bool, key: &str, th: &Theme) -> egui::Response {
     let resp = ui.interact(r, egui::Id::new(("vp_pop_row", id)), Sense::click());
     let p = ui.painter();
     if resp.hovered() { p.rect_filled(r, 3., th.panel2); }
@@ -32,8 +32,14 @@ fn pop_row(ui: &mut egui::Ui, r: Rect, id: impl std::hash::Hash, label: &str, se
     } else if selected { p.text(mark.center(), egui::Align2::CENTER_CENTER, "✓", egui::FontId::proportional(13.), th.accent); }
     p.text(Pos2::new(r.left() + 30., r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.), th.text);
     if !key.is_empty() { p.text(Pos2::new(r.right() - 8., r.center().y), egui::Align2::RIGHT_CENTER, key, egui::FontId::monospace(11.), th.dim); }
-    resp.clicked()
+    resp
 }
+
+fn pop_row(ui: &mut egui::Ui, r: Rect, id: impl std::hash::Hash, label: &str, selected: bool, check: bool, key: &str, th: &Theme) -> bool {
+    pop_row_response(ui,r,id,label,selected,check,key,th).clicked()
+}
+
+pub(super) const UV_PREVIEW_TOOLTIP:&str="Shaded modes only. Shows a UV checker on every object using the canonical uv map (corner or point). No UVs or non-finite UVs show a solid diagnostic colour for the whole triangle. Temporarily overrides materials, textures, random colours and matcaps. Packed instances show full geometry.";
 
 fn numeric_row(ui: &mut egui::Ui, r: Rect, id: &'static str, label: &str, value: f32, th: &Theme, units: Option<crate::units::UnitSettings>) -> Option<f32> {
     let p = ui.painter();
@@ -92,7 +98,7 @@ pub(super) fn falloff_samples(f: Falloff) -> [f32; 13] { std::array::from_fn(|i|
 pub(super) fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover, v: &View, out: &mut Actions) -> Rect {
     let th = v.theme;
     let ed = v.editor;
-    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 19, Popover::Shading => Mode::ALL.len() + 7, Popover::Visibility => 3 };
+    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 21, Popover::Shading => Mode::ALL.len() + 7, Popover::Visibility => 3 };
     let height = 30. + rows as f32 * 24. + 10.;
     let x = (anchor.right() - 232.).clamp(viewport.left() + 6., (viewport.right() - 238.).max(viewport.left() + 6.));
     let pop = Rect::from_min_size(Pos2::new(x, anchor.bottom() + 4.), Vec2::new(232., height));
@@ -177,7 +183,6 @@ pub(super) fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, whic
             }
             ui.scope_builder(egui::UiBuilder::new().max_rect(row(12)),|ui| {ui.add(egui::Slider::new(&mut o.point_size,1.0..=16.0).text("Point size"));});
             ui.scope_builder(egui::UiBuilder::new().max_rect(row(13)),|ui| {ui.add(egui::Slider::new(&mut o.line_width,1.0..=10.0).text("Line width"));});
-            if o!=ed.overlays { out.push(UiAction::Editor(EditorChange::Overlays(o))); }
             section(ui,row(14),"COLOR",th);
             for (i,color) in crate::viewport::ObjectColor::ALL.into_iter().enumerate() {
                 if pop_row(ui,row(15+i),("object_color",i),color.label(),ed.object_color==color,false,"",th) {
@@ -190,6 +195,15 @@ pub(super) fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, whic
             if pop_row(ui,row(18),"overlay_texture_inspector","Texture inspector",ed.texture_inspector,true,"",th) {
                 out.push(UiAction::Editor(EditorChange::TextureInspector(!ed.texture_inspector)));
             }
+            if pop_row_response(ui,row(19),"overlay_uv_preview","UV preview",o.uv_preview,true,"?",th)
+                .on_hover_text(UV_PREVIEW_TOOLTIP).clicked() {o.uv_preview=!o.uv_preview;}
+            let cells=row(20);
+            ui.painter().text(Pos2::new(cells.left()+8.,cells.center().y),egui::Align2::LEFT_CENTER,
+                "Checker cells per UV unit",egui::FontId::proportional(10.5),th.text);
+            let edit=Rect::from_min_size(Pos2::new(cells.right()-70.,cells.center().y-11.),Vec2::new(62.,22.));
+            ui.put(edit,egui::DragValue::new(&mut o.uv_checker_cells).range(1..=256).speed(1.));
+            o.uv_checker_cells=o.uv_checker_cells.clamp(1,256);
+            if o!=ed.overlays { out.push(UiAction::Editor(EditorChange::Overlays(o))); }
         }
     }
     pop
