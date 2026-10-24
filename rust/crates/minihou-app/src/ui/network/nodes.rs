@@ -100,7 +100,12 @@ pub(super) fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &
     if node.node_type != "output" {
         let count = output_count(&v.doc["nodes"][id]);
         for index in 0..count {
-            p.circle(r.min + output_offset(index, count) * zoom, 5.0 * zoom, t.base, Stroke::new(1.5_f32, t.stroke2));
+            let typed=minihou_core::nodes::integer_output(&node.node_type,index);
+            p.circle(r.min + output_offset(index, count) * zoom, 5.0 * zoom, t.base, Stroke::new(1.5_f32, if typed {t.warn}else{t.stroke2}));
+            if node.node_type=="for_each_start" && zoom>=0.7 {
+                p.text(r.min+output_offset(index,count)*zoom+vec2(0.,9.*zoom),Align2::CENTER_TOP,
+                    if typed {"Index"}else{"Element"},FontId::proportional(9.*zoom),if typed {t.warn}else{t.dim});
+            }
         }
     }
     if v.cooking.cooking() && !node.bypass { p.rect_filled(Rect::from_min_size(pos2(r.left() + 2.0, r.bottom() - 3.0), vec2(r.width() * 0.38, 2.0)), 0.0, t.accent); }

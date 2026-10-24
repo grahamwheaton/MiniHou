@@ -2535,6 +2535,9 @@
    ]
   }
  },
+ "for_each_index": {
+  "name": {"default":"source_index","doc":"Integer point and detail attribute receiving the typed Index socket","kind":"str"}
+ },
  "for_each_start": {
   "method": {"default":"connected","doc":"How to partition the input geometry","kind":"enum","options":["connected","attribute","domain"]},
   "domain": {"default":"points","doc":"Points, edges, faces or native instances","kind":"enum","options":["points","edges","faces","instances"]},

@@ -356,6 +356,13 @@
     "label": "For Each",
     "keywords": "per piece iterate"
   },
+  "for_each_index": {
+    "category": "flow",
+    "doc": "Write a For Each zone's typed Index input to a point and detail integer attribute.",
+    "menu": "Flow & Time",
+    "label": "Index Attribute",
+    "keywords": "foreach index source integer"
+  },
   "fuse": {
     "category": "modify",
     "doc": "Weld points that lie within ``distance`` of each other (snapped to a grid of that size). With a second input\nthe first input's points are only snapped onto the nearest point of the second (within ``distance``): the\nsecond input is not modified, and the first input's points are not welded to each other.",

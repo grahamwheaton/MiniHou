@@ -69,6 +69,46 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         } else if trackpad_pan { state.pan += scroll; }
         if dragging { state.pan += delta; }
     }
+    let zone_under_pointer=pointer.filter(|at|r.contains(*at)).and_then(|at| {
+        let world=((at-r.min-state.pan)/state.zoom.max(0.25)).to_pos2();
+        let zone=zone_hit(&v.graph.zones,&positions,world)?;
+        let frame=zone_bounds(zone,&positions)?;
+        let on_socket=[pos2(frame.center().x,frame.top()),pos2(frame.center().x,frame.bottom())]
+            .iter().any(|socket|socket.distance(world)<=10.);
+        let on_card=positions.iter().any(|(_,pos)|Rect::from_min_size(*pos,CARD).contains(world));
+        (!on_socket && !on_card).then(||zone.clone())
+    });
+    if state.zone_drag.is_none() && state.menu.is_none() && state.layout.is_none() &&
+        zone_under_pointer.is_some() && ctx.input(|i|i.pointer.button_pressed(PointerButton::Primary)) {
+        let zone=zone_under_pointer.as_ref().unwrap();
+        let members=zone_nodes(zone);
+        let selected:Vec<_>=positions.iter().filter(|(id,_)|members.contains(id)).cloned().collect();
+        let mut before=v.doc.clone();
+        for (id,at) in &positions {before["nodes"][id]["pos"]=serde_json::json!([at.x,at.y]);}
+        state.zone_drag=Some(ZoneDrag{anchor:pointer.unwrap(),selected,before});
+        state.box_start=None;state.springs=None;
+        out.push(UiAction::SelectSet{ids:members,extend:false});
+    }
+    if let Some(drag)=state.zone_drag.clone() {
+        let cancel=pointer.is_none() || ctx.input(|i|i.key_pressed(egui::Key::Escape)||i.pointer.button_pressed(PointerButton::Secondary));
+        if cancel {
+            for (id,at) in &drag.selected {state.moved.insert(id.clone(),*at);}
+            state.zone_drag=None;
+        } else if ctx.input(|i|i.pointer.primary_down()) {
+            let delta=(pointer.unwrap()-drag.anchor)/state.zoom.max(0.25);
+            for (id,at) in &drag.selected {
+                let moved=*at+delta;
+                state.moved.insert(id.clone(),moved);
+                if let Some((_,position))=positions.iter_mut().find(|(node,_)|node==id) {*position=moved;}
+            }
+            ctx.request_repaint();
+        } else {
+            let delta=(pointer.unwrap()-drag.anchor)/state.zoom.max(0.25);
+            let next=move_zone_document(&drag.before,&drag.selected,delta);
+            if next!=drag.before {out.push(UiAction::NetworkGesture{expected:v.doc.clone(),before:drag.before,next});}
+            state.zone_drag=None;
+        }
+    }
     let mut tool_dropped = false;
     if over && ctx.input(|i| i.pointer.any_released()) {
         if let Some(tool) = egui::DragAndDrop::take_payload::<crate::ui::ToolDrag>(ctx) {
@@ -129,15 +169,19 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     let p = ui.painter().with_clip_rect(r);
     p.rect_filled(r, 0.0, v.theme.base);
     grid(&p, r, state, v.theme.grid);
+    draw_zones(&p,r,state,v,&positions);
     let ports = canvas_ports(v, &positions);
     let hit_port = pointer.filter(|at| r.contains(*at)).and_then(|at| ports.iter().rev()
         .find(|(_, world)| screen(r, state, *world).distance(at) <= (9.0 * state.zoom).max(6.0)));
     if !layout_frame && state.menu.is_none() && ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary)) {
         if let Some((port, world)) = hit_port {
+            state.wire_origin=Some(*world);
             state.wire_output_index = if matches!(port, AddConnection::Output(_)) {
                 ports.iter().filter(|(candidate, _)| candidate == port)
                     .position(|(_, position)| position == world)
-                    .and_then(|position| match port { AddConnection::Output(node) => output_index(&v.doc["nodes"][node],position), _ => None })
+                    .and_then(|position| match port { AddConnection::Output(node) => {
+                        let raw=&v.doc["nodes"][node];output_index(raw,position%output_count(raw))
+                    }, _ => None })
                     .unwrap_or(0)
             } else { 0 };
             state.pickup = match port {
@@ -153,9 +197,9 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
             state.springs = None;
         }
     }
-    let blocked = layout_frame || tool_dropped || state.menu.is_some() || state.wire.is_some() || state.cut.is_some();
+    let blocked = layout_frame || tool_dropped || state.menu.is_some() || state.wire.is_some() || state.cut.is_some() || state.zone_drag.is_some();
     if ctx.input(|i| i.key_pressed(egui::Key::Escape) || !i.focused || i.pointer.button_pressed(PointerButton::Secondary)) {
-        state.wire = None;
+        state.wire = None;state.wire_origin=None;
         state.pickup = None;
     }
     if state.wire.is_some() && ctx.input(|i| i.pointer.button_released(PointerButton::Primary)) {
@@ -196,7 +240,9 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
             let target_output = if matches!(target, AddConnection::Output(_)) {
                 ports.iter().filter(|(candidate, _)| candidate == target)
                     .position(|(_, position)| position == target_world)
-                    .and_then(|position| match target { AddConnection::Output(node) => output_index(&v.doc["nodes"][node],position), _ => None })
+                    .and_then(|position| match target { AddConnection::Output(node) => {
+                        let raw=&v.doc["nodes"][node];output_index(raw,position%output_count(raw))
+                    }, _ => None })
                     .unwrap_or(0)
             } else { 0 };
             let subnet_connection = match (&source, target) {
@@ -235,10 +281,10 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         }
     }
     // Pointer disappearance/cancellation must not leave a stale noodle.
-    if !ctx.input(|i| i.pointer.primary_down()) || pointer.is_none() { state.wire = None; state.pickup = None; }
+    if !ctx.input(|i| i.pointer.primary_down()) || pointer.is_none() { state.wire = None; state.wire_origin=None; state.pickup = None; }
     let sense = if blocked { Sense::hover() } else { Sense::click_and_drag() };
     let background = ui.interact(r, id.with("box_selection"), sense);
-    let background_hit_card = pointer.is_some_and(|at| positions.iter().any(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at)));
+    let background_hit_card = zone_under_pointer.is_some() || state.zone_drag.is_some() || pointer.is_some_and(|at| positions.iter().any(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at)));
     if background.double_clicked() && !background_hit_card {
         let at = pointer.unwrap_or(r.center());
         let zoom = if state.zoom <= 0.0 { 1.0 } else { state.zoom };
@@ -435,7 +481,7 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
     if let Some((port, Some(end))) = live {
         let output_index = if state.wire.is_some() && matches!(port, AddConnection::Output(_)) { state.wire_output_index } else { 0 };
         if let Some((_, start)) = ports.iter().filter(|(candidate, _)| candidate == port).nth(output_index) {
-            let start = screen(r, state, *start);
+            let start = screen(r, state, state.wire_origin.filter(|_|state.wire.is_some()).unwrap_or(*start));
             let (a, b) = if matches!(port, AddConnection::Output(_)) { (start, end) } else { (end, start) };
             noodle(&p, a, b, v.theme.accent);
         }

@@ -21,6 +21,8 @@ mod wires;
 use wires::*;
 mod position;
 use position::*;
+mod zone_frames;
+use zone_frames::*;
 pub use position::{rename_positions, insert_added, layout_changed, position_add, position_add_merge, restore_positions};
 
 use super::{Actions, UiAction, View};
@@ -72,21 +74,25 @@ struct LayoutTransform { kind: LayoutKind, anchor: Pos2, selected: Vec<(String, 
     before: serde_json::Value }
 
 #[derive(Clone)]
+struct ZoneDrag { anchor: Pos2, selected: Vec<(String, Pos2)>, before: serde_json::Value }
+
+#[derive(Clone)]
 struct State { show_links: bool, focus: Option<String>, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2>, snap: bool, physics: bool, springs: Option<network_physics::Springs>, tidied: bool,
     subnet_path: Vec<String>, inner_selected: String, inner_selected_set: BTreeSet<String>,
     tidy_order: HashMap<String, Pos2>,
     selected_wires: BTreeSet<WireRef>, graph_snapshot: Option<serde_json::Value>,
     cut: Option<Cut>, box_op: SelectionOp,
     wiggle: Wiggle,
-    wire: Option<AddConnection>, wire_output_index: usize, pickup: Option<crate::graph_edit::WirePickup>,
+    wire: Option<AddConnection>, wire_output_index: usize, wire_origin: Option<Pos2>, pickup: Option<crate::graph_edit::WirePickup>,
     drag_before: Option<serde_json::Value>, drag_physics: bool, layout: Option<LayoutTransform>,
+    zone_drag: Option<ZoneDrag>,
     drag: Option<(String, Pos2)>, box_start: Option<Pos2>, alt_pan: bool, menu: Option<network_menu::MenuState>,
     canvas: Option<Rect>, add_pos: Option<Pos2> }
 impl Default for State {
     fn default() -> Self { Self { show_links: true, focus: None, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true, physics: true, springs: None,
         subnet_path: Vec::new(), inner_selected: String::new(), inner_selected_set: BTreeSet::new(),
         selected_wires: BTreeSet::new(), graph_snapshot: None, cut: None, box_op: SelectionOp::Replace,
-        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, wire_output_index: 0, pickup: None, drag_before: None, drag_physics: false, layout: None, drag: None, box_start: None, alt_pan: false, menu: None,
+        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, wire_output_index: 0, wire_origin: None, pickup: None, drag_before: None, drag_physics: false, layout: None, zone_drag: None, drag: None, box_start: None, alt_pan: false, menu: None,
         canvas: None, add_pos: None } }
 }
 
@@ -345,7 +351,8 @@ pub fn scoped_edit(doc: &serde_json::Value, path: &[String], action: UiAction) -
 }
 fn reset_scope(state: &mut State) {
     state.inner_selected.clear(); state.inner_selected_set.clear(); state.selected_wires.clear();
-    state.moved.clear(); state.layout=None; state.graph_snapshot=None; state.zoom=-1.0; state.pan=Vec2::ZERO;
+    state.moved.clear(); state.layout=None; state.zone_drag=None; state.wire_origin=None;
+    state.graph_snapshot=None; state.zoom=-1.0; state.pan=Vec2::ZERO;
 }
 #[cfg(test)]
 mod subnet_scope_tests;
