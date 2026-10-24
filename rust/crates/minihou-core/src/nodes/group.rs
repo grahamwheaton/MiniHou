@@ -179,7 +179,7 @@ fn create_edges(g:&Geometry,inputs:&Inputs,p:&Params,name:&str)->Result<Geometry
 }
 
 pub const BLAST: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, cook_sidecar: None, name: "blast", inputs: GEO, params: crate::params!(
-    "group":"";"domain":"primitives";"delete_non_selected":false;"keep_unused_points":false), cook: blast };
+    "group":"";"domain":"primitives";"mode":"delete_geometry";"delete_non_selected":false;"keep_unused_points":false), cook: blast };
 fn blast(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=BLAST.one(inputs,0)?;let dom=p.e("domain",&["primitives","points","edges"])?;
     if dom=="edges" {
@@ -196,7 +196,51 @@ fn blast(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let mut m=if pattern.split(|c:char|c==',' || c.is_whitespace()).all(|s|s.is_empty()){vec![false;n]}else{mask(&g,dom,&pattern)?};
     if !p.b("delete_non_selected")?{for v in &mut m{*v=!*v;}}
     if m.iter().all(|&v|v){return Ok((*g).clone());}
-    if dom=="point"{super::modify::keep_points(&g,&m)}else{keep_prims(&g,&m,!p.b("keep_unused_points")?)}
+    if dom=="point"{super::modify::keep_points(&g,&m)}else if p.e("mode", &["delete_geometry", "faces_only"])? == "faces_only" {
+        keep_faces_and_edges(&g, &m)
+    }else{keep_prims(&g,&m,!p.b("keep_unused_points")?)}
+}
+
+fn keep_faces_and_edges(g: &Geometry, keep: &[bool]) -> Result<Geometry> {
+    let original_edges = crate::topo::edges(&g.topology, g.npoints);
+    let keep: Vec<_> = keep.iter().enumerate().map(|(i, &selected)| selected || !g.topology.is_closed(i)).collect();
+    let mut out = keep_prims(g, &keep, false)?;
+    let remaining = crate::topo::edges(&out.topology, out.npoints);
+    let existing: std::collections::BTreeSet<_> = remaining.points.chunks_exact(2).map(|e| (e[0], e[1])).collect();
+    let missing: Vec<_> = original_edges.points.chunks_exact(2)
+        .filter(|e| !existing.contains(&(e[0], e[1]))).collect();
+    if !missing.is_empty() {
+        let kept_prims = out.nprims();
+        let topo = Arc::make_mut(&mut out.topology);
+        let mut closed = topo.closed.take().unwrap_or_else(|| vec![true; kept_prims]);
+        for edge in &missing {
+            topo.vertex_point.extend([edge[0] as i32, edge[1] as i32]);
+            topo.prim_offsets.push(topo.vertex_point.len() as i32);
+            closed.push(false);
+        }
+        topo.closed = Some(closed);
+        for attr in out.vertex.values_mut() {
+            let attr = Arc::make_mut(attr);
+            match &mut attr.data {
+                AttrData::F32(v) => v.resize(v.len() + missing.len() * 2 * attr.width, 0.),
+                AttrData::I32(v) => v.resize(v.len() + missing.len() * 2 * attr.width, 0),
+            }
+        }
+        for attr in out.prim.values_mut() {
+            let attr = Arc::make_mut(attr);
+            match &mut attr.data {
+                AttrData::F32(v) => v.resize(v.len() + missing.len() * attr.width, 0.),
+                AttrData::I32(v) => v.resize(v.len() + missing.len() * attr.width, 0),
+            }
+        }
+    }
+    let original_pairs = original_edges.points.chunks_exact(2).map(|e| (e[0], e[1])).collect::<Vec<_>>();
+    let rows: Vec<_> = crate::topo::edges(&out.topology, out.npoints).points.chunks_exact(2)
+        .map(|e| original_pairs.binary_search(&(e[0], e[1])).expect("output edge came from input"))
+        .collect();
+    out.edge = gather_table(&g.edge, &rows);
+    out.validate()?;
+    Ok(out)
 }
 #[cfg(test)]
 mod tests {
@@ -256,5 +300,23 @@ mod tests {
         let p=Params::resolve(BLAST.params,serde_json::json!({"domain":"edges","group":"0-1"}).as_object()).unwrap();
         let out=blast(&[vec![Arc::new(g)]],&p).unwrap();out.validate().unwrap();
         assert_eq!(out.nedges(),12);assert_eq!(count(&out),11);
+    }
+    #[test]
+    fn blast_faces_only_keeps_all_cube_edges_and_points() {
+        let g = cube_open(false);
+        let p = Params::resolve(BLAST.params, serde_json::json!({"group":"5", "mode":"faces_only"}).as_object()).unwrap();
+        let out = blast(&[vec![Arc::new(g)]], &p).unwrap();
+        assert_eq!(out.npoints, 8);
+        assert_eq!((0..out.nprims()).filter(|&i| out.topology.is_closed(i)).count(), 5);
+        assert_eq!(out.nedges(), 12);
+        out.validate().unwrap();
+
+        let p = Params::resolve(BLAST.params, serde_json::json!({"group":"*", "mode":"faces_only"}).as_object()).unwrap();
+        let wires = blast(&[vec![Arc::new(cube_open(false))]], &p).unwrap();
+        assert_eq!(wires.npoints, 8);
+        assert_eq!(wires.nedges(), 12);
+        assert_eq!(wires.nprims(), 12);
+        assert!((0..wires.nprims()).all(|i| !wires.topology.is_closed(i)));
+        wires.validate().unwrap();
     }
 }

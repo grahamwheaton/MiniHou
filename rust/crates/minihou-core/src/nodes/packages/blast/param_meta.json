@@ -26,5 +26,11 @@
     "default": false,
     "doc": "primitives: keep points no remaining primitive uses",
     "kind": "bool"
+  },
+  "mode": {
+    "default": "delete_geometry",
+    "doc": "Faces only keeps all points and edges when deleting selected faces",
+    "kind": "enum",
+    "options": ["delete_geometry", "faces_only"]
   }
 }
