@@ -1,7 +1,7 @@
 //! Python output.py: named outputs use the same validated pass-through cook as the main output.
 use super::{InputSpec,Inputs,NodeSpec};
 use crate::{Geometry,Error,Result,params::Params};
-pub const OUTPUT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"output",inputs:super::GEO,params:crate::params!("object":""),cook:output};
+pub const OUTPUT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"output",inputs:super::GEO,params:crate::params!("index":0;"object":""),cook:output};
 pub const INPUT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"input",inputs:&[InputSpec{name:"preview",multi:false,optional:true}],params:crate::params!("index":0;"name":"geo"),cook:input};
 fn input(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let index=p.f("index")?;
@@ -9,7 +9,11 @@ fn input(inputs:&Inputs,p:&Params)->Result<Geometry>{
     p.s("name")?;
     inputs[0].first().map(|g|Ok((**g).clone())).unwrap_or_else(||Geometry::points_only(Vec::new()))
 }
-fn output(inputs:&Inputs,_:&Params)->Result<Geometry>{inputs[0].first().map(|g|(**g).clone()).ok_or_else(||Error::new("input 'geo' is not connected"))}
+fn output(inputs:&Inputs,p:&Params)->Result<Geometry>{
+    let index=p.i("index")?;
+    if !(0..=15).contains(&index){return Err(Error::new("index must be an integer from 0 to 15"));}
+    inputs[0].first().map(|g|(**g).clone()).ok_or_else(||Error::new("input 'geo' is not connected"))
+}
 #[cfg(test)]mod tests{
     use crate::Graph;
     use serde_json::json;

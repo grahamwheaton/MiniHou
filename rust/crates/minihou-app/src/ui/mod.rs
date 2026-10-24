@@ -64,6 +64,7 @@ pub enum UiAction {
     RegionSelect { shape: crate::picking::RegionShape, op: crate::picking::SelectOp },
     RestoreRegionSelection(selection_region::Snapshot),
     Open,
+    NewGraph,
     Save,
     SaveAs,
     Undo,

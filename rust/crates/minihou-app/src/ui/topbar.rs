@@ -38,7 +38,7 @@ fn button(ui: &mut egui::Ui, label: &str, kind: &str, enabled: bool, outlined: b
 
 /// File menu entries in display order (excluding Export USD).
 pub fn file_menu_entries() -> Vec<(&'static str, UiAction)> {
-    vec![("Open", UiAction::Open), ("Save", UiAction::Save), ("Save As", UiAction::SaveAs)]
+    vec![("New Graph", UiAction::NewGraph), ("Open", UiAction::Open), ("Save", UiAction::Save), ("Save As", UiAction::SaveAs)]
 }
 
 /// Preferences menu entries in display order (a separator goes before "Preferences…").
@@ -103,11 +103,12 @@ mod tests {
     use crate::ui::testing::Fixture;
 
     #[test]
-    fn file_menu_entries_are_open_save_save_as() {
+    fn file_menu_entries_include_new_graph() {
         let e = file_menu_entries();
         let labels: Vec<_> = e.iter().map(|(l, _)| *l).collect();
-        assert_eq!(labels, ["Open", "Save", "Save As"]);
-        assert!(matches!(e[0].1, UiAction::Open) && matches!(e[1].1, UiAction::Save) && matches!(e[2].1, UiAction::SaveAs));
+        assert_eq!(labels, ["New Graph", "Open", "Save", "Save As"]);
+        assert!(matches!(e[0].1, UiAction::NewGraph) && matches!(e[1].1, UiAction::Open)
+            && matches!(e[2].1, UiAction::Save) && matches!(e[3].1, UiAction::SaveAs));
     }
 
     #[test]

@@ -1,5 +1,13 @@
 use super::*;
 
+fn discard_changes() -> bool {
+    rfd::MessageDialog::new()
+        .set_title("Unsaved changes")
+        .set_description("Discard changes to the current graph?")
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show() == rfd::MessageDialogResult::Yes
+}
+
 impl App {
     /// Apply selected wire disconnections with any selected node operation as
     /// one history entry. With no wires, preserve the existing node command path.
@@ -409,7 +417,12 @@ impl App {
                     self.selection = snapshot.selection; self.selected = snapshot.selected;
                     self.selected_set = snapshot.selected_set; self.selection_dirty = true;
                 }
-                UiAction::Open => if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json", "minihou"]).pick_file() { self.open(path); },
+                UiAction::NewGraph => {
+                    if !self.editor.dirty() || discard_changes() { self.new_graph(); }
+                }
+                UiAction::Open => if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json", "minihou"]).pick_file() {
+                    if !self.editor.dirty() || discard_changes() { self.open(path); }
+                },
                 UiAction::Save => self.save_to(self.editor.path.clone()),
                 UiAction::SaveAs if self.editor.blender_label.is_some() => {
                     // A Blender-bound document saves into the .blend implicitly; Save As exports a

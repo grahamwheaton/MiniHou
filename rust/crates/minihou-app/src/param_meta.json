@@ -689,6 +689,12 @@
    "default": false,
    "doc": "primitives: keep points no remaining primitive uses",
    "kind": "bool"
+  },
+  "mode": {
+   "default": "delete_geometry",
+   "doc": "Faces only keeps all points and edges when deleting selected faces",
+   "kind": "enum",
+   "options": ["delete_geometry", "faces_only"]
   }
  },
  "blend": {
@@ -5611,6 +5617,13 @@
   }
  },
  "output": {
+  "index": {
+   "default": 0,
+   "doc": "Which output of the system this is (0 = first)",
+   "kind": "int",
+   "max": 15,
+   "min": 0
+  },
   "object": {
    "default": "",
    "doc": "Blender object that shows this output (created and updated live). Empty: the main output, shown through the MiniHou proxy; only the display node is the main output",
