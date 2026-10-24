@@ -180,6 +180,40 @@
     "mode": "radial"
    }
   },
+  "random_position": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Largest random move per axis, either way. Applies to every copy, the first included.",
+   "kind": "vec3"
+  },
+  "random_rotation": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Largest random rotation in degrees about X, Y and Z, either way, about each copy's origin.",
+   "kind": "vec3"
+  },
+  "random_scale": {
+   "default": 0.0,
+   "doc": "Largest random change of scale: each copy scales by 1 plus or minus this.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "random_seed": {
+   "default": 0,
+   "doc": "Seed for the per-copy randomness. Each copy draws from (seed, copy number), so adding copies keeps the existing ones.",
+   "kind": "int"
+  },
+  "random_uv": {
+   "default": 0.0,
+   "doc": "Largest random shift of U and V per copy, either way.",
+   "kind": "float"
+  },
   "relative_offset": {
    "default": [
     1.0,
@@ -211,6 +245,11 @@
      "grid"
     ]
    }
+  },
+  "uniform_scale": {
+   "default": true,
+   "doc": "Use one random scale for all axes; off scales X, Y and Z separately.",
+   "kind": "bool"
   },
   "uv_offset_u": {
    "default": 0.0,

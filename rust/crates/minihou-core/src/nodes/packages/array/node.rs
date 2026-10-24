@@ -12,6 +12,8 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
         "relative_offset": [1., 0., 0.]; "constant_offset": [0., 0., 0.]; "endpoint": [1., 0., 0.];
         "count_x": 2; "count_y": 2; "count_z": 1;
         "radial_mode": "count"; "distance": 1.0; "radius": 1.0; "axis": "z"; "angle": 360.0; "align_rotation": true;
+        "random_seed": 0; "random_position": [0., 0., 0.]; "random_rotation": [0., 0., 0.];
+        "random_scale": 0.0; "uniform_scale": true; "random_uv": 0.0;
         "legacy_fit_length": -1.0;
         "merge_vertices": true; "merge_distance": 0.0; "merge_first_last": false;
         "uv_offset_u": 0.0; "uv_offset_v": 0.0
@@ -255,6 +257,49 @@ fn radial_layout(p: &Params) -> Result<Layout> {
     Ok(Layout { xf, pairs: chain(count) })
 }
 
+/// A stable number in [0, 1) for (seed, copy, channel): adding copies never changes the existing ones.
+fn hash01(seed: i64, copy: usize, channel: u64) -> f64 {
+    let mut z = (seed as u64) ^ (copy as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ channel.wrapping_mul(0xD1B5_4A32_D192_ED03);
+    for _ in 0..2 {
+        z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+    }
+    (z >> 11) as f64 / (1u64 << 53) as f64
+}
+fn signed(seed: i64, copy: usize, channel: u64) -> f64 { hash01(seed, copy, channel) * 2. - 1. }
+
+/// Per-copy randomness, applied in the copy's own space before the layout places it (copy 0 included).
+pub(super) struct Random { seed: i64, pos: [f64; 3], rot: [f64; 3], scale: f64, uniform: bool, uv: f64 }
+impl Random {
+    fn read(p: &Params) -> Result<Self> {
+        let r = Self { seed: p.i("random_seed")?, pos: p.v3("random_position")?, rot: p.v3("random_rotation")?,
+            scale: p.f("random_scale")?, uniform: p.b("uniform_scale")?, uv: p.f("random_uv")? };
+        if !finite3(r.pos) || !finite3(r.rot) || !r.scale.is_finite() || r.scale < 0. || !r.uv.is_finite() {
+            return Err(Error::new("array random ranges must be finite and random scale nonnegative"));
+        }
+        Ok(r)
+    }
+    fn local(&self, k: usize) -> Affine {
+        let t = std::array::from_fn(|a| self.pos[a] * signed(self.seed, k, a as u64));
+        let rot = math::euler_xyz(std::array::from_fn(|a| self.rot[a] * signed(self.seed, k, 3 + a as u64)));
+        let sc: [f64; 3] = std::array::from_fn(|a| {
+            let ch = if self.uniform { 6 } else { 6 + a as u64 };
+            (1. + self.scale * signed(self.seed, k, ch)).max(1e-4)
+        });
+        Affine { m: std::array::from_fn(|r| std::array::from_fn(|c| rot[r][c] * sc[c])), t }
+    }
+    fn uv(&self, k: usize) -> [f32; 2] {
+        [(self.uv * signed(self.seed, k, 9)) as f32, (self.uv * signed(self.seed, k, 10)) as f32]
+    }
+    fn active(&self) -> bool { self.pos != [0.; 3] || self.rot != [0.; 3] || self.scale != 0. }
+}
+fn compose(outer: Affine, inner: Affine) -> Affine {
+    let t = math::apply(&outer.m, inner.t);
+    Affine { m: math::mul(&outer.m, &inner.m), t: std::array::from_fn(|a| t[a] + outer.t[a]) }
+}
+
 fn layout(g: &Geometry, p: &Params) -> Result<Layout> {
     match p.e("mode", &["line", "grid", "radial"])?.as_str() {
         "line" => line_layout(g, p),
@@ -269,14 +314,19 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let dist = p.f("merge_distance")?;
     if !dist.is_finite() || dist < 0. { return Err(Error::new("array merge distance must be finite and nonnegative")); }
     let uv = uv_offset(p)?;
-    let Layout { xf, mut pairs } = layout(&g, p)?;
+    let Layout { mut xf, mut pairs } = layout(&g, p)?;
+    let random = Random::read(p)?;
+    if random.active() { for (k, x) in xf.iter_mut().enumerate() { *x = compose(*x, random.local(k)); } }
     let count = xf.len();
     if g.npoints == 0 { return Ok((*g).clone()); }
     let estimated = g.npoints.checked_mul(count).ok_or_else(|| Error::new("array point count overflow"))?;
     if estimated > crate::geometry::MAX_ELEMENTS { return Err(Error::new("array exceeds geometry point limit")); }
     let mut parts = Vec::with_capacity(count);
     for (k, x) in xf.iter().enumerate() {
-        parts.push(Arc::new(transformed(&g, *x, [uv[0] * k as f32, uv[1] * k as f32])?));
+        parts.push(Arc::new(transformed(&g, *x, {
+            let r = random.uv(k);
+            [uv[0] * k as f32 + r[0], uv[1] * k as f32 + r[1]]
+        })?));
     }
     let mut merged = (MERGE.cook)(&[parts.clone()], p)?;
     restore_edge_attributes(&mut merged, &parts)?;

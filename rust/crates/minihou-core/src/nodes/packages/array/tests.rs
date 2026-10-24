@@ -187,3 +187,47 @@ fn radial_align_rotation_turns_copies_and_can_be_off() {
     let off = run(seg, json!({"mode":"radial","count":4,"radius":2.0,"align_rotation":false}));
     assert!(near(&off.p()[6..12], &[0.,2.,0., 1.,2.,0.]));
 }
+fn random_params(seed: i64, count: i64) -> serde_json::Value {
+    json!({"spacing":"offset","count":count,"constant_offset":[10.,0.,0.],"random_seed":seed,
+        "random_position":[0.5,0.25,0.],"random_rotation":[0.,0.,30.],"random_scale":0.5,"random_uv":0.1})
+}
+#[test]
+fn random_same_seed_same_result_different_seed_differs() {
+    let a = run(quad(), random_params(3, 4));
+    let b = run(quad(), random_params(3, 4));
+    let c = run(quad(), random_params(4, 4));
+    assert_eq!(a.p(), b.p());
+    assert_eq!(a.vertex["uv"].data, b.vertex["uv"].data);
+    assert_ne!(a.p(), c.p());
+    // Copy 0 is randomised too.
+    let plain = run(quad(), json!({"spacing":"offset","count":4,"constant_offset":[10.,0.,0.]}));
+    assert_ne!(&a.p()[..12], &plain.p()[..12]);
+}
+#[test]
+fn random_stays_within_ranges() {
+    let pt = Geometry::points_only(vec![0.,0.,0., 1.,0.,0.]).unwrap();
+    let out = run(pt, json!({"spacing":"offset","count":50,"constant_offset":[10.,0.,0.],"random_seed":9,
+        "random_position":[0.5,0.25,0.],"random_scale":0.5}));
+    for k in 0..50 {
+        let a = &out.p()[6*k..6*k+3];
+        let b = &out.p()[6*k+3..6*k+6];
+        assert!((a[0] - 10. * k as f32).abs() <= 0.5 + 1e-4 && a[1].abs() <= 0.25 + 1e-6 && a[2] == 0.);
+        let len = b[0] - a[0];
+        assert!((0.5 - 1e-4..=1.5 + 1e-4).contains(&len), "uniform scale {len}");
+        assert!((b[1] - a[1]).abs() < 1e-5);
+    }
+    let rot = run(Geometry::points_only(vec![1.,0.,0.]).unwrap(),
+        json!({"spacing":"offset","count":40,"random_rotation":[0.,0.,30.],"random_seed":1}));
+    for q in rot.p().chunks_exact(3) {
+        let angle = (q[1] as f64).atan2(q[0] as f64).to_degrees();
+        assert!(angle.abs() <= 30. + 1e-3, "{angle}");
+    }
+}
+#[test]
+fn random_copies_are_stable_when_the_count_grows() {
+    let few = run(quad(), random_params(7, 3));
+    let many = run(quad(), random_params(7, 6));
+    assert_eq!(few.p(), &many.p()[..few.p().len()]);
+    let uv = few.vertex["uv"].as_f32().unwrap();
+    assert_eq!(uv, &many.vertex["uv"].as_f32().unwrap()[..uv.len()]);
+}
