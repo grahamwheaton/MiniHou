@@ -155,3 +155,35 @@ fn grid_counts_and_positions_per_axis() {
     assert_eq!(welded.npoints, 9);
     assert!(run_err(pt(), json!({"mode":"grid","count_x":100,"count_y":100,"count_z":2})).contains("at most"));
 }
+fn near(a: &[f32], b: &[f32]) -> bool { a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5) }
+#[test]
+fn radial_count_places_copies_at_even_angles() {
+    let pt = Geometry::points_only(vec![0.,0.,0.]).unwrap();
+    let out = run(pt.clone(), json!({"mode":"radial","count":4,"radius":2.0}));
+    assert!(near(out.p(), &[2.,0.,0., 0.,2.,0., -2.,0.,0., 0.,-2.,0.]), "{:?}", out.p());
+    // A partial angle reaches its end: 90 degrees over three copies is 0, 45 and 90.
+    let arc = run(pt.clone(), json!({"mode":"radial","count":3,"radius":1.0,"angle":90.0}));
+    let h = std::f32::consts::FRAC_1_SQRT_2;
+    assert!(near(arc.p(), &[1.,0.,0., h,h,0., 0.,1.,0.]));
+    // About X the circle starts on +Y.
+    let x = run(pt, json!({"mode":"radial","count":2,"radius":1.0,"axis":"x"}));
+    assert!(near(x.p(), &[0.,1.,0., 0.,-1.,0.]));
+}
+#[test]
+fn radial_distance_mode_derives_the_count() {
+    let pt = Geometry::points_only(vec![0.,0.,0.]).unwrap();
+    let tau = std::f64::consts::TAU;
+    let out = run(pt.clone(), json!({"mode":"radial","radial_mode":"distance","radius":1.0,"distance":tau / 8.0}));
+    assert_eq!(out.npoints, 8);
+    let half = run(pt, json!({"mode":"radial","radial_mode":"distance","radius":1.0,"angle":180.0,"distance":tau / 8.0}));
+    assert_eq!(half.npoints, 5);
+}
+#[test]
+fn radial_align_rotation_turns_copies_and_can_be_off() {
+    let seg = Geometry::points_only(vec![0.,0.,0., 1.,0.,0.]).unwrap();
+    let on = run(seg.clone(), json!({"mode":"radial","count":4,"radius":2.0}));
+    // Second copy at 90 degrees: the segment pointing along +X now points along +Y.
+    assert!(near(&on.p()[6..12], &[0.,2.,0., 0.,3.,0.]), "{:?}", on.p());
+    let off = run(seg, json!({"mode":"radial","count":4,"radius":2.0,"align_rotation":false}));
+    assert!(near(&off.p()[6..12], &[0.,2.,0., 1.,2.,0.]));
+}

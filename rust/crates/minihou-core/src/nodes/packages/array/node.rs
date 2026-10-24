@@ -1,4 +1,4 @@
-//! Array copies following Blender 5.2's geometry-nodes Array (Line and Grid shapes with Relative, Offset and Endpoint spacing).
+//! Array copies following Blender 5.2's geometry-nodes Array (Line, Grid and Radial shapes with Relative, Offset and Endpoint spacing).
 use std::{collections::{BTreeSet, HashMap}, sync::Arc};
 use serde_json::{Map, Value};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry, Topology},
@@ -11,6 +11,7 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
         "mode": "line"; "spacing": "relative"; "count": 2;
         "relative_offset": [1., 0., 0.]; "constant_offset": [0., 0., 0.]; "endpoint": [1., 0., 0.];
         "count_x": 2; "count_y": 2; "count_z": 1;
+        "radial_mode": "count"; "distance": 1.0; "radius": 1.0; "axis": "z"; "angle": 360.0; "align_rotation": true;
         "legacy_fit_length": -1.0;
         "merge_vertices": true; "merge_distance": 0.0; "merge_first_last": false;
         "uv_offset_u": 0.0; "uv_offset_v": 0.0
@@ -212,10 +213,53 @@ fn grid_layout(g: &Geometry, p: &Params) -> Result<Layout> {
     Ok(Layout { xf, pairs })
 }
 
+/// Rotation by `theta` radians about the unit X, Y or Z axis.
+fn axis_rotation(axis: usize, theta: f64) -> M3 {
+    let (s, c) = theta.sin_cos();
+    let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
+    let mut m = IDENTITY;
+    m[u][u] = c; m[u][v] = -s; m[v][u] = s; m[v][v] = c;
+    m
+}
+
+/// Radial: copies around a circle about the X, Y or Z axis through the origin. Copy 0 sits at `radius` along the
+/// next axis (X for Z, Y for X, Z for Y). A full turn spaces copies evenly without doubling the first; a partial
+/// angle puts the last copy at the end of the arc. Align Rotation turns each copy to face along the circle.
+fn radial_layout(p: &Params) -> Result<Layout> {
+    let radius = p.f("radius")?;
+    let angle = p.f("angle")?;
+    if !radius.is_finite() || !angle.is_finite() { return Err(Error::new("array radius and angle must be finite")); }
+    let axis_name = p.e("axis", &["x", "y", "z"])?;
+    let axis = ["x", "y", "z"].iter().position(|a| *a == axis_name.as_str()).unwrap();
+    let full = angle.abs() >= 360. - 1e-9;
+    let count = match p.e("radial_mode", &["count", "distance"])?.as_str() {
+        "count" => checked_count(p, "count")?,
+        _ => {
+            let d = p.f("distance")?;
+            if !d.is_finite() || d <= 0. { return Err(Error::new("array radial distance must be positive")); }
+            let arc = radius.abs() * angle.abs().min(360.).to_radians();
+            let n = (arc / d + 1e-9).floor();
+            (if full { n } else { n + 1. }).clamp(1., MAX_COUNT as f64) as usize
+        },
+    };
+    let sweep = angle.clamp(-360., 360.).to_radians();
+    let div = if full { count as f64 } else if count > 1 { (count - 1) as f64 } else { 1. };
+    let mut base = [0.; 3];
+    base[(axis + 1) % 3] = radius;
+    let align = p.b("align_rotation")?;
+    let xf = (0..count).map(|k| {
+        let r = axis_rotation(axis, sweep * k as f64 / div);
+        let t = math::apply(&r, base);
+        Affine { m: if align { r } else { IDENTITY }, t }
+    }).collect();
+    Ok(Layout { xf, pairs: chain(count) })
+}
+
 fn layout(g: &Geometry, p: &Params) -> Result<Layout> {
     match p.e("mode", &["line", "grid", "radial"])?.as_str() {
         "line" => line_layout(g, p),
         "grid" => grid_layout(g, p),
+        "radial" => radial_layout(p),
         other => Err(Error::new(format!("array mode {other:?} is not available yet"))),
     }
 }

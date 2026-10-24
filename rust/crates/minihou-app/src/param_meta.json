@@ -1,5 +1,36 @@
 {
  "array": {
+  "align_rotation": {
+   "default": true,
+   "doc": "Rotate each copy to follow the circle.",
+   "kind": "bool",
+   "visible_when": {
+    "mode": "radial"
+   }
+  },
+  "angle": {
+   "default": 360.0,
+   "doc": "Sweep in degrees. A full turn spaces copies evenly; less puts the last copy at the end of the arc.",
+   "kind": "float",
+   "max": 360.0,
+   "min": -360.0,
+   "visible_when": {
+    "mode": "radial"
+   }
+  },
+  "axis": {
+   "default": "z",
+   "doc": "Axis the copies turn around.",
+   "kind": "enum",
+   "options": [
+    "x",
+    "y",
+    "z"
+   ],
+   "visible_when": {
+    "mode": "radial"
+   }
+  },
   "constant_offset": {
    "default": [
     0.0,
@@ -26,7 +57,11 @@
    "max": 10000,
    "min": 1,
    "visible_when": {
-    "mode": "line"
+    "mode": [
+     "line",
+     "radial"
+    ],
+    "radial_mode": "count"
    }
   },
   "count_x": {
@@ -57,6 +92,16 @@
    "min": 1,
    "visible_when": {
     "mode": "grid"
+   }
+  },
+  "distance": {
+   "default": 1.0,
+   "doc": "Arc length between neighbouring copies (Radial, Distance).",
+   "kind": "float",
+   "min": 0.0,
+   "visible_when": {
+    "mode": "radial",
+    "radial_mode": "distance"
    }
   },
   "endpoint": {
@@ -114,6 +159,26 @@
     "grid",
     "radial"
    ]
+  },
+  "radial_mode": {
+   "default": "count",
+   "doc": "Radial: set the number of copies directly, or derive it from the distance between copies along the arc.",
+   "kind": "enum",
+   "options": [
+    "count",
+    "distance"
+   ],
+   "visible_when": {
+    "mode": "radial"
+   }
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "Distance of the copies from the rotation axis.",
+   "kind": "float",
+   "visible_when": {
+    "mode": "radial"
+   }
   },
   "relative_offset": {
    "default": [
