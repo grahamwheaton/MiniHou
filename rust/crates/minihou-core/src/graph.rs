@@ -221,6 +221,13 @@ impl Graph {
                         Value::Array(a) => a.iter().map(parse).collect::<Result<Vec<_>>>()?,
                         _ => vec![parse(r)?],
                     };
+                    for endpoint in &refs {
+                        if let Some(source_type) = nodes_v.get(&endpoint.node).and_then(|n|n["type"].as_str()) {
+                            if nodes::integer_output(source_type,endpoint.output) != nodes::integer_input(&node_type,port) {
+                                return Err(Error::new(format!("node '{id}': input '{port}' has the wrong socket type")));
+                            }
+                        }
+                    }
                     inputs.push((port.clone(), refs.iter().map(|r| r.node.clone()).collect()));
                     endpoints.push((port.clone(), refs));
                 }
@@ -399,7 +406,7 @@ pub(crate) fn run_node_outputs(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, 
             .and_then(|p| if def.node_type == "usd_export" { nodes::usd_nodes::cook_named(inputs, &p, id).map(Into::into) } else { spec.cook_outputs(inputs, &p) })
             .and_then(|g: nodes::NodeOutputs| {
                 if g.0.len() != spec.outputs.len() { return Err(Error::new(format!("expected {} outputs, got {}", spec.outputs.len(), g.0.len()))); }
-                for output in &g.0 { output.validate()?; }
+                for output in &g.0 { if let nodes::NodeOutput::Geometry(geometry)=output {geometry.validate()?;} }
                 Ok(g)
             })
     };
@@ -433,7 +440,7 @@ impl Cook<'_> {
                 return Err(Error::new(format!("node '{id}': '{}' has no input '{port}'", def.node_type)));
             }
         }
-        if def.node_type == "loop_end" {
+        if matches!(def.node_type.as_str(), "loop_end" | "for_each_end") {
             let (plan, graph, budget, resolved) = (self.plan, self.graph, self.budget.clone(), self.resolved.clone());
             let geo = Arc::new(plan.cook_end(graph, &resolved, id, budget, &mut |src, output| self.node_output(src, output))?.0);
             self.active.remove(id);
@@ -454,7 +461,7 @@ impl Cook<'_> {
             }
             inputs.push(got);
         }
-        let outputs: Vec<_> = run_node_outputs(id, def, spec, &inputs, self.resolved.params.get(id))?.0.into_iter().map(Arc::new).collect();
+        let outputs = run_node_outputs(id, def, spec, &inputs, self.resolved.params.get(id))?.into_geometries()?;
         self.active.remove(id);
         let geo = outputs.get(output).cloned().ok_or_else(|| Error::new(format!("node '{id}' has no output {output}")))?;
         self.done.insert(id.to_string(), outputs);

@@ -66,7 +66,7 @@ fn glue(g: Geometry, p: &Params, strength: f64, output: &str) -> Result<Geometry
             "clusters":p.i("clusters")?,"weak":0.5}))
 }
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    Ok(cook_multi(inputs, p)?.0.remove(0))
+    cook_multi(inputs, p)?.0.remove(0).into_geometry()
 }
 fn cook_multi(inputs: &Inputs, p: &Params) -> Result<NodeOutputs> {
     let source = RBD_MATERIAL_FRACTURE.one(inputs,0)?;

@@ -1,7 +1,7 @@
 //! For-each pieces, using native NodeSpec bodies and their parameter validation.
 use std::sync::Arc;
 use super::{InputSpec,Inputs,NodeSpec,GEO};
-use crate::{error::{Error,Result},geometry::{AttrData,Geometry},params::Params};
+use crate::{error::{Error,Result},geometry::{Attr,AttrData,Geometry},params::Params};
 pub const FOR_EACH:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None, cook_sidecar: None,name:"for_each",inputs:GEO,params:crate::params!(
     "body":"";"params":"{}";"piece":"connectivity";"method":"connected";"domain":"points";"selection":"";"attribute":"class";"max_pieces":1000),cook:for_each};
 pub const FOR_EACH_START:NodeSpec=NodeSpec{ outputs: &["element","index"], cook_multi:None,cook_sidecar:None,
@@ -12,6 +12,23 @@ pub const FOR_EACH_END:NodeSpec=NodeSpec{ outputs: &["generated"],cook_multi:Non
         InputSpec{name:"generated",multi:false,optional:false},
         InputSpec{name:"begin",multi:false,optional:false},
     ],params:&[],cook:|_,_|Err(Error::new("For Each End must cook through its zone"))};
+/// Bridge a typed Index into geometry attributes for ordinary body nodes.
+pub const FOR_EACH_INDEX:NodeSpec=NodeSpec{ outputs:&["geometry"],cook_multi:None,cook_sidecar:None,
+    name:"for_each_index",inputs:&[
+        InputSpec{name:"geo",multi:false,optional:false},
+        InputSpec{name:"index",multi:false,optional:false},
+    ],params:crate::params!("name":"source_index"),
+    cook:|_,_|Err(Error::new("Index is only available inside a For Each zone"))};
+
+pub(crate) fn stamp_index(g:&Geometry,index:i64,name:&str)->Result<Geometry> {
+    super::group::valid_name(name)?;
+    let value=i32::try_from(index).map_err(|_|Error::new("Index exceeds the integer attribute range"))?;
+    let mut out=g.clone();
+    out.point.insert(name.into(),Arc::new(Attr::i32(1,vec![value;g.npoints])));
+    out.detail.insert(name.into(),serde_json::json!(index));
+    out.validate()?;
+    Ok(out)
+}
 thread_local!{static DEPTH:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};}
 struct Depth;
 impl Drop for Depth{fn drop(&mut self){DEPTH.with(|d|d.set(d.get()-1));}}

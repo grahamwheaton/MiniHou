@@ -114,19 +114,55 @@ pub type Inputs = [Vec<Arc<Geometry>>];
 /// A cached node payload and its size in bytes.
 pub type Sidecar = (Arc<dyn Any + Send + Sync>, usize);
 
-/// Ordered geometry sockets produced by a single node cook.
+/// A socket payload. Index is an integer rather than geometry carrying a detail attribute.
 #[derive(Clone, Debug)]
-pub struct NodeOutputs(pub Vec<Geometry>);
+pub enum NodeOutput { Geometry(Geometry), Integer(i64) }
+
+impl NodeOutput {
+    pub fn into_geometry(self) -> Result<Geometry> {
+        match self {Self::Geometry(g)=>Ok(g),Self::Integer(_)=>Err(Error::new("integer output is not geometry"))}
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum CachedOutput { Geometry(Arc<Geometry>), Integer(i64) }
+
+impl CachedOutput {
+    pub fn geometry(self) -> Result<Arc<Geometry>> {
+        match self { Self::Geometry(g) => Ok(g), Self::Integer(_) => Err(Error::new("integer Index socket cannot feed a geometry input")) }
+    }
+    pub fn integer(self) -> Result<i64> {
+        match self { Self::Integer(i) => Ok(i), Self::Geometry(_) => Err(Error::new("geometry socket cannot feed an integer input")) }
+    }
+}
+
+/// Ordered typed sockets produced by a single node cook.
+#[derive(Clone, Debug)]
+pub struct NodeOutputs(pub Vec<NodeOutput>);
+
+impl NodeOutputs {
+    pub fn into_cached(self) -> Vec<CachedOutput> {
+        self.0.into_iter().map(|output| match output {
+            NodeOutput::Geometry(g) => CachedOutput::Geometry(Arc::new(g)),
+            NodeOutput::Integer(i) => CachedOutput::Integer(i),
+        }).collect()
+    }
+    pub fn into_geometries(self) -> Result<Vec<Arc<Geometry>>> {
+        self.into_cached().into_iter().map(CachedOutput::geometry).collect()
+    }
+}
 
 impl From<Geometry> for NodeOutputs {
-    fn from(geometry: Geometry) -> Self { Self(vec![geometry]) }
+    fn from(geometry: Geometry) -> Self { Self(vec![NodeOutput::Geometry(geometry)]) }
 }
 impl From<Vec<Geometry>> for NodeOutputs {
-    fn from(geometries: Vec<Geometry>) -> Self { Self(geometries) }
+    fn from(geometries: Vec<Geometry>) -> Self { Self(geometries.into_iter().map(NodeOutput::Geometry).collect()) }
 }
 impl std::ops::Index<usize> for NodeOutputs {
     type Output = Geometry;
-    fn index(&self, index: usize) -> &Geometry { &self.0[index] }
+    fn index(&self, index: usize) -> &Geometry {
+        match &self.0[index] {NodeOutput::Geometry(g)=>g,NodeOutput::Integer(_)=>panic!("Index is an integer socket")}
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -165,6 +201,9 @@ mod output_wrapper_tests {
         let spec = get("null").unwrap();
         let params = Params::resolve(spec.params, None).unwrap();
         assert_eq!(spec.cook_outputs(&[vec![Arc::new(geometry)]], &params).unwrap().0.len(), 1);
+        let typed=NodeOutputs(vec![NodeOutput::Integer(7)]).into_cached();
+        assert_eq!(typed[0].clone().integer().unwrap(),7);
+        assert!(typed[0].clone().geometry().is_err());
     }
 }
 
@@ -239,6 +278,7 @@ pub fn registry() -> &'static [NodeSpec] {
         foreach::FOR_EACH,
         foreach::FOR_EACH_START,
         foreach::FOR_EACH_END,
+        foreach::FOR_EACH_INDEX,
         select_nodes::GROW,
         select_nodes::SELECT_PATH,
         select_nodes::SELECT_LOOP,
@@ -341,6 +381,13 @@ pub fn registry() -> &'static [NodeSpec] {
         }
         nodes
     })
+}
+
+pub fn integer_output(node_type: &str, index: usize) -> bool {
+    node_type == "for_each_start" && index == 1
+}
+pub fn integer_input(node_type: &str, port: &str) -> bool {
+    node_type == "for_each_index" && port == "index"
 }
 
 pub fn get(name: &str) -> Option<&'static NodeSpec> {

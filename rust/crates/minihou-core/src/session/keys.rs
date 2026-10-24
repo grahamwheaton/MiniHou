@@ -23,6 +23,15 @@ pub(super) fn key_of(graph: &Graph, resolved: &crate::channels::ResolvedChannels
     }
     let mut h = DefaultHasher::new();
     def.node_type.hash(&mut h);
+    if def.node_type == "for_each_end" {
+        if let Some(zone)=graph.zones.iter().find(|zone|zone.end==id) {
+            zone.id.hash(&mut h);
+            zone.kind.hash(&mut h);
+            zone.start.hash(&mut h);
+            zone.members.hash(&mut h);
+            zone.parent.hash(&mut h);
+        }
+    }
     if def.node_type == "usd_export" {
         nodes::usd_nodes::exports_suppressed().hash(&mut h);
         let p = Params::resolve(spec.params, values)?;
