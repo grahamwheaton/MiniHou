@@ -168,13 +168,22 @@ pub fn modifier_inputs_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions,
     ui.small("Link a parameter with this input's stable id in the node parameter menu.");
 }
 
+pub const UP_LABEL: &str = "▲";
+pub const DOWN_LABEL: &str = "▼";
+
 pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str) {
     let node = &v.doc["nodes"][id];
     let mut sections = node["controller_sections"].as_array().cloned().unwrap_or_default();
     let mut changed = false;
     ui.heading(format!("Controller: {id}"));
     ui.small("Use ch('../controller/parameter') to drive another node.");
+    let edit_key = egui::Id::new(("controller_edit", id));
+    let mut edit = ui.ctx().data(|d| d.get_temp::<bool>(edit_key)).unwrap_or(false);
+    if ui.selectable_label(edit, if edit { "Done" } else { "Edit" }).clicked() { edit = !edit; }
+    ui.ctx().data_mut(|d| d.insert_temp(edit_key, edit));
+    ui.add_space(4.0);
     egui::ScrollArea::vertical().show(ui, |ui| {
+        if !edit {
         ui.heading("Parameters");
         let parameters = minihou_core::controller::parameters(node);
         if parameters.is_empty() { ui.small("Add a section and parameter below to create a control."); }
@@ -201,13 +210,14 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
             });
             }
         }
-        ui.separator();
+        } else {
         ui.heading("Edit Sections");
         let section_drag_key=egui::Id::new(("controller_section_drag",id));
         let mut section_dragging=ui.ctx().data(|d|d.get_temp::<usize>(section_drag_key));
         let mut section_move=None;
         for si in 0..sections.len() {
             ui.push_id(si, |ui| {
+                ui.add_space(6.0);
                 ui.separator();
                 let mut title = sections[si]["name"].as_str().unwrap_or("").to_owned();
                 let heading=ui.horizontal(|ui| {
@@ -216,8 +226,8 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
                     if ui.text_edit_singleline(&mut title).changed() && !title.trim().is_empty() {
                         sections[si]["name"] = json!(title.trim()); changed = true;
                     }
-                    if ui.add_enabled(si > 0, egui::Button::new("↑")).clicked() { sections.swap(si, si-1); changed = true; }
-                    if ui.add_enabled(si+1 < sections.len(), egui::Button::new("↓")).clicked() { sections.swap(si, si+1); changed = true; }
+                    if ui.add_enabled(si > 0, egui::Button::new(UP_LABEL)).clicked() { sections.swap(si, si-1); changed = true; }
+                    if ui.add_enabled(si+1 < sections.len(), egui::Button::new(DOWN_LABEL)).clicked() { sections.swap(si, si+1); changed = true; }
                     if ui.button("Remove section").clicked() { sections.remove(si); changed = true; }
                 });
                 if ui.ctx().input(|i|i.pointer.any_released()) && heading.response.hovered() {
@@ -241,8 +251,8 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
                             if matches!(kind.as_str(),"float"|"int"|"bool"|"vector"|"color") && ui.checkbox(&mut expose,"Expose to Blender").changed() {
                                 entries[pi]["expose_to_blender"]=json!(expose); changed=true;
                             }
-                            if ui.add_enabled(pi>0,egui::Button::new("↑")).clicked() {entries.swap(pi,pi-1);changed=true;}
-                            if ui.add_enabled(pi+1<entries.len(),egui::Button::new("↓")).clicked() {entries.swap(pi,pi+1);changed=true;}
+                            if ui.add_enabled(pi>0,egui::Button::new(UP_LABEL)).clicked() {entries.swap(pi,pi-1);changed=true;}
+                            if ui.add_enabled(pi+1<entries.len(),egui::Button::new(DOWN_LABEL)).clicked() {entries.swap(pi,pi+1);changed=true;}
                             if ui.button("×").clicked() {entries.remove(pi);changed=true;}
                         });
                         if ui.ctx().input(|i|i.pointer.any_released()) && row.response.hovered() {
@@ -296,6 +306,7 @@ pub fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: 
             while sections.iter().any(|s|s["name"]==format!("Section {i}")) {i+=1;}
             sections.push(json!({"name":format!("Section {i}"),"parameters":[]}));changed=true;
         }
+        }
     });
     if changed {
         let mut next=v.doc.clone();next["nodes"][id]["controller_sections"]=json!(sections);
@@ -333,6 +344,46 @@ mod controller_panel_tests {
         assert!(out.0.is_empty());
     }
 
+    fn drawn_texts(edit: bool) -> Vec<String> {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"nodes":{"c":{"type":"controller",
+            "controller_sections":[{"name":"Shape","parameters":[{"name":"width","kind":"float","default":1.0}]}]}},"display":"c"}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "c".into();
+        f.display = "c".into();
+        let ctx = egui::Context::default();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(("controller_edit", "c")), edit));
+        let mut out = Actions::default();
+        let frame = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| super::super::show(ui, &f.view(), &mut out));
+        });
+        frame.shapes.iter().filter_map(|s| match &s.shape { egui::Shape::Text(t) => Some(t.galley.text().to_owned()), _ => None }).collect()
+    }
+
+    #[test]
+    fn final_mode_hides_edit_controls() {
+        let t = drawn_texts(false);
+        assert!(t.iter().any(|x| x == "width") && t.iter().any(|x| x == "Edit"));
+        for hidden in ["Add section", "Add parameter", "Remove section", "×", UP_LABEL, DOWN_LABEL] {
+            assert!(!t.iter().any(|x| x == hidden), "{hidden} must be hidden in final mode");
+        }
+    }
+
+    #[test]
+    fn edit_mode_lists_add_and_remove_controls() {
+        let t = drawn_texts(true);
+        for shown in ["Add section", "Add parameter", "Remove section", "×", "Done"] {
+            assert!(t.iter().any(|x| x == shown), "{shown} must be shown in edit mode");
+        }
+    }
+
+    #[test]
+    fn move_buttons_use_arrow_labels() {
+        assert_eq!((UP_LABEL, DOWN_LABEL), ("▲", "▼"));
+        let t = drawn_texts(true);
+        assert!(t.iter().any(|x| x == UP_LABEL) && t.iter().any(|x| x == DOWN_LABEL));
+    }
+
     #[test]
     fn add_section_click_emits_persisted_controller_section() {
         let mut f = Fixture::new();
@@ -341,6 +392,7 @@ mod controller_panel_tests {
         f.selected = "controller1".into();
         f.display = "controller1".into();
         let ctx = egui::Context::default();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(("controller_edit", "controller1")), true));
         f.theme.apply(&ctx);
         let mut click = None;
         let mut actions = Actions::default();
