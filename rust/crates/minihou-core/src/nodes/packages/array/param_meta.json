@@ -19,11 +19,12 @@
   "random_rotation": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Largest random rotation in degrees about X, Y and Z, either way, about each copy's origin."},
   "random_scale": {"kind": "float", "default": 0.0, "min": 0.0, "doc": "Largest random change of scale: each copy scales by 1 plus or minus this."},
   "uniform_scale": {"kind": "bool", "default": true, "doc": "Use one random scale for all axes; off scales X, Y and Z separately."},
-  "random_uv": {"kind": "float", "default": 0.0, "doc": "Largest random shift of U and V per copy, either way."},
+  "random_uv": {"kind": "float", "default": 0.0, "visible_when": {"pack": false}, "doc": "Largest random shift of U and V per copy, either way."},
+  "pack": {"kind": "bool", "default": false, "doc": "Output one shared copy of the input and one instance point per copy instead of real geometry. UV offsets and welding are off while packed; Unpack gives the real copies."},
   "legacy_fit_length": {"kind": "float", "default": -1.0, "visible_when": {"mode": []}, "doc": "Hidden. Set by migration from the old Fit Length: the count comes from this length and the step. Negative disables it."},
-  "merge_vertices": {"kind": "bool", "default": true, "doc": "Weld adjacent copies within Merge Distance."},
-  "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "visible_when": {"merge_vertices": true}, "doc": "Maximum distance for welding. Zero disables welding for legacy graph compatibility."},
-  "merge_first_last": {"kind": "bool", "default": false, "visible_when": {"merge_vertices": true}, "doc": "Also weld the last copy with the first."},
-  "uv_offset_u": {"kind": "float", "default": 0.0, "doc": "Shift U on each copy by its copy number."},
-  "uv_offset_v": {"kind": "float", "default": 0.0, "doc": "Shift V on each copy by its copy number."}
+  "merge_vertices": {"kind": "bool", "default": true, "visible_when": {"pack": false}, "doc": "Weld adjacent copies within Merge Distance."},
+  "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "visible_when": {"pack": false, "merge_vertices": true}, "doc": "Maximum distance for welding. Zero disables welding for legacy graph compatibility."},
+  "merge_first_last": {"kind": "bool", "default": false, "visible_when": {"pack": false, "merge_vertices": true}, "doc": "Also weld the last copy with the first."},
+  "uv_offset_u": {"kind": "float", "default": 0.0, "visible_when": {"pack": false}, "doc": "Shift U on each copy by its copy number."},
+  "uv_offset_v": {"kind": "float", "default": 0.0, "visible_when": {"pack": false}, "doc": "Shift V on each copy by its copy number."}
 }

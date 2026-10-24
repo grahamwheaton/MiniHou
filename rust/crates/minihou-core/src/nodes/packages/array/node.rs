@@ -14,6 +14,7 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
         "radial_mode": "count"; "distance": 1.0; "radius": 1.0; "axis": "z"; "angle": 360.0; "align_rotation": true;
         "random_seed": 0; "random_position": [0., 0., 0.]; "random_rotation": [0., 0., 0.];
         "random_scale": 0.0; "uniform_scale": true; "random_uv": 0.0;
+        "pack": false;
         "legacy_fit_length": -1.0;
         "merge_vertices": true; "merge_distance": 0.0; "merge_first_last": false;
         "uv_offset_u": 0.0; "uv_offset_v": 0.0
@@ -319,6 +320,14 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     if random.active() { for (k, x) in xf.iter_mut().enumerate() { *x = compose(*x, random.local(k)); } }
     let count = xf.len();
     if g.npoints == 0 { return Ok((*g).clone()); }
+    if p.b("pack")? {
+        // One shared source and one instance point per copy; UV offsets and welding do not apply.
+        let positions = xf.iter().flat_map(|x| x.t).collect::<Vec<f64>>();
+        if positions.iter().any(|v| !v.is_finite() || v.abs() > f32::MAX as f64) { return Err(Error::new("array position exceeds float32 range")); }
+        let matrices: Vec<M3> = xf.iter().map(|x| x.m).collect();
+        return packed::instance_geometry(std::slice::from_ref(&g), &vec![0; count],
+            positions.into_iter().map(|v| v as f32).collect(), &matrices, Default::default());
+    }
     let estimated = g.npoints.checked_mul(count).ok_or_else(|| Error::new("array point count overflow"))?;
     if estimated > crate::geometry::MAX_ELEMENTS { return Err(Error::new("array exceeds geometry point limit")); }
     let mut parts = Vec::with_capacity(count);

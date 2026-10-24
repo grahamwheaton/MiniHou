@@ -231,3 +231,18 @@ fn random_copies_are_stable_when_the_count_grows() {
     let uv = few.vertex["uv"].as_f32().unwrap();
     assert_eq!(uv, &many.vertex["uv"].as_f32().unwrap()[..uv.len()]);
 }
+#[test]
+fn pack_makes_one_instance_per_copy_and_unpacks_to_the_plain_array() {
+    let values = |pack: bool| json!({"mode":"radial","count":5,"radius":3.0,"pack":pack,"random_seed":2,
+        "random_rotation":[10.,20.,30.],"random_scale":0.3,"uv_offset_u":0.5,"merge_distance":0.01});
+    let inst = run(quad(), values(true));
+    assert_eq!((crate::nodes::packed::instance_count(&inst), inst.packed.len(), inst.npoints), (5, 1, 5));
+    let real = crate::nodes::packed::unpack(&inst, None, false).unwrap();
+    // The plain array with UV offsets and welding off matches the unpacked instances.
+    let plain = run(quad(), json!({"mode":"radial","count":5,"radius":3.0,"random_seed":2,
+        "random_rotation":[10.,20.,30.],"random_scale":0.3}));
+    assert_eq!((real.npoints, real.nprims()), (plain.npoints, plain.nprims()));
+    assert!(near(real.p(), plain.p()));
+    // UV offsets are off while packed.
+    assert_eq!(real.vertex["uv"].as_f32().unwrap(), &quad().vertex["uv"].as_f32().unwrap().repeat(5)[..]);
+}

@@ -134,7 +134,8 @@
    "kind": "float",
    "min": 0.0,
    "visible_when": {
-    "merge_vertices": true
+    "merge_vertices": true,
+    "pack": false
    }
   },
   "merge_first_last": {
@@ -142,13 +143,17 @@
    "doc": "Also weld the last copy with the first.",
    "kind": "bool",
    "visible_when": {
-    "merge_vertices": true
+    "merge_vertices": true,
+    "pack": false
    }
   },
   "merge_vertices": {
    "default": true,
    "doc": "Weld adjacent copies within Merge Distance.",
-   "kind": "bool"
+   "kind": "bool",
+   "visible_when": {
+    "pack": false
+   }
   },
   "mode": {
    "default": "line",
@@ -159,6 +164,11 @@
     "grid",
     "radial"
    ]
+  },
+  "pack": {
+   "default": false,
+   "doc": "Output one shared copy of the input and one instance point per copy instead of real geometry. UV offsets and welding are off while packed; Unpack gives the real copies.",
+   "kind": "bool"
   },
   "radial_mode": {
    "default": "count",
@@ -212,7 +222,10 @@
   "random_uv": {
    "default": 0.0,
    "doc": "Largest random shift of U and V per copy, either way.",
-   "kind": "float"
+   "kind": "float",
+   "visible_when": {
+    "pack": false
+   }
   },
   "relative_offset": {
    "default": [
@@ -254,12 +267,18 @@
   "uv_offset_u": {
    "default": 0.0,
    "doc": "Shift U on each copy by its copy number.",
-   "kind": "float"
+   "kind": "float",
+   "visible_when": {
+    "pack": false
+   }
   },
   "uv_offset_v": {
    "default": 0.0,
    "doc": "Shift V on each copy by its copy number.",
-   "kind": "float"
+   "kind": "float",
+   "visible_when": {
+    "pack": false
+   }
   }
  },
  "assemble": {
