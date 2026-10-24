@@ -1,0 +1,5 @@
+{
+  "angle": {"kind": "float", "default": 30.0, "range": [0.0, 180.0], "doc": "Dihedral angle in degrees above which shared edges split in Sharp Edges mode."},
+  "mode": {"kind": "enum", "default": "sharp_edges", "options": ["sharp_edges", "selected_edges"], "doc": "Split edges above the angle threshold or edges in the selected group."},
+  "group": {"kind": "str", "default": "", "pick_domain": "edges", "doc": "Edge group or edge pattern used in Selected Edges mode. Empty selects no edges."}
+}

@@ -202,8 +202,13 @@ pub fn start_edge_slide(ctx: &egui::Context, source: String, edges: Vec<Edge>) {
 pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.slide.is_some())) }
 /// Loop Cut owns the wheel throughout its modal session, including between edges.
 pub fn captures_wheel(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool == Some(Tool::LoopCut)))
+    let ctrl = ctx.input(|i| i.modifiers.ctrl);
+    ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool.is_some_and(|tool| cut_tool(tool, ctrl) == Tool::LoopCut)))
 }
+fn cut_tool(selected: Tool, ctrl: bool) -> Tool {
+    if selected == Tool::Knife && ctrl { Tool::LoopCut } else { selected }
+}
+fn cut_commit_exits_tool(selected: Tool) -> bool { selected != Tool::Knife }
 /// Inference categories the Knife offers; edge-centre (midpoint) snapping is always on.
 fn knife_inference_mask(enabled: u32) -> u32 {
     enabled & (inf::cat::VERTEX | inf::cat::MIDPOINT | inf::cat::EDGE | inf::cat::FACE | inf::cat::EXTENSION)
@@ -212,20 +217,31 @@ fn knife_inference_mask(enabled: u32) -> u32 {
 mod knife_snap_tests {
     use super::*;
     #[test]
+    fn ctrl_chooses_loop_cut_only_while_knife_is_selected() {
+        assert_eq!(cut_tool(Tool::Knife, false), Tool::Knife);
+        assert_eq!(cut_tool(Tool::Knife, true), Tool::LoopCut);
+        assert_eq!(cut_tool(Tool::Knife, false), Tool::Knife);
+        assert_eq!(cut_tool(Tool::LoopCut, false), Tool::LoopCut);
+        assert_eq!(cut_tool(Tool::EdgeSlide, true), Tool::EdgeSlide);
+        assert!(!cut_commit_exits_tool(Tool::Knife));
+        assert!(cut_commit_exits_tool(Tool::LoopCut));
+    }
+    #[test]
     fn midpoint_stays_enabled_without_modifier() {
         assert_ne!(knife_inference_mask(inf::cat::POINTS) & inf::cat::MIDPOINT, 0);
         assert_eq!(knife_inference_mask(inf::cat::MIDPOINT | inf::cat::AXIS), inf::cat::MIDPOINT);
     }
 }pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::ops::Range<u32>)>, out: &mut Actions) {
-    let tool = v.editor.tool;
-    if !matches!(tool, Tool::Knife | Tool::LoopCut | Tool::EdgeSlide) { cancel(ui.ctx()); return; }
+    let selected_tool = v.editor.tool;
+    if !matches!(selected_tool, Tool::Knife | Tool::LoopCut | Tool::EdgeSlide) { cancel(ui.ctx()); return; }
     let ctx = ui.ctx().clone();
+    let tool = cut_tool(selected_tool, ctx.input(|i| i.modifiers.ctrl));
     let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
     let ready = active.is_some() && !v.cooking.cooking() && v.cooking.error.is_none() && v.cooking.geometry.is_some();
     let source = active.map(|(id,_)|id.to_owned()).unwrap_or_default();
     let aspect = rect.width()/rect.height().max(1.);
-    if s.tool != Some(tool) || s.source != source {
-        s = State { tool: Some(tool), count: 1, clamp: true, ..Default::default() };
+    if s.tool != Some(selected_tool) || s.source != source {
+        s = State { tool: Some(selected_tool), count: 1, clamp: true, ..Default::default() };
     }
     if s.revision != v.cooking.completed || s.source != source || s.mesh.positions.is_empty() && v.cooking.geometry.is_some() {
         // The cut count is a tool setting and survives re-cooks; a pending slide refers to the old topology.
@@ -234,6 +250,9 @@ mod knife_snap_tests {
         s.slide = None; s.hover = None; s.hover_key = None;
     }
     s.count = s.count.clamp(1, LOOP_CUT_MAX);
+    if selected_tool == Tool::Knife && tool == Tool::Knife {
+        s.slide = None; s.hover = None; s.hover_key = None;
+    }
     if tool==Tool::Knife && (s.projection!=v.camera.projection || s.aspect!=aspect) {
         let update=|p:&mut KnifePoint| { if let Some(q)=transform_gizmo::project(v.camera,rect,p.world) {
             p.screen=[(q.x-rect.center().x)*2./rect.width(),(rect.center().y-q.y)*2./rect.height()];
@@ -323,7 +342,9 @@ mod knife_snap_tests {
                 "factor":factor,"even":s.even,"flipped":s.flipped,"clamp":s.clamp,"mirror_editing":true,"correct_uvs":true,"output_group":true}))
         } else { ("polysplit",loop_params(edge,s.count,factor,s.even,s.flipped,s.clamp)) };
         out.push(UiAction::MeshCutCommit { source:s.source.clone(), node_type:node_type.into(), params });
-        out.push(UiAction::Editor(EditorChange::Tool(Tool::Select)));
+        if s.tool.is_some_and(cut_commit_exits_tool) {
+            out.push(UiAction::Editor(EditorChange::Tool(Tool::Select)));
+        }
     };
     for event in ctx.input(|i| i.events.clone()) {
         match event {
@@ -430,7 +451,7 @@ mod knife_snap_tests {
         super::sketch::paint_primitives(&painter,&knife_primitives,|q|transform_gizmo::project(v.camera,rect,q),v.theme.panel);
     }
     let hint = if !ready { "Cut tools: select a cooked active mesh stream".to_owned() }
-        else if tool == Tool::Knife { format!("Knife: click | RMB/E next chain | Enter/Space apply | Backspace undo | Esc cancel | Ctrl midpoint, Shift free, Z through {} | C angle {}",s.cut_through,s.angle) }
+        else if tool == Tool::Knife { format!("Knife: click | RMB/E next chain | Enter/Space apply | Backspace undo | Esc cancel | Ctrl loop cut, Shift free, Z through {} | C angle {}",s.cut_through,s.angle) }
         else if tool==Tool::EdgeSlide { format!("Edge Slide | Factor {:.3} | Shift precision, Ctrl snap, E Even, F Flip, C Clamp, type factor | LMB/Enter confirm | RMB/Esc cancel",s.slide.map(|sl|slide_factor(sl.raw,snap)).unwrap_or(0.)) }
         else { loop_hint(s.count, s.slide.map(|sl| slide_factor(sl.raw, snap)), s.hover.is_some()) };
     let galley = painter.layout_no_wrap(hint, FontId::monospace(11.), v.theme.text);

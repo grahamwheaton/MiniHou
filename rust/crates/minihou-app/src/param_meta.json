@@ -2084,6 +2084,27 @@
    ]
   }
  },
+ "edge_split": {
+  "angle": {
+   "default": 30.0,
+   "doc": "Dihedral angle in degrees above which shared edges split in Sharp Edges mode.",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Edge group or edge pattern used in Selected Edges mode. Empty selects no edges.",
+   "kind": "str",
+   "pick_domain": "edges"
+  },
+  "mode": {
+   "default": "sharp_edges",
+   "doc": "Split edges above the angle threshold or edges in the selected group.",
+   "kind": "enum",
+   "options": ["sharp_edges", "selected_edges"]
+  }
+ },
  "edge_slide": {
   "clamp": {
    "default": true,
