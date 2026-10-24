@@ -5571,6 +5571,13 @@
   }
  },
  "output": {
+  "index": {
+   "default": 0,
+   "doc": "Which output of the system this is (0 = first)",
+   "kind": "int",
+   "max": 15,
+   "min": 0
+  },
   "object": {
    "default": "",
    "doc": "Blender object that shows this output (created and updated live). Empty: the main output, shown through the MiniHou proxy; only the display node is the main output",

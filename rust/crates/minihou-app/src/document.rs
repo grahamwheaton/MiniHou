@@ -283,6 +283,25 @@ mod default_graph_tests {
     }
 
     #[test]
+    fn input_and_output_indices_round_trip_through_save_and_load() {
+        let mut doc = Document::parse(json!({"nodes": {
+            "in": {"type": "input"},
+            "out": {"type": "output", "inputs": {"geo": "in"}}
+        }, "display": "out"}).to_string()).unwrap();
+        for (node, index) in [("in", 3), ("out", 7)] {
+            doc.edit(&Edit::Param { node: node.into(), name: "index".into(), value: json!(index) }).unwrap();
+        }
+        let path = std::env::temp_dir().join(format!("minihou-index-test-{}-{}.json",
+            std::process::id(), SAVE_TEMP_ID.fetch_add(1, Ordering::Relaxed)));
+        doc.save(&path).unwrap();
+        let loaded = Document::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(loaded.value()["nodes"]["in"]["params"]["index"], 3);
+        assert_eq!(loaded.value()["nodes"]["out"]["params"]["index"], 7);
+        assert_eq!(loaded.graph().cook(None).unwrap().npoints, 0);
+    }
+
+    #[test]
     fn graph_snapshot_changes_only_with_document_value() {
         let mut doc = Document::parse(json!({"nodes":{"box":{"type":"box"}},"display":"box"}).to_string()).unwrap();
         let old_graph = doc.graph.get().unwrap().clone();
