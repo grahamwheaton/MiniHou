@@ -488,7 +488,12 @@ def draw_placement(layout, mod, section):
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,
             MINIHOU_OT_add_modifier, MINIHOU_OT_refresh_modifiers, MINIHOU_OT_reload_modifier,
             MINIHOU_OT_connect, MINIHOU_OT_disconnect, MINIHOU_OT_resync, MINIHOU_OT_select_proxy,
-            MINIHOU_PT_main, MINIHOU_PT_modifier_sources, MINIHOU_OT_bake_rbd, MINIHOU_OT_cleanup_scene_objects)
+            MINIHOU_PT_main, MINIHOU_OT_bake_rbd, MINIHOU_OT_cleanup_scene_objects)
+
+
+def _add_modifier_menu(self, context):
+    """MiniHou appears in the Add Modifier list; the modifier's own panel holds its buttons."""
+    self.layout.operator("minihou.add_modifier", text="MiniHou", icon="NODETREE").new_graph = True
 
 
 def register():
@@ -510,11 +515,13 @@ def register():
     geonodes_ui.register()
     network_ui.register()
     input_define_ui.register()
+    bpy.types.OBJECT_MT_modifier_add.append(_add_modifier_menu)
     if not bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.register(_auto_connect_timer, first_interval=2.0, persistent=True)
 
 
 def unregister():
+    bpy.types.OBJECT_MT_modifier_add.remove(_add_modifier_menu)
     if bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.unregister(_auto_connect_timer)
     input_define_ui.unregister()
