@@ -38,6 +38,25 @@ pub struct NodeDef {
     pub bypass: bool,
 }
 
+/// One framed loop in a graph scope. Nodes remain in that scope's ordinary nodes map.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ZoneDef {
+    pub id: String,
+    pub kind: String,
+    pub start: String,
+    pub end: String,
+    pub members: Vec<String>,
+    pub parent: Option<String>,
+}
+
+impl ZoneDef {
+    fn value(&self) -> Value {
+        let mut v = serde_json::json!({"kind":self.kind,"start":self.start,"end":self.end,"members":self.members});
+        if let Some(parent) = &self.parent { v["parent"] = Value::String(parent.clone()); }
+        v
+    }
+}
+
 impl NodeDef {
     pub fn output_for(&self, port: &str, index: usize, source: &str) -> Endpoint {
         self.endpoints.iter().find(|(name, _)| name == port)
@@ -50,9 +69,102 @@ impl NodeDef {
 pub struct Graph {
     /// In file order (the first `output` node is the main output, as in Python).
     pub nodes: Vec<(String, NodeDef)>,
+    pub zones: Vec<ZoneDef>,
     pub display: Option<String>,
     /// Original UI/extension fields survive graph embedding in interchange files.
     source: Value,
+}
+
+fn parse_zones(raw: Option<&Value>, nodes: &Map<String,Value>) -> Result<Vec<ZoneDef>> {
+    let Some(raw) = raw else { return Ok(Vec::new()); };
+    let records = raw.as_object().ok_or_else(||Error::new("zones must be an object"))?;
+    let mut zones = Vec::with_capacity(records.len());
+    let mut boundaries = HashSet::new();
+    for (id, record) in records {
+        if id.is_empty() || id.contains('/') { return Err(Error::new(format!("invalid zone id {id:?}"))); }
+        let obj = record.as_object().ok_or_else(||Error::new(format!("zone '{id}' must be an object")))?;
+        let field = |name: &str| -> Result<String> {obj.get(name).and_then(Value::as_str).map(str::to_owned)
+            .ok_or_else(||Error::new(format!("zone '{id}' needs a {name} id")))};
+        let kind = field("kind")?;
+        if kind != "for_each" { return Err(Error::new(format!("zone '{id}' has unknown kind {kind:?}"))); }
+        let start = field("start")?;
+        let end = field("end")?;
+        if start == end || !boundaries.insert(start.clone()) || !boundaries.insert(end.clone()) {
+            return Err(Error::new(format!("zone '{id}' has reused boundaries")));
+        }
+        for (name, expected) in [(&start,"for_each_start"),(&end,"for_each_end")] {
+            if nodes.get(name).and_then(|n|n["type"].as_str()) != Some(expected) {
+                return Err(Error::new(format!("zone '{id}' boundary '{name}' must be a {expected} node")));
+            }
+        }
+        let members = obj.get("members").and_then(Value::as_array)
+            .ok_or_else(||Error::new(format!("zone '{id}' needs a members array")))?;
+        let mut seen = HashSet::new();
+        let members: Vec<String> = members.iter().map(|m| {
+            let member = m.as_str().ok_or_else(||Error::new(format!("zone '{id}' has a non-string member")))?;
+            if member == start || member == end || !nodes.contains_key(member) || !seen.insert(member) {
+                return Err(Error::new(format!("zone '{id}' has an invalid or duplicate member '{member}'")));
+            }
+            Ok(member.to_owned())
+        }).collect::<Result<_>>()?;
+        let parent = match obj.get("parent") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            _ => return Err(Error::new(format!("zone '{id}' parent must be a zone id"))),
+        };
+        zones.push(ZoneDef{id:id.clone(),kind,start,end,members,parent});
+    }
+    for zone in &zones {
+        let mut seen = HashSet::new();
+        let mut parent = zone.parent.as_deref();
+        while let Some(id) = parent {
+            if !seen.insert(id) { return Err(Error::new(format!("zone '{}' has a parent cycle",zone.id))); }
+            let outer = zones.iter().find(|z|z.id==id).ok_or_else(||Error::new(format!("zone '{}' has missing parent '{id}'",zone.id)))?;
+            if !outer.members.contains(&zone.start) || !outer.members.contains(&zone.end) {
+                return Err(Error::new(format!("zone '{}' boundaries must be members of parent '{id}'",zone.id)));
+            }
+            parent = outer.parent.as_deref();
+        }
+    }
+    Ok(zones)
+}
+
+#[cfg(test)]
+mod zone_record_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn nested() -> Value {json!({"nodes":{
+        "source":{"type":"point"},
+        "outer_start":{"type":"for_each_start","inputs":{"geo":"source"}},
+        "inner_start":{"type":"for_each_start","inputs":{"geo":"outer_start"}},
+        "inner_body":{"type":"null","inputs":{"geo":"inner_start"}},
+        "inner_end":{"type":"for_each_end","inputs":{"begin":"inner_start","generated":"inner_body"}},
+        "outer_body":{"type":"null","inputs":{"geo":"inner_end"}},
+        "outer_end":{"type":"for_each_end","inputs":{"begin":"outer_start","generated":"outer_body"}}
+    },"zones":{
+        "outer":{"kind":"for_each","start":"outer_start","end":"outer_end","members":["inner_start","inner_body","inner_end","outer_body"]},
+        "inner":{"kind":"for_each","start":"inner_start","end":"inner_end","members":["inner_body"],"parent":"outer"}
+    }})}
+
+    #[test] fn nested_zones_round_trip_in_root_and_subnet_scopes() {
+        let original=nested();
+        let graph=Graph::from_value(&original).unwrap();
+        assert_eq!(graph.zones.len(),2);
+        assert_eq!(graph.to_value(),original);
+        let scoped=json!({"nodes":{"sub":{"type":"subnet","inner":original}}});
+        assert_eq!(Graph::from_value(&scoped).unwrap().to_value(),scoped);
+    }
+    #[test] fn rejects_invalid_boundaries_members_and_parent() {
+        let mut bad=nested(); bad["zones"]["inner"]["start"]=json!("source");
+        assert!(Graph::from_value(&bad).err().unwrap().to_string().contains("boundary"));
+        let mut bad=nested(); bad["zones"]["inner"]["members"]=json!(["inner_body","inner_body"]);
+        assert!(Graph::from_value(&bad).err().unwrap().to_string().contains("duplicate"));
+        let mut bad=nested(); bad["zones"]["inner"]["parent"]=json!("missing");
+        assert!(Graph::from_value(&bad).err().unwrap().to_string().contains("missing parent"));
+        let mut bad=nested(); bad["zones"]["outer"]["members"]=json!(["inner_body","outer_body"]);
+        assert!(Graph::from_value(&bad).err().unwrap().to_string().contains("parent"));
+    }
 }
 
 impl Graph {
@@ -75,6 +187,9 @@ impl Graph {
             let nd = nd.as_object().ok_or_else(|| Error::new(format!("node '{id}': expected an object with a 'type'")))?;
             let node_type = nd.get("type").and_then(Value::as_str)
                 .ok_or_else(|| Error::new(format!("node '{id}': expected an object with a 'type'")))?.to_string();
+            if node_type == "subnet" {
+                if let Some(inner) = nd.get("inner") { Graph::from_value(inner).map_err(|e| Error::new(format!("subnet '{id}': {e}")))?; }
+            }
             if node_type == "controller" { crate::controller::validate(&Value::Object(nd.clone())).map_err(|e| e.in_node(id, &node_type))?; }
             if nd.contains_key("locked_geometry") {
                 return Err(Error::new(format!("node '{id}': locked geometry is not supported by the Rust backend yet")));
@@ -83,7 +198,7 @@ impl Graph {
             let mut endpoints = Vec::new();
             if let Some(ins) = nd.get("inputs").and_then(Value::as_object) {
                 for (port, r) in ins {
-                    if matches!(node_type.as_str(), "loop_begin" | "loop_end") && r.is_array() {
+                    if matches!(node_type.as_str(), "loop_begin" | "loop_end" | "for_each_start" | "for_each_end") && r.is_array() {
                         return Err(Error::new(format!("node '{id}': {port} input must be a single node")));
                     }
                     let parse = |r: &Value| -> Result<Endpoint> {
@@ -134,8 +249,9 @@ impl Graph {
             let locked_params = nd.get("locked_params").map(|v| v.as_array().and_then(|a| a.iter().map(|x| x.as_str().map(str::to_owned)).collect()).ok_or_else(|| Error::new(format!("node '{id}': locked_params must be an array of strings")))).transpose()?;
             nodes.push((id.clone(), NodeDef { node_type, inputs, endpoints, params, channels, locked_params, bypass }));
         }
+        let zones = parse_zones(obj.get("zones"), nodes_v)?;
         let display = obj.get("display").and_then(|v| v.as_str().or_else(|| v.as_array()?.iter().find_map(Value::as_str))).map(str::to_string);
-        Ok(Graph { nodes, display, source: v.clone() })
+        Ok(Graph { nodes, zones, display, source: v.clone() })
     }
 
     /// Current engine edits over the original document, preserving layout and metadata.
@@ -180,6 +296,9 @@ impl Graph {
         if value["display"].as_str() != self.display.as_deref() {
             if let Some(display) = &self.display { value["display"] = Value::String(display.clone()); }
             else { value.as_object_mut().unwrap().remove("display"); }
+        }
+        if self.source.get("zones").is_some() || !self.zones.is_empty() {
+            value["zones"] = Value::Object(self.zones.iter().map(|zone|(zone.id.clone(),zone.value())).collect());
         }
         value
     }

@@ -237,6 +237,8 @@ pub fn registry() -> &'static [NodeSpec] {
         copy_to_points::COPY_TO_POINTS,
         instance::INSTANCE,
         foreach::FOR_EACH,
+        foreach::FOR_EACH_START,
+        foreach::FOR_EACH_END,
         select_nodes::GROW,
         select_nodes::SELECT_PATH,
         select_nodes::SELECT_LOOP,
