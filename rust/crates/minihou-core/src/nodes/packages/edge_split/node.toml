@@ -1,0 +1,5 @@
+id = "edge_split"
+name = "Edge Split"
+category = "Edges"
+description = "Separate faces along sharp or selected edges by duplicating their shared points."
+keywords = "edge split sharp angle selected seams unweld"

@@ -526,6 +526,11 @@
         "Edge Group Promote",
         "edge_group_promote",
         "group"
+      ],
+      [
+        "Edge Split",
+        "edge_split",
+        "edge_split"
       ]
     ]
   },
