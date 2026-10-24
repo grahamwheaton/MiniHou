@@ -21,6 +21,25 @@ pub struct Params {
 impl Params {
     pub fn resolve_node(node_type: &str, specs: &[ParamSpec], given: Option<&Map<String, Value>>) -> Result<Params> {
         if node_type == "controller" { return Ok(Params { values: given.cloned().unwrap_or_default() }); }
+        if node_type == "for_each" {
+            let mut values = given.cloned().unwrap_or_default();
+            if values.contains_key("method") {
+                // A newly authored Method wins over an old, retained Piece field.
+                values.insert("piece".into(), Value::String("connectivity".into()));
+            } else {
+                let piece = values.get("piece").and_then(Value::as_str).unwrap_or("connectivity");
+                let method = match piece {
+                    "connectivity" => "connected",
+                    "attribute" => "attribute",
+                    // This hidden mode includes open curves, unlike the new Faces domain.
+                    "primitive" => "legacy_primitive",
+                    _ => return Err(Error::new(format!("unknown legacy piece mode {piece:?}"))),
+                };
+                values.insert("method".into(), Value::String(method.into()));
+                values.insert("domain".into(), Value::String("primitives".into()));
+            }
+            return Self::resolve(specs, Some(&values));
+        }
         if node_type == "split" {
             if let Some(g) = given.filter(|g| g.contains_key("extract_elements")) {
                 // Older graphs stored this checkbox; the group domain now determines extraction.

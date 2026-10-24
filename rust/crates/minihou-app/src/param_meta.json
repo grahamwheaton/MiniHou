@@ -403,6 +403,13 @@
     "first"
    ]
   },
+  "selection": {
+   "default": "",
+   "doc": "Optional selected elements or group in the chosen domain; empty selects all",
+   "kind": "str",
+   "pick_domain_param": "domain",
+   "pick_domain_default": "points"
+  },
   "name": {
    "default": "Cd",
    "doc": "Attribute to move (wildcards promote several)",
