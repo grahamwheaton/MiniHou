@@ -113,13 +113,38 @@ def draw(layout, mod):
     embed_ui.draw(layout, mod)
 
 
+class MINIHOU_OT_open_active_modifier(bpy.types.Operator):
+    bl_idname = "minihou.open_active_modifier"
+    bl_label = "Open Active MiniHou Modifier"
+    bl_description = "Double-click a MiniHou modifier to open it in MiniHou"
+
+    def execute(self, context):
+        mod = context.object.modifiers.active if context.object else None
+        if mod is None or not modifiers.is_modifier(mod):
+            return {"CANCELLED"}
+        return bpy.ops.minihou.edit_network(modifier_name=mod.name)
+
+
+_keymaps = []
+
+
 def register():
     bpy.utils.register_class(MINIHOU_OT_edit_network)
+    bpy.utils.register_class(MINIHOU_OT_open_active_modifier)
     bpy.utils.register_class(MINIHOU_OT_choose_object)
     embed_ui.register()
+    keyconfig = bpy.context.window_manager.keyconfigs.addon
+    if keyconfig:
+        km = keyconfig.keymaps.new(name="Property Editor", space_type="PROPERTIES")
+        kmi = km.keymap_items.new("minihou.open_active_modifier", "LEFTMOUSE", "DOUBLE_CLICK")
+        _keymaps.append((km, kmi))
 
 
 def unregister():
+    for km, kmi in _keymaps:
+        km.keymap_items.remove(kmi)
+    _keymaps.clear()
+    bpy.utils.unregister_class(MINIHOU_OT_open_active_modifier)
     embed_ui.unregister()
     if bpy.app.timers.is_registered(_redraw):
         bpy.app.timers.unregister(_redraw)

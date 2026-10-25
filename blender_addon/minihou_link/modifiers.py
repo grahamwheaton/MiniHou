@@ -528,8 +528,14 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     path = os.path.abspath(bpy.path.abspath(graph_path)) if graph_path.strip() else ""
     if path and not path.lower().endswith((".json", ".minihou")):
         raise ValueError("Graph must name a .minihou or .json file; leave Graph empty to start a new modifier")
-    # A new modifier starts as a plain pass-through: input straight to output, no transform parameters.
-    starter = {"nodes": {"input": {"type": "modifier_input"},
+    # Actions and Mode are menu inputs shown as buttons. "Idle" is the resting value: a press sets
+    # the choice and the dispatcher resets it to Idle, so pressing the same button again still counts.
+    starter_inputs = [
+        {"id": "input_1", "name": "Actions", "kind": "menu", "default": "Idle",
+         "options": ["Idle", "Open", "Reload", "Add input"]},
+        {"id": "input_2", "name": "Mode", "kind": "menu", "default": "Idle",
+         "options": ["Idle", "Pack", "Unpack", "Relink"]}]
+    starter = {"nodes": {"input": {"type": "modifier_input", "modifier_inputs": starter_inputs},
                            "output": {"type": "output", "inputs": {"geo": "input"}}},
                "display": "output", "exposed": []}
     header = _connection(host, port).describe(path, None if path else starter)

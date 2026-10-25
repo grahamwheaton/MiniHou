@@ -343,9 +343,10 @@ class EmbeddedNetworkTests(unittest.TestCase):
         self.assertTrue(any(t.startswith("Large network") for t in labels), labels)
         self.assertTrue(any("MiniHou window" in t for t in labels), labels)
         ops = [args[0] for name, args, kw in layout.calls if name == "operator"]
-        for op in ("minihou.embed_from_file", "minihou.extract_graph", "minihou.switch_embed_mode",
-                   "minihou.toggle_freeze"):
+        for op in ("minihou.embed_from_file", "minihou.extract_graph", "minihou.switch_embed_mode"):
             self.assertIn(op, ops)
+        self.assertNotIn("minihou.toggle_freeze", ops)
+        self.assertFalse(any(t.startswith("Freeze result") for t in labels))
 
     def test_legacy_path_modifier_stays_linked(self):
         _mod, ng = self.network(self.obj(), embed_it=False)

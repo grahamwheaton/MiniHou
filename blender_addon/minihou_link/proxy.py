@@ -522,6 +522,8 @@ def _configure_socket(s, p: dict) -> None:
         s.structure_type = "SINGLE"          # a plain value: no "use attribute" toggle in the modifier panel
     elif not hasattr(s, "structure_type") and hasattr(s, "force_non_field") and not s.force_non_field:
         s.force_non_field = True             # Blender < 5.0 equivalent
+    if kind == "menu" and hasattr(s, "menu_expanded") and not s.menu_expanded:
+        s.menu_expanded = True               # shown as a row of buttons in the modifier panel
     desc = p.get("doc", "")
     if s.description != desc:
         s.description = desc                 # tooltip

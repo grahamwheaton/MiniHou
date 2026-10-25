@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (0, 5, 1),
+    "version": (1, 0, 0),
     "blender": (4, 2, 0),
     "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
@@ -9,6 +9,8 @@ bl_info = {
 }
 
 import json
+import os
+import subprocess
 
 import bpy
 from bpy.app.handlers import persistent
@@ -41,12 +43,81 @@ def _restore_endpoint_timer():
     return None
 
 
+_app_start_tried = False
+
+
+def _start_app_once(prefs):
+    """Launch the MiniHou app (once per session) with the scene's graph, when an exe path is set."""
+    global _app_start_tried
+    if _app_start_tried or not prefs.auto_start_app or not prefs.minihou_app:
+        return
+    scene = bpy.context.scene
+    graph = bpy.path.abspath(scene.minihou_graph_path) if scene.minihou_graph_path else ""
+    exe = bpy.path.abspath(prefs.minihou_app)
+    if not graph or not os.path.isfile(graph) or not os.path.isfile(exe):
+        return
+    _app_start_tried = True
+    try:
+        subprocess.Popen([exe, graph], cwd=os.path.dirname(graph), stdin=subprocess.DEVNULL,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except OSError as exc:
+        print(f"[minihou] auto-start: {exc}")
+
+
+def _set_button(mod, name, choice):
+    from . import proxy
+    params = modifiers.parameters(mod)
+    proxy.write_values(mod, mod.node_group, params, {name: choice})
+
+
+def _press_button(obj, mod, action, mode):
+    """Run a pressed Actions or Mode button, then return it to Idle so the next press counts."""
+    from . import embed
+    ng = mod.node_group
+    with bpy.context.temp_override(object=obj, active_object=obj):
+        if action == "Reload":
+            bpy.ops.minihou.reload_modifier(modifier_name=mod.name)
+        elif action == "Add input":                # a float input named Input N; rename it in MiniHou or here
+            count = len(modifiers.parameters(mod)) + 1
+            bpy.ops.minihou.add_input("EXEC_DEFAULT", modifier=mod.name, input_name=f"Input {count}", kind="float")
+        elif action == "Open":
+            bpy.ops.minihou.edit_network(modifier_name=mod.name)
+        if mode == "Unpack":
+            bpy.ops.minihou.extract_graph(modifier_name=mod.name)
+        elif mode == "Pack" and embed.mode(ng) != embed.EMBEDDED or mode == "Relink" and embed.mode(ng) != embed.LINKED:
+            bpy.ops.minihou.switch_embed_mode(modifier_name=mod.name)
+
+
+def _poll_buttons():
+    """Dispatch pressed MiniHou buttons on each modifier. Runs on a Blender timer, on the UI thread."""
+    from . import proxy
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        for mod in obj.modifiers:
+            if not modifiers.is_modifier(mod):
+                continue
+            values = proxy.read_values(mod, mod.node_group, modifiers.parameters(mod))
+            action, mode = values.get("Actions", "Idle"), values.get("Mode", "Idle")
+            if action == "Idle" and mode == "Idle":
+                continue
+            for name, choice in (("Actions", action), ("Mode", mode)):
+                if choice != "Idle":
+                    _set_button(mod, name, "Idle")
+            try:
+                _press_button(obj, mod, action, mode)
+            except Exception as exc:
+                print(f"[minihou] button {action}/{mode}: {exc}")
+    return 0.25
+
+
 def _auto_connect_timer():
     try:
         addon = bpy.context.preferences.addons.get(__package__)
         wm = bpy.context.window_manager
         if addon and wm:
             runtime.get_runtime().poll_auto_connect(addon.preferences.auto_connect_minihou, wm.minihou_port)
+            _start_app_once(addon.preferences)
     except Exception as exc:
         # Keep polling through file loads and temporarily restricted Blender contexts.
         print(f"[minihou] auto-connect: {exc}")
@@ -69,6 +140,14 @@ class MINIHOU_Preferences(bpy.types.AddonPreferences):
 
     rust_app: StringProperty(name="MiniHou Rust App", subtype="FILE_PATH",
         description="Optional minihou-app executable; empty uses rust/target/debug or release")
+    external_python: StringProperty(name="External Python / Portable Runtime", subtype="FILE_PATH",
+        description="Prepared Python 3.11+ executable with MiniHou and numpy; never Blender's executable")
+    project_root: StringProperty(name="MiniHou Project Folder", subtype="DIR_PATH",
+        description="Folder containing minihou/__main__.py and the node library")
+    minihou_app: StringProperty(name="MiniHou App", subtype="FILE_PATH",
+        description="The minihou-app executable. Pick it once; builds can have new names")
+    auto_start_app: BoolProperty(name="Start MiniHou with Blender", default=True,
+        description="Launch the MiniHou App above when Blender opens, with the scene's graph")
 
     def draw(self, context):
         self.layout.prop(self, "auto_connect_minihou")
@@ -83,6 +162,12 @@ class MINIHOU_Preferences(bpy.types.AddonPreferences):
         server = _server.snapshot()
         if server["state"] == "error":
             self.layout.label(text=server["detail"][:240], icon="ERROR")
+        self.layout.prop(self, "minihou_app")
+        self.layout.prop(self, "auto_start_app")
+        self.layout.label(text="Advanced: launch an external Python engine from Blender")
+        self.layout.prop(self, "external_python")
+        self.layout.prop(self, "project_root")
+        self.layout.label(text="Prepare dependencies in the external runtime, not Blender.")
 
 
 def _server_redraw():
@@ -455,7 +540,12 @@ def draw_placement(layout, mod, section):
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,
             MINIHOU_OT_add_modifier, MINIHOU_OT_refresh_modifiers, MINIHOU_OT_reload_modifier,
             MINIHOU_OT_connect, MINIHOU_OT_disconnect, MINIHOU_OT_resync, MINIHOU_OT_select_proxy,
-            MINIHOU_PT_main, MINIHOU_PT_modifier_sources, MINIHOU_OT_bake_rbd, MINIHOU_OT_cleanup_scene_objects)
+            MINIHOU_PT_main, MINIHOU_OT_bake_rbd, MINIHOU_OT_cleanup_scene_objects)
+
+
+def _add_modifier_menu(self, context):
+    """MiniHou appears in the Add Modifier list; the modifier's own panel holds its buttons."""
+    self.layout.operator("minihou.add_modifier", text="MiniHou", icon="NODETREE").new_graph = True
 
 
 def register():
@@ -477,11 +567,17 @@ def register():
     geonodes_ui.register()
     network_ui.register()
     input_define_ui.register()
+    bpy.types.OBJECT_MT_modifier_add.append(_add_modifier_menu)
     if not bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.register(_auto_connect_timer, first_interval=2.0, persistent=True)
+    if not bpy.app.timers.is_registered(_poll_buttons):
+        bpy.app.timers.register(_poll_buttons, first_interval=1.0, persistent=True)
 
 
 def unregister():
+    bpy.types.OBJECT_MT_modifier_add.remove(_add_modifier_menu)
+    if bpy.app.timers.is_registered(_poll_buttons):
+        bpy.app.timers.unregister(_poll_buttons)
     if bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.unregister(_auto_connect_timer)
     input_define_ui.unregister()
