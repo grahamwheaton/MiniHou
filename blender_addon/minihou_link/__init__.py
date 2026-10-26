@@ -99,6 +99,10 @@ def _press_button(obj, mod, action, mode):
                 embed.switch_mode(ng)
 
 
+_BUTTONS = {"Actions": {"Open", "Reload", "Add input"}, "Mode": {"Pack", "Unpack", "Relink"}}
+_button_seen = set()
+
+
 def _poll_buttons():
     """Dispatch pressed MiniHou buttons on each modifier. Runs on a Blender timer, on the UI thread."""
     from . import proxy
@@ -109,12 +113,22 @@ def _poll_buttons():
             if not modifiers.is_modifier(mod):
                 continue
             values = proxy.read_values(mod, mod.node_group, modifiers.parameters(mod))
-            action, mode = values.get("Actions", "Idle"), values.get("Mode", "Idle")
+            # Only a real choice from the menu counts. Anything else (unknown, or a value Blender
+            # reports while the graph is being rebuilt) must never fire an action.
+            action = values.get("Actions") if values.get("Actions") in _BUTTONS["Actions"] else "Idle"
+            mode = values.get("Mode") if values.get("Mode") in _BUTTONS["Mode"] else "Idle"
+            key = (obj.name, mod.name)
+            if key not in _button_seen:
+                _button_seen.add(key)           # first sight records the state; it is not a press
+                continue
             if action == "Idle" and mode == "Idle":
                 continue
             for name, choice in (("Actions", action), ("Mode", mode)):
                 if choice != "Idle":
-                    _set_button(mod, name, "Idle")
+                    try:
+                        _set_button(mod, name, "Idle")
+                    except Exception as exc:
+                        print(f"[minihou] reset {name}: {exc}")
             try:
                 _press_button(obj, mod, action, mode)
             except Exception as exc:
