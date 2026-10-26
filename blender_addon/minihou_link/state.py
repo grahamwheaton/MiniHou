@@ -83,7 +83,13 @@ def _close(a, b) -> bool:
         return len(a) == len(b) and all(_close(x, y) for x, y in zip(a, b))
     if isinstance(a, bool) or isinstance(b, bool):
         return a == b
-    return abs(float(a) - float(b)) <= FLOAT_REL_TOL * max(1.0, abs(float(a)), abs(float(b)))
+    if isinstance(a, str) or isinstance(b, str):
+        return a == b                        # names (objects, menus) compare exactly
+    try:
+        fa, fb = float(a), float(b)
+    except (TypeError, ValueError):
+        return a == b
+    return abs(fa - fb) <= FLOAT_REL_TOL * max(1.0, abs(fa), abs(fb))
 
 
 class ParamForwarder:
