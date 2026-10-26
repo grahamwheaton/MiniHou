@@ -6,18 +6,22 @@ use minihou_app::object_names::{self as names, Search};
 use serde_json::{json, Value};
 
 #[derive(Clone, Default)]
-struct Field { search: Search, highlight: usize, open: bool, over_popup: bool, had_focus: bool }
+struct Field { search: Search, highlight: usize, open: bool, over_popup: bool, had_focus: bool,
+    /// What the user is typing. It stays local until a name is picked: writing each partial name to
+    /// the document would send it to Blender, which echoes back an empty object and wipes the field.
+    draft: Option<String> }
 
 static WAKE: std::sync::Once = std::sync::Once::new();
 
 /// Returns true when the value changed (typed or picked).
 pub fn field(ui: &mut egui::Ui, value: &mut Value, width: f32, theme: &super::theme::Theme) -> bool {
-    let mut text = value.as_str().unwrap_or("").to_owned();
     let id = ui.id().with("blender_object_name");
     let available = names::available();
     let mut keys = (false, false, false);
     let state_id = id.with("state");
     let mut st: Field = ui.ctx().data_mut(|d| d.remove_temp(state_id)).unwrap_or_default();
+    if !available { st.draft = None; }
+    let mut text = st.draft.clone().unwrap_or_else(|| value.as_str().unwrap_or("").to_owned());
     if available && st.open && !st.search.results.is_empty() {
         // Arrow keys move the highlight instead of the caret while the dropdown is open.
         keys = ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp), i.key_pressed(Key::Enter)));
@@ -26,6 +30,9 @@ pub fn field(ui: &mut egui::Ui, value: &mut Value, width: f32, theme: &super::th
         .hint_text(if available { "type to search Blender objects" } else { "" }));
     let mut changed = response.changed();
     if !available { if changed { *value = json!(text); } return changed; }
+    // Typing edits the draft only; the document changes when a name is chosen (below).
+    if response.changed() { st.draft = Some(text.clone()); }
+    changed = false;
     let now = ui.input(|i| i.time);
     // A Blender reply repaints the field at once instead of the field polling every frame.
     let ctx = ui.ctx().clone();
@@ -50,6 +57,8 @@ pub fn field(ui: &mut egui::Ui, value: &mut Value, width: f32, theme: &super::th
     // Losing focus by typing or a stray repaint is not a choice: take it back unless the user
     // clicked elsewhere, picked a name, or pressed Enter/Escape.
     let deliberate = picked.is_some() || ui.input(|i| i.pointer.any_pressed() || i.key_pressed(Key::Enter) || i.key_pressed(Key::Escape));
+    // Enter with nothing to pick commits the typed name as-is (e.g. an object Blender has not listed yet).
+    if picked.is_none() && len == 0 && ui.input(|i| i.key_pressed(Key::Enter)) { if let Some(d) = &st.draft { picked = Some(d.clone()); } }
     if st.had_focus && response.lost_focus() && !deliberate { response.request_focus(); }
     st.had_focus = response.has_focus() || (st.had_focus && !deliberate && response.lost_focus());
     st.open = st.open && (response.has_focus() || st.over_popup) && picked.is_none();
@@ -84,9 +93,16 @@ pub fn field(ui: &mut egui::Ui, value: &mut Value, width: f32, theme: &super::th
             }
         });
     }
+    // Leaving the field without choosing keeps a draft that names a listed object exactly, and drops anything else.
+    if picked.is_none() && response.lost_focus() && deliberate {
+        if let Some(d) = st.draft.take() {
+            if let Some(hit) = st.search.results.iter().find(|m| m.name.eq_ignore_ascii_case(&d)) { picked = Some(hit.name.clone()); }
+        }
+    }
     if let Some(name) = picked {
         text = name;
         changed = true;
+        st.draft = None;
         st.open = false;
         st.over_popup = false;
         ui.ctx().memory_mut(|m| m.surrender_focus(id));
