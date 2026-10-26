@@ -858,7 +858,9 @@ def canonical(kind: str, v):
     if kind == "float":
         return float(v)
     if kind in {"object", "collection", "material", "image", "texture"}:
-        return v.name if v is not None else ""
+        if v is None or isinstance(v, str):
+            return v or ""              # a name from the MiniHou field, or an empty choice
+        return v.name
     if kind in {"geometry", "bundle", "closure"}:
         raise ValueError(f"{kind} input cannot be read as a uniform modifier value; connect a supported value source")
     return str(v)
