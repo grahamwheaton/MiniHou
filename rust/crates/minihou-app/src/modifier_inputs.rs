@@ -199,31 +199,26 @@ mod tests {
     }
 
     #[test]
-    fn parameter_links_resolve_at_graph_parse_and_missing_inputs_error() {
+    fn legacy_parameter_links_fall_back_to_defaults() {
         let graph = json!({"display":"move","nodes":{
             "input":{"type":"modifier_input","modifier_inputs":[{"id":"offset","name":"Offset","kind":"vector","default":[0,0,0]}],
                      "input_values":{"offset":[3,4,5]}},
-            "move":{"type":"transform","inputs":{"geo":"input"},"params":{"translate":{"modifier_input":{"node":"input","id":"offset"}}}}
+            "move":{"type":"transform","inputs":{"geo":"input"},"params":{"translate":{"modifier_input":{"node":"input","id":"offset"}},"uniform_scale":2.0}}
         }});
         let parsed = minihou_core::Graph::from_value(&graph).unwrap();
-        assert_eq!(parsed.nodes.iter().find(|(name,_)| name == "move").unwrap().1.params.as_ref().unwrap()["translate"], json!([3,4,5]));
-        assert_eq!(parsed.to_value()["nodes"]["move"]["params"]["translate"], graph["nodes"]["move"]["params"]["translate"]);
-        let mut broken = graph;
-        broken["nodes"]["input"]["modifier_inputs"] = json!([]);
-        assert!(minihou_core::Graph::from_value(&broken).err().unwrap().to_string().contains("is missing"));
+        let params = parsed.nodes.iter().find(|(name,_)| name == "move").unwrap().1.params.clone().unwrap();
+        assert!(!params.contains_key("translate"));
+        assert_eq!(parsed.to_value()["nodes"]["move"]["params"], json!({"uniform_scale":2.0}));
     }
 
     #[test]
-    fn removing_input_resets_its_parameter_links_and_discards_stale_value() {
-        let mut doc = Document::parse(json!({"display":"move","nodes":{
+    fn removing_input_discards_its_stale_value() {
+        let mut doc = Document::parse(json!({"display":"input","nodes":{
             "input":{"type":"modifier_input","modifier_inputs":[{"id":"offset","name":"Offset","kind":"vector","default":[0,0,0]}],
-                     "input_values":{"offset":[3,4,5]}},
-            "move":{"type":"transform","inputs":{"geo":"input"},"params":{"translate":{"modifier_input":{"node":"input","id":"offset"}}}}
+                     "input_values":{"offset":[3,4,5]}}
         }}).to_string()).unwrap();
         doc.edit(&Edit::ModifierInputs { node:"input".into(), inputs:vec![] }).unwrap();
-        assert_eq!(doc.value()["nodes"]["move"]["params"]["translate"], json!([0.,0.,0.]));
         assert_eq!(doc.value()["nodes"]["input"]["input_values"], json!({}));
-        assert!(minihou_core::Graph::from_value(doc.value()).is_ok());
     }
 
     #[test]

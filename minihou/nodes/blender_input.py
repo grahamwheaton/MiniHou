@@ -61,8 +61,7 @@ def modifier_input():
     """Mesh entering this MiniHou modifier at its stack position, in object coordinates.
 
     The Rust editor may store an ordered ``modifier_inputs`` interface on this node.
-    Each entry has a stable id, Blender socket name and type, and a default; a
-    node parameter can refer to it with ``{"modifier_input":{"node":"input","id":"..."}}``.
+    Each entry has a stable id, Blender socket name and type, and a default.
 
     Supplied by an independent modifier instance. This node cannot cook in the legacy proxy session.
     """

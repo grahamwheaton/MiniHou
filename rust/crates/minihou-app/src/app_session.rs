@@ -190,10 +190,6 @@ impl App {
         }
     }
     pub(super) fn edit(&mut self, edit: Edit, continuous: bool) {
-        let was_linked = match &edit {
-            Edit::Param { node, name, .. } => self.editor.doc.value()["nodes"][node]["params"][name].get("modifier_input").is_some(),
-            _ => false,
-        };
         let promote = match &edit {
             Edit::Param { name, value, .. } if self.editor_state.selection != ui::SelectionMode::Object && !self.selection.is_empty() =>
                 ui::params::domain_edit_mode(name, value).filter(|to| *to != self.selection.mode),
@@ -207,8 +203,7 @@ impl App {
                     self.editor_state.apply(ui::EditorChange::Selection(to));
                 }
                 if matches!(&edit, Edit::Param { node, .. } if self.editor.doc.value()["nodes"][node]["linked_params_group"].is_string())
-                    || matches!(edit, Edit::ModifierInputs { .. } | Edit::ModifierInputValue { .. }) || was_linked
-                    || matches!(&edit, Edit::Param { value, .. } if value.get("modifier_input").is_some()) {
+                    || matches!(edit, Edit::ModifierInputs { .. } | Edit::ModifierInputValue { .. }) {
                     self.send(Edit::Replace(self.editor.doc.value().clone()));
                 } else { self.send(edit); }
                 if !continuous { self.finish_history(); }

@@ -233,29 +233,11 @@ impl Document {
                 let removed: std::collections::HashSet<_> = self.value["nodes"][node]["modifier_inputs"].as_array()
                     .into_iter().flatten().filter_map(|p| p["id"].as_str())
                     .filter(|id| !retained.contains(id)).map(str::to_owned).collect();
-                let mut resets = Vec::new();
-                if let Some(nodes) = self.value["nodes"].as_object() {
-                    for (nid, data) in nodes {
-                        if let Some(params) = data["params"].as_object() {
-                            for (name, value) in params {
-                                let link = &value["modifier_input"];
-                                let referenced = link["node"] == *node && link["id"].as_str().is_some_and(|id| removed.contains(id))
-                                    || link.as_str().is_some_and(|id| removed.contains(id));
-                                if referenced {
-                                    let default = data["type"].as_str().and_then(minihou_core::nodes::get)
-                                        .and_then(|s| s.params.iter().find(|p| p.name == name)).map(|p| (p.default)()).unwrap_or(Value::Null);
-                                    resets.push((nid.clone(), name.clone(), default));
-                                }
-                            }
-                        }
-                    }
-                }
                 self.set(&["nodes", node, "modifier_inputs"], json!(inputs));
                 if !removed.is_empty() {
                     let mut values = self.value["nodes"][node]["input_values"].as_object().cloned().unwrap_or_default();
                     values.retain(|id, _| retained.contains(id.as_str()));
                     self.set(&["nodes", node, "input_values"], Value::Object(values));
-                    for (nid, name, value) in resets { self.set(&["nodes", &nid, "params", &name], value); }
                 }
             }
             Edit::ModifierInputValue { node, id, value } => {
