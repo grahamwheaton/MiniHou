@@ -121,6 +121,7 @@ pub(crate) fn serve_client(
                 Ok(Ok((h, arrays))) => match h["type"].as_str().unwrap_or("") {
                     "object_names" if names_capable => {
                         if let Ok(mut hub) = minihou_app::object_names::HUB.lock() { if hub.incoming.len() < 64 { hub.incoming.push(h); } }
+                        minihou_app::object_names::wake();
                     }
                     "material_manifest" if hello["capabilities"].as_array().is_some_and(|a|a.iter().any(|v|v=="viewport_materials_v1")) => {
                         let scope=h["scope"].as_str().unwrap_or("");

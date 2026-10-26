@@ -6,7 +6,9 @@ use minihou_app::object_names::{self as names, Search};
 use serde_json::{json, Value};
 
 #[derive(Clone, Default)]
-struct Field { search: Search, highlight: usize, open: bool, over_popup: bool }
+struct Field { search: Search, highlight: usize, open: bool, over_popup: bool, had_focus: bool }
+
+static WAKE: std::sync::Once = std::sync::Once::new();
 
 /// Returns true when the value changed (typed or picked).
 pub fn field(ui: &mut egui::Ui, value: &mut Value, width: f32, theme: &super::theme::Theme) -> bool {
@@ -25,13 +27,19 @@ pub fn field(ui: &mut egui::Ui, value: &mut Value, width: f32, theme: &super::th
     let mut changed = response.changed();
     if !available { if changed { *value = json!(text); } return changed; }
     let now = ui.input(|i| i.time);
+    // A Blender reply repaints the field at once instead of the field polling every frame.
+    let ctx = ui.ctx().clone();
+    WAKE.call_once(|| names::set_wake(move || ctx.request_repaint()));
     if response.gained_focus() { st.search.focus(&text, now); st.open = true; st.highlight = 0; }
     if response.changed() { st.search.edit(&text, now); st.highlight = 0; st.open = true; }
     for msg in names::take_incoming() { if let Some(r) = names::parse(&msg) { st.search.accept(r); } }
+    // An unanswered query is abandoned after TIMEOUT, so the field cannot wait (and repaint) forever.
+    st.search.expire(now);
     if response.has_focus() || st.over_popup {
         if let Some(q) = st.search.poll(now) { names::send(q); }
-        if st.search.searching() { ui.ctx().request_repaint_after(std::time::Duration::from_millis(30)); }
     }
+    if st.search.debouncing() { ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(names::DEBOUNCE)); }
+    if let Some(left) = st.search.expires_in(now) { ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left)); }
     let len = st.search.results.len().min(names::LIMIT);
     if keys.0 { st.highlight = names::navigate(st.highlight, len, names::Key::Down).0; }
     if keys.1 { st.highlight = names::navigate(st.highlight, len, names::Key::Up).0; }
@@ -39,6 +47,11 @@ pub fn field(ui: &mut egui::Ui, value: &mut Value, width: f32, theme: &super::th
     if keys.2 && st.open {
         if let (_, Some(i)) = names::navigate(st.highlight, len, names::Key::Enter) { picked = Some(st.search.results[i].name.clone()); }
     }
+    // Losing focus by typing or a stray repaint is not a choice: take it back unless the user
+    // clicked elsewhere, picked a name, or pressed Enter/Escape.
+    let deliberate = picked.is_some() || ui.input(|i| i.pointer.any_pressed() || i.key_pressed(Key::Enter) || i.key_pressed(Key::Escape));
+    if st.had_focus && response.lost_focus() && !deliberate { response.request_focus(); }
+    st.had_focus = response.has_focus() || (st.had_focus && !deliberate && response.lost_focus());
     st.open = st.open && (response.has_focus() || st.over_popup) && picked.is_none();
     st.over_popup = false;
     if st.open {

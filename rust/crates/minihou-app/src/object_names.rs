@@ -17,6 +17,8 @@ pub const QUERY: &str = "object_names_query";
 pub const RESPONSE: &str = "object_names";
 /// Seconds between the last keystroke and the request.
 pub const DEBOUNCE: f64 = 0.12;
+/// A query Blender has not answered after this long is abandoned, so the field stops waiting.
+pub const TIMEOUT: f64 = 3.0;
 /// Most matches one response carries (and the add-on computes).
 pub const LIMIT: usize = 50;
 const MAX_NAME_BYTES: usize = 256;
@@ -107,6 +109,7 @@ pub fn parse(msg: &Value) -> Option<Response> {
 pub struct Search {
     next_id: u64,
     pending: Option<(u64, String)>,
+    pending_since: f64,
     typed_at: Option<f64>,
     query: String,
     hash: String,
@@ -130,6 +133,21 @@ impl Search {
         self.results = rank(query, &self.results, LIMIT);
         if let Some(hit) = self.cache.get(query) { self.results = hit.clone(); self.partial = false; }
     }
+    /// True while a keystroke waits out the debounce before it is sent.
+    pub fn debouncing(&self) -> bool { self.typed_at.is_some() }
+    /// Seconds until an outstanding query is abandoned, measured from `now`; None when nothing is pending.
+    pub fn expires_in(&self, now: f64) -> Option<f64> {
+        self.pending.as_ref().map(|_| (self.pending_since + TIMEOUT - now).max(0.))
+    }
+    /// Abandon an outstanding query that has waited past TIMEOUT. Returns true when it did.
+    pub fn expire(&mut self, now: f64) -> bool {
+        if self.pending.is_some() && now - self.pending_since >= TIMEOUT {
+            self.pending = None;
+            self.partial = false;
+            return true;
+        }
+        false
+    }
     /// "searching..." while a request for the current text is outstanding or debouncing.
     pub fn searching(&self) -> bool {
         self.typed_at.is_some() || self.pending.as_ref().is_some_and(|(_, q)| *q == self.query)
@@ -146,6 +164,7 @@ impl Search {
         }
         self.next_id += 1;
         self.pending = Some((self.next_id, self.query.clone()));
+        self.pending_since = now;
         Some(request(self.next_id, &self.query))
     }
     /// Apply a response; false when stale (an older request id) and discarded.
@@ -185,8 +204,19 @@ pub struct Hub {
     pub capable_peers: usize,
     pub outgoing: Vec<Value>,
     pub incoming: Vec<Value>,
+    /// Called when a reply arrives on a link thread, so the UI repaints to show it.
+    pub wake: Option<Box<dyn Fn() + Send>>,
 }
-pub static HUB: Mutex<Hub> = Mutex::new(Hub { capable_peers: 0, outgoing: Vec::new(), incoming: Vec::new() });
+pub static HUB: Mutex<Hub> = Mutex::new(Hub { capable_peers: 0, outgoing: Vec::new(), incoming: Vec::new(), wake: None });
+
+/// Install the repaint callback once (the UI thread calls this while drawing).
+pub fn set_wake(f: impl Fn() + Send + 'static) {
+    if let Ok(mut h) = HUB.lock() { if h.wake.is_none() { h.wake = Some(Box::new(f)); } }
+}
+/// Wake the UI for a new reply. Runs on the link thread; the callback only requests a repaint.
+pub fn wake() {
+    if let Ok(h) = HUB.lock() { if let Some(f) = &h.wake { f(); } }
+}
 
 pub fn available() -> bool { HUB.lock().map(|h| h.capable_peers > 0).unwrap_or(false) }
 /// Queue a query for the capable link connection (dropped if none is connected).
@@ -213,6 +243,18 @@ mod tests {
         assert_eq!(score("", "Cube"), Some(0));
         let ranked = rank("cu", &[m("Biscuit"), m("Cube.001"), m("Cube"), m("Camera"), m("BigCube")], 3);
         assert_eq!(ranked.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), ["Cube", "Cube.001", "BigCube"]);
+    }
+
+    #[test]
+    fn an_unanswered_query_expires_so_the_field_stops_waiting() {
+        let mut s = Search::default();
+        s.focus("cu", 0.0);
+        assert!(s.poll(1.0).is_some());
+        assert!(s.searching());
+        assert!(s.expires_in(1.0).is_some_and(|left| (left - TIMEOUT).abs() < 1e-9));
+        assert!(!s.expire(TIMEOUT - 0.5), "not yet");
+        assert!(s.expire(1.0 + TIMEOUT));
+        assert!(!s.searching() && s.expires_in(5.0).is_none());
     }
 
     #[test]
