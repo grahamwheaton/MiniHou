@@ -83,9 +83,20 @@ def _press_button(obj, mod, action, mode):
         elif action == "Open":
             bpy.ops.minihou.edit_network(modifier_name=mod.name)
         if mode == "Unpack":
-            bpy.ops.minihou.extract_graph(modifier_name=mod.name)
-        elif mode == "Pack" and embed.mode(ng) != embed.EMBEDDED or mode == "Relink" and embed.mode(ng) != embed.LINKED:
-            bpy.ops.minihou.switch_embed_mode(modifier_name=mod.name)
+            # Write the .minihou file beside the .blend: no dialog, and never into Blender's own folder.
+            if not bpy.data.filepath:
+                raise ValueError("Save the .blend first; Unpack writes the .minihou file beside it")
+            path = embed.linked_file(ng) or bpy.path.abspath("//" + bpy.path.clean_name(mod.name) + ".minihou")
+            embed.extract(ng, path)
+            if embed.mode(ng) == embed.EMBEDDED:
+                embed.switch_mode(ng)
+        elif mode == "Pack" and embed.mode(ng) != embed.EMBEDDED:
+            embed.switch_mode(ng)
+        elif mode == "Relink":
+            if not embed.linked_file(ng):
+                raise ValueError("Unpack first: Relink needs a .minihou file")
+            if embed.mode(ng) != embed.LINKED:
+                embed.switch_mode(ng)
 
 
 def _poll_buttons():
