@@ -71,7 +71,7 @@ def _set_button(mod, name, choice):
 
 
 def _press_button(obj, mod, action, mode):
-    """Run a pressed Actions or Mode button, then return it to Idle so the next press counts."""
+    """Run a pressed Actions or Mode button, then return it to REST ("-") so the next press counts."""
     from . import embed
     ng = mod.node_group
     with bpy.context.temp_override(object=obj, active_object=obj):
@@ -99,6 +99,7 @@ def _press_button(obj, mod, action, mode):
                 embed.switch_mode(ng)
 
 
+REST = "-"   # the resting menu choice between presses
 _BUTTONS = {"Actions": {"Open", "Reload", "Add input"}, "Mode": {"Pack", "Unpack", "Relink"}}
 _button_seen = set()
 
@@ -115,18 +116,18 @@ def _poll_buttons():
             values = proxy.read_values(mod, mod.node_group, modifiers.parameters(mod))
             # Only a real choice from the menu counts. Anything else (unknown, or a value Blender
             # reports while the graph is being rebuilt) must never fire an action.
-            action = values.get("Actions") if values.get("Actions") in _BUTTONS["Actions"] else "Idle"
-            mode = values.get("Mode") if values.get("Mode") in _BUTTONS["Mode"] else "Idle"
+            action = values.get("Actions") if values.get("Actions") in _BUTTONS["Actions"] else REST
+            mode = values.get("Mode") if values.get("Mode") in _BUTTONS["Mode"] else REST
             key = (obj.name, mod.name)
             if key not in _button_seen:
                 _button_seen.add(key)           # first sight records the state; it is not a press
                 continue
-            if action == "Idle" and mode == "Idle":
+            if action == REST and mode == REST:
                 continue
             for name, choice in (("Actions", action), ("Mode", mode)):
-                if choice != "Idle":
+                if choice != REST:
                     try:
-                        _set_button(mod, name, "Idle")
+                        _set_button(mod, name, REST)
                     except Exception as exc:
                         print(f"[minihou] reset {name}: {exc}")
             try:
