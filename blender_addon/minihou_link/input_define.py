@@ -227,7 +227,7 @@ def plan(graph, msg):
 
 
 def apply_offline(graph, msg):
-    """Apply to a graph dict (copy). Removing an input resets parameters linked to it, like the app."""
+    """Apply to a graph dict (copy). Removing an input drops its stored value, like the app."""
     graph = json.loads(json.dumps(graph))
     node, inputs, entry = plan(graph, msg)
     data = graph["nodes"][node]
@@ -239,12 +239,6 @@ def apply_offline(graph, msg):
         values.pop(ident, None)
     if "input_values" in data:
         data["input_values"] = values
-    if removed:
-        for other in graph["nodes"].values():
-            for pname, v in list((other.get("params") or {}).items()):
-                if isinstance(v, dict) and (v.get("modifier_input") or {}).get("node") == node \
-                        and v["modifier_input"].get("id") in removed:
-                    del other["params"][pname]   # back to the node's own default
     return graph, entry
 
 
