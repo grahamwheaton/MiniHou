@@ -35,8 +35,14 @@ impl App {
                         Ok(edits)=>{
                             if request.message["type"]=="live_activate" { ctx.send_viewport_cmd(egui::ViewportCommand::Focus); }
                             self.display=Graph::from_value(self.editor.doc.value()).ok().and_then(|g|g.main_output().ok()).unwrap_or_default();
-                            self.selected=self.display.clone();
-                            self.selected_set=std::collections::BTreeSet::from([self.display.clone()]);
+                            // A new document selects its output. An update (Blender echoing a value the
+                            // user is typing) keeps the selection, or the edited node's panel and field vanish.
+                            let kind=request.message["type"].as_str().unwrap_or("");
+                            self.selected=live_selection(kind,self.editor.doc.value(),&self.selected,&self.display);
+                            self.selected_set.retain(|id| self.editor.doc.value()["nodes"].get(id).is_some());
+                            if self.selected_set.is_empty() || !self.selected_set.contains(&self.selected) {
+                                self.selected_set=std::collections::BTreeSet::from([self.selected.clone()]);
+                            }
                             for edit in edits { self.send(edit); }
                             Ok(())
                         },
@@ -105,5 +111,31 @@ impl App {
                 link.listening(), &self.blender.clients, &self.blender.link_message, disconnected);
             ctx.request_repaint_after(Duration::from_millis(33));
         }
+    }
+}
+
+/// Selection after a live message from Blender: a new document (activate/replace) selects its output;
+/// an update or removal keeps the current node when it still exists.
+fn live_selection(kind: &str, doc: &serde_json::Value, selected: &str, display: &str) -> String {
+    let keeps = matches!(kind, "live_update" | "live_remove");
+    if keeps && !selected.is_empty() && doc["nodes"].get(selected).is_some() { selected.to_owned() } else { display.to_owned() }
+}
+
+#[cfg(test)]
+mod live_selection_tests {
+    use super::live_selection;
+    use serde_json::json;
+
+    #[test]
+    fn an_update_from_blender_keeps_the_node_being_edited() {
+        let doc = json!({"nodes": {"blender_object1": {}, "output": {}}});
+        assert_eq!(live_selection("live_update", &doc, "blender_object1", "output"), "blender_object1");
+    }
+    #[test]
+    fn a_new_document_or_a_missing_node_selects_the_output() {
+        let doc = json!({"nodes": {"output": {}}});
+        assert_eq!(live_selection("live_activate", &doc, "output", "output"), "output");
+        assert_eq!(live_selection("live_replace", &json!({"nodes": {"a": {}, "output": {}}}), "a", "output"), "output");
+        assert_eq!(live_selection("live_update", &doc, "gone", "output"), "output");
     }
 }
