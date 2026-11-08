@@ -28,11 +28,6 @@
         "grid"
       ],
       [
-        "Null",
-        "null",
-        "null"
-      ],
-      [
         "Circle",
         "circle",
         "circle"
@@ -78,41 +73,6 @@
         "points_to_surface"
       ],
       [
-        "Blender Object",
-        "blender_object",
-        "file"
-      ],
-      [
-        "Blender Image",
-        "blender_image",
-        "file"
-      ],
-      [
-        "Image File",
-        "image_file",
-        "file"
-      ],
-      [
-        "USD Import",
-        "usd_import",
-        "file"
-      ],
-      [
-        "Host Mesh",
-        "modifier_input",
-        "host"
-      ],
-      [
-        "Controller",
-        "controller",
-        "null"
-      ],
-      [
-        "Object Input",
-        "object_input",
-        "host"
-      ],
-      [
         "Line",
         "line",
         "line"
@@ -127,11 +87,6 @@
   {
     "name": "Modify",
     "tools": [
-      [
-        "LOD Bake",
-        "lod_bake",
-        "null"
-      ],
       [
         "Transform",
         "transform",
@@ -193,44 +148,9 @@
         "sort"
       ],
       [
-        "Null",
-        "null",
-        "null"
-      ],
-      [
-        "Output",
-        "output",
-        "output"
-      ],
-      [
-        "Scene Objects",
-        "scene_objects",
-        "output"
-      ],
-      [
-        "Image Out",
-        "image_out",
-        "output"
-      ],
-      [
-        "USD Export",
-        "usd_export",
-        "output"
-      ],
-      [
-        "Input",
-        "input",
-        "host"
-      ],
-      [
         "Bound",
         "bound",
         "bound"
-      ],
-      [
-        "Cache",
-        "cache",
-        "cache"
       ],
       [
         "Example Offset",
@@ -1300,17 +1220,87 @@
     ]
   },
   {
-    "name": "Library",
+    "name": "Utilities",
     "tools": [
       [
-        "Controller",
-        "controller",
-        "controller"
+        "Input",
+        "input",
+        "host"
+      ],
+      [
+        "Output",
+        "output",
+        "output"
       ],
       [
         "Subnet",
         "subnet",
         "subnet"
+      ],
+      [
+        "Controller",
+        "controller",
+        "null"
+      ],
+      [
+        "Host Mesh",
+        "modifier_input",
+        "host"
+      ],
+      [
+        "Object Input",
+        "object_input",
+        "host"
+      ],
+      [
+        "Blender Object",
+        "blender_object",
+        "file"
+      ],
+      [
+        "Blender Image",
+        "blender_image",
+        "file"
+      ],
+      [
+        "Image File",
+        "image_file",
+        "file"
+      ],
+      [
+        "Image Out",
+        "image_out",
+        "output"
+      ],
+      [
+        "Scene Objects",
+        "scene_objects",
+        "output"
+      ],
+      [
+        "USD Import",
+        "usd_import",
+        "file"
+      ],
+      [
+        "USD Export",
+        "usd_export",
+        "output"
+      ],
+      [
+        "Null",
+        "null",
+        "null"
+      ],
+      [
+        "Cache",
+        "cache",
+        "cache"
+      ],
+      [
+        "LOD Bake",
+        "lod_bake",
+        "null"
       ]
     ]
   }

@@ -1,5 +1,5 @@
 id = "cache"
 name = "Cache"
-category = "Modify"
+category = "Utilities"
 description = "Reuse input geometry while its upstream cook key is unchanged."
 keywords = "cache cook performance reuse geometry"

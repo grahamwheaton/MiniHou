@@ -23,10 +23,6 @@
         "label": "Grid"
       },
       {
-        "id": "null",
-        "label": "Null"
-      },
-      {
         "id": "circle",
         "label": "Circle"
       },
@@ -62,51 +58,12 @@
       {
         "id": "points_to_surface",
         "label": "Metaball"
-      },
-      {
-        "id": "blender_object",
-        "label": "Blender Object",
-        "icon": "file"
-      },
-      {
-        "id": "blender_image",
-        "label": "Blender Image",
-        "icon": "file"
-      },
-      {
-        "id": "image_file",
-        "label": "Image File",
-        "icon": "file"
-      },
-      {
-        "id": "usd_import",
-        "label": "USD Import",
-        "icon": "file"
-      },
-      {
-        "id": "modifier_input",
-        "label": "Host Mesh",
-        "icon": "host"
-      },
-      {
-        "id": "controller",
-        "icon": "null"
-      },
-      {
-        "id": "object_input",
-        "label": "Object Input",
-        "icon": "host"
       }
     ]
   },
   {
     "name": "Modify",
     "tools": [
-      {
-        "id": "lod_bake",
-        "label": "LOD Bake",
-        "icon": "null"
-      },
       {
         "id": "transform",
         "label": "Transform"
@@ -149,34 +106,6 @@
       },
       {
         "id": "sort"
-      },
-      {
-        "id": "null",
-        "label": "Null"
-      },
-      {
-        "id": "output",
-        "label": "Output"
-      },
-      {
-        "id": "scene_objects",
-        "label": "Scene Objects",
-        "icon": "output"
-      },
-      {
-        "id": "image_out",
-        "label": "Image Out",
-        "icon": "output"
-      },
-      {
-        "id": "usd_export",
-        "label": "USD Export",
-        "icon": "output"
-      },
-      {
-        "id": "input",
-        "label": "Input",
-        "icon": "host"
       }
     ]
   },
@@ -872,7 +801,81 @@
     "tools": []
   },
   {
-    "name": "Library",
-    "tools": []
+    "name": "Utilities",
+    "tools": [
+      {
+        "id": "input",
+        "label": "Input",
+        "icon": "host"
+      },
+      {
+        "id": "output",
+        "label": "Output"
+      },
+      {
+        "id": "subnet"
+      },
+      {
+        "id": "controller",
+        "icon": "null"
+      },
+      {
+        "id": "modifier_input",
+        "label": "Host Mesh",
+        "icon": "host"
+      },
+      {
+        "id": "object_input",
+        "label": "Object Input",
+        "icon": "host"
+      },
+      {
+        "id": "blender_object",
+        "label": "Blender Object",
+        "icon": "file"
+      },
+      {
+        "id": "blender_image",
+        "label": "Blender Image",
+        "icon": "file"
+      },
+      {
+        "id": "image_file",
+        "label": "Image File",
+        "icon": "file"
+      },
+      {
+        "id": "image_out",
+        "label": "Image Out",
+        "icon": "output"
+      },
+      {
+        "id": "scene_objects",
+        "label": "Scene Objects",
+        "icon": "output"
+      },
+      {
+        "id": "usd_import",
+        "label": "USD Import",
+        "icon": "file"
+      },
+      {
+        "id": "usd_export",
+        "label": "USD Export",
+        "icon": "output"
+      },
+      {
+        "id": "null",
+        "label": "Null"
+      },
+      {
+        "id": "cache"
+      },
+      {
+        "id": "lod_bake",
+        "label": "LOD Bake",
+        "icon": "null"
+      }
+    ]
   }
 ]

@@ -1,5 +1,5 @@
 id = "null"
 name = "Null"
-category = "Modify"
+category = "Utilities"
 description = "Pass geometry through and mark the origin in the viewport."
 keywords = "null pass through crosshair"
