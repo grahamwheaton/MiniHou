@@ -1,10 +1,11 @@
 use eframe::egui;
 use minihou_app::{
+    metadata_kind, param_kind, param_meta,
     value_link_ui::{self, CopiedParam, PasteMode},
-    Edit,
+    Edit, ParamKind,
 };
 use minihou_core::nodes;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::super::{Actions, SelectionMode, UiAction, View};
 use super::pick;
@@ -132,6 +133,7 @@ pub(crate) fn parameter_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions,
             }
         });
     });
+    blender_input_menu(ui, v, out, node, name, default);
     let linked = v.doc["nodes"][node]["channels"].as_object().is_some_and(|c| c.keys().any(|k| k == name || k.starts_with(&format!("{name}."))));
     if let Some((source, param)) = value_link_ui::go_to_source(v.doc,node,Some(name)) {
         if ui.button(format!("Go to Source: {source}.{param}")).clicked() { out.push(UiAction::NavigateLink {node:source,param}); ui.close(); }
@@ -189,4 +191,33 @@ pub(crate) fn expression_dialog(ctx: &egui::Context, v: &View<'_>, out: &mut Act
         }
     });
     if !open { ctx.data_mut(|d| d.remove::<(String,String)>(id)); }
+}
+
+/// "Link to Blender input": bind this parameter to one of the modifier's Blender inputs of a matching type.
+fn blender_input_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str, name: &str, default: &Value) {
+    let typ = v.doc["nodes"][node]["type"].as_str().unwrap_or("");
+    let kind = param_meta(typ, name).map_or_else(|| param_kind(default), |m| metadata_kind(m, default));
+    let matching: Vec<_> = minihou_app::modifier_inputs::entries(v.doc).into_iter().filter(|entry| match kind {
+        ParamKind::Float => entry["kind"] == "float",
+        ParamKind::Integer => entry["kind"] == "int",
+        ParamKind::Bool => entry["kind"] == "bool",
+        ParamKind::Vec3 => entry["kind"] == "vector" || entry["kind"] == "rotation",
+        ParamKind::String => ["string", "menu", "object", "collection", "material", "image", "texture"].iter().any(|k| entry["kind"] == *k),
+        ParamKind::Unsupported => false,
+    }).collect();
+    let linked = v.doc["nodes"][node]["params"][name].get("modifier_input").is_some();
+    if matching.is_empty() && !linked { return; }
+    ui.menu_button("Link to Blender input", |ui| {
+        for entry in &matching {
+            if ui.button(entry["name"].as_str().unwrap_or("")).clicked() {
+                out.push(UiAction::Edit { edit: Edit::Param { node: node.into(), name: name.into(),
+                    value: json!({"modifier_input":{"node":entry["node"],"id":entry["id"]}}) }, continuous: false });
+                ui.close();
+            }
+        }
+        if linked && ui.button("Unlink").clicked() {
+            out.push(UiAction::Edit { edit: Edit::Param { node: node.into(), name: name.into(), value: default.clone() }, continuous: false });
+            ui.close();
+        }
+    });
 }

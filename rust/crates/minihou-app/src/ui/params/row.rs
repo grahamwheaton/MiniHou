@@ -434,34 +434,10 @@ pub(crate) fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, 
         .on_hover_text(if on { "Exposed: click to remove" } else { "Expose parameter" }).clicked() {
         out.push(UiAction::Edit { edit: minihou_app::toggle_exposed(v.doc, id, param.name), continuous: false });
     }
-    let matching: Vec<_> = minihou_app::modifier_inputs::entries(v.doc).into_iter().filter(|entry| {
-        match kind {
-            ParamKind::Float => entry["kind"] == "float",
-            ParamKind::Integer => entry["kind"] == "int",
-            ParamKind::Bool => entry["kind"] == "bool",
-            ParamKind::Vec3 => entry["kind"] == "vector" || entry["kind"] == "rotation",
-            ParamKind::String => ["string", "menu", "object", "collection", "material", "image", "texture"].iter().any(|k| entry["kind"] == *k),
-            ParamKind::Unsupported => false,
-        }
-    }).collect();
-    if !matching.is_empty() || old.get("modifier_input").is_some() {
-        ui.horizontal(|ui| {
-            if let Some(link) = old.get("modifier_input") { ui.label(format!("Blender input: {link}")); }
-            ui.menu_button("Link to Blender input", |ui| {
-                for entry in &matching {
-                    let name = entry["name"].as_str().unwrap_or("");
-                    if ui.button(name).clicked() {
-                        out.push(UiAction::Edit { edit: Edit::Param { node: id.into(), name: param.name.into(),
-                            value: json!({"modifier_input":{"node":entry["node"],"id":entry["id"]}}) }, continuous: false });
-                        ui.close();
-                    }
-                }
-                if old.get("modifier_input").is_some() && ui.button("Unlink").clicked() {
-                    out.push(UiAction::Edit { edit: Edit::Param { node: id.into(), name: param.name.into(), value: default.clone() }, continuous: false });
-                    ui.close();
-                }
-            });
-        });
+    // The link to a Blender input lives in the parameter's right-click menu; only a link that is
+    // already made is shown here, so the panel stays free of per-parameter buttons.
+    if let Some(link) = old.get("modifier_input") {
+        ui.label(format!("Blender input: {link}"));
     }
 }
 
