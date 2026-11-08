@@ -179,11 +179,24 @@ mod tests {
             assert_eq!(appended, package_ids, "{} package tools", merged.name);
         }
         let modify = tabs().iter().find(|t| t.name == "Modify").unwrap();
-        assert_eq!(modify.tools[0].node_type, "lod_bake");
+        assert!(modify.tools.iter().all(|t| t.node_type != "lod_bake"), "lod_bake moved to the Utilities tab");
         let measure = tabs().iter().find(|t| t.name == "Measure").unwrap();
         for id in ["measure_volume", "measure_bounds", "measure_area", "measure_length", "measure_distance"] {
             assert_eq!(measure.tools.iter().filter(|t| t.node_type == id).count(), 1, "{id}");
         }
+    }
+    #[test] fn utilities_tab_holds_io_and_caching_nodes_and_nothing_is_lost() {
+        const UTILITIES: [&str; 16] = ["input", "output", "subnet", "controller", "modifier_input", "object_input", "blender_object", "blender_image",
+            "image_file", "image_out", "scene_objects", "usd_import", "usd_export", "null", "cache", "lod_bake"];
+        let utilities = tabs().iter().find(|t| t.name == "Utilities").expect("Utilities tab");
+        assert_eq!(utilities.tools.iter().map(|t| t.node_type).collect::<Vec<_>>(), UTILITIES);
+        for tab in tabs().iter().filter(|t| t.name != "Utilities") {
+            for tool in tab.tools { assert!(!UTILITIES.contains(&tool.node_type), "{} still in {}", tool.node_type, tab.name); }
+        }
+        let shown: std::collections::BTreeSet<_> = tabs().iter().flat_map(|t| t.tools).map(|t| t.node_type).collect();
+        for node in minihou_core::nodes::package_catalogue() { assert!(shown.contains(node.id), "{} missing from shelf", node.id); }
+        // 217 distinct node types were on the shelf before Utilities existed.
+        assert_eq!(shown.len(), 217);
     }
     #[test] fn labels_and_initials() { assert_eq!(wrap_label("Blender Object"), "Blender\nObject"); assert_eq!(initials("Blender Object"), "BO"); }
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }

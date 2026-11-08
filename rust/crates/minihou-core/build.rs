@@ -34,7 +34,7 @@ fn discover(root: &Path) -> Result<Vec<Package>, String> {
         let metadata = fs::read_to_string(path.join("node.toml")).map_err(|e| format!("{folder}: missing or unreadable node.toml: {e}"))?;
         let read = |key| field(&metadata, key).map(str::to_owned).map_err(|e| format!("{folder}: {e}"));
         let package = Package { folder: folder.clone(), id: read("id")?, name: read("name")?, category: read("category")?, description: read("description")?, keywords: read("keywords")? };
-        const CATEGORIES: &[&str] = &["Create", "Modify", "Model", "Polygon", "Edges", "Deform", "Texture", "Groups", "Attributes", "Curves", "Points", "Rigid Bodies", "Constraints", "Terrain FX", "Volume", "PCG", "Procedural", "Flow", "Measure", "Library"];
+        const CATEGORIES: &[&str] = &["Create", "Modify", "Model", "Polygon", "Edges", "Deform", "Texture", "Groups", "Attributes", "Curves", "Points", "Rigid Bodies", "Constraints", "Terrain FX", "Volume", "PCG", "Procedural", "Flow", "Measure", "Utilities"];
         if !CATEGORIES.contains(&package.category.as_str()) { return Err(format!("{}: unknown category {:?}", package.folder, package.category)); }
         if !package.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') || package.id.starts_with(|c: char| c.is_ascii_digit()) {
             return Err(format!("{}: id must be snake_case", package.folder));
