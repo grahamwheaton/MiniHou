@@ -11,7 +11,7 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
     inputs: GEO,
     params: crate::params!(
         "group": "";
-        "domain": "detail";
+        "domain": "object";
         "method": "center_of_mass";
         "output": "points";
         "attribute_name": "centroid";
@@ -132,7 +132,9 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
 
     let group = p.s("group")?;
-    let domain = p.e("domain", &["detail", "pieces", "primitives"])?;
+    // Points/Edges/Faces/Object are the names shown; detail/pieces/primitives stay accepted so older graphs cook.
+    let domain = p.e("domain", &["points", "edges", "faces", "object", "detail", "pieces", "primitives"])?;
+    let domain = match domain.as_str() { "faces" => "primitives", "object" => "pieces", d => d }.to_owned();
     let method = p.e("method", &["center_of_mass", "bounding_box"])?;
     let output = p.e("output", &["points", "attribute"])?;
     let attribute_name = p.s("attribute_name")?;
@@ -144,6 +146,32 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let nprims = geo.nprims();
 
     match domain.as_str() {
+        "points" => {
+            if output == "attribute" {
+                let mut out = (*geo).clone();
+                out.point.insert(attribute_name, Arc::new(Attr::f32(3, p_slice.to_vec())));
+                Ok(out)
+            } else {
+                Geometry::points_only(p_slice.to_vec())
+            }
+        }
+        "edges" => {
+            // Every edge once, in first-seen order; its centre is the midpoint (also its bounding-box centre).
+            let mut seen = BTreeSet::new();
+            let mut pts = Vec::new();
+            for f in 0..nprims {
+                let (s, e) = (offsets[f] as usize, offsets[f + 1] as usize);
+                let n = e - s;
+                if n < 2 { continue; }
+                for i in 0..if n == 2 { 1 } else { n } {
+                    let (a, b) = (vp[s + i] as usize, vp[s + (i + 1) % n] as usize);
+                    if seen.insert((a.min(b), a.max(b))) {
+                        for k in 0..3 { pts.push((p_slice[a * 3 + k] + p_slice[b * 3 + k]) * 0.5); }
+                    }
+                }
+            }
+            Geometry::points_only(pts)
+        }
         "primitives" => {
             let mask = if group.trim().is_empty() {
                 vec![true; nprims]
