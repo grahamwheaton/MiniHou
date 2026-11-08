@@ -18,7 +18,7 @@ GRAPH = {"display": "input", "exposed": [{"name": "Scale", "node": "t", "param":
          "nodes": {"input": {"type": "modifier_input",
                              "modifier_inputs": [{"id": "input_1", "name": "Amount", "kind": "float", "default": 0.0}],
                              "input_values": {"input_1": 2.0}},
-                   "t": {"type": "transform", "params": {"translate": {"modifier_input": {"node": "input", "id": "input_1"}}}}}}
+                   "t": {"type": "transform"}}}
 
 
 class PureRules(unittest.TestCase):
@@ -55,14 +55,13 @@ class PureRules(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.plan({"nodes": {"b": {"type": "box"}}}, D.request(input={"kind": "float"}))
 
-    def test_rename_keeps_id_and_remove_resets_links(self):
+    def test_rename_keeps_id_and_remove_drops_value(self):
         graph, entry = D.apply_offline(GRAPH, D.request("rename", ident="input_1", name="Scale"))
         self.assertEqual((entry["id"], entry["name"]), ("input_1", "Scale 2"))
         self.assertEqual(graph["nodes"]["input"]["input_values"], {"input_1": 2.0}, "values follow the stable id")
         graph, _ = D.apply_offline(GRAPH, D.request("remove", ident="input_1"))
         self.assertEqual(graph["nodes"]["input"]["modifier_inputs"], [])
         self.assertEqual(graph["nodes"]["input"]["input_values"], {})
-        self.assertNotIn("translate", graph["nodes"]["t"]["params"])
 
     def test_merged_interface_keeps_exposed_and_follows_graph(self):
         graph, _ = D.apply_offline(GRAPH, D.request(input={"name": "Target", "kind": "object"}))

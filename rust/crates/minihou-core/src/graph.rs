@@ -234,23 +234,8 @@ impl Graph {
             }
             let bypass = nd.get("flags").and_then(|f| f.get("bypass")).and_then(Value::as_bool).unwrap_or(false);
             let mut params = nd.get("params").and_then(Value::as_object).cloned();
-            if let Some(params) = &mut params {
-                for (param, value) in params {
-                    if let Some(link) = value.as_object().and_then(|o| o.get("modifier_input")) {
-                        let (source, input) = if let Some(s) = link.as_str() {
-                            (None, s)
-                        } else {
-                            (link["node"].as_str(), link["id"].as_str().ok_or_else(|| Error::new(format!("node '{id}' parameter '{param}': modifier input link needs an id")))?)
-                        };
-                        let found = nodes_v.iter().filter(|(name, n)| n["type"] == "modifier_input" && source.is_none_or(|s| s == name.as_str()))
-                            .flat_map(|(_, n)| n["modifier_inputs"].as_array().into_iter().flatten().map(move |entry| (n, entry)))
-                            .find(|(_, entry)| entry["id"] == input || entry["name"] == input)
-                            .ok_or_else(|| Error::new(format!("node '{id}' parameter '{param}': modifier input {input:?} is missing")))?;
-                        let key = found.1["id"].as_str().unwrap_or(input);
-                        *value = found.0["input_values"].get(key).unwrap_or(&found.1["default"]).clone();
-                    }
-                }
-            }
+            // Parameter-to-Blender-input links were removed; old saved links fall back to the parameter's default.
+            if let Some(params) = &mut params { params.retain(|_, value| value.get("modifier_input").is_none()); }
             let channels = nd.get("channels").map(|v| v.as_object().cloned().ok_or_else(|| Error::new(format!("node '{id}': channels must be an object")))).transpose()?;
             if channels.as_ref().is_some_and(|m| m.values().any(|v| !v.is_string())) {return Err(Error::new(format!("node '{id}': channels must contain expression strings")));}
             let locked_params = nd.get("locked_params").map(|v| v.as_array().and_then(|a| a.iter().map(|x| x.as_str().map(str::to_owned)).collect()).ok_or_else(|| Error::new(format!("node '{id}': locked_params must be an array of strings")))).transpose()?;
@@ -272,15 +257,7 @@ impl Graph {
             if id.contains('/') { continue; }
             let nd = nodes.entry(id.clone()).or_insert_with(|| serde_json::json!({}));
             nd["type"] = Value::String(def.node_type.clone());
-            let mut params = def.params.clone();
-            if let (Some(params), Some(original), Some(baseline)) = (&mut params,
-                nd.get("params").and_then(Value::as_object), baseline.as_ref().and_then(|g| g.node(id)).and_then(|d| d.params.as_ref())) {
-                for (name, link) in original {
-                    if link.get("modifier_input").is_some() && params.get(name) == baseline.get(name) {
-                        params.insert(name.clone(), link.clone());
-                    }
-                }
-            }
+            let params = &def.params;
             if nd.get("params").and_then(Value::as_object) != params.as_ref() {
                 if let Some(p) = &params { nd["params"] = Value::Object(p.clone()); }
                 else { nd.as_object_mut().unwrap().remove("params"); }
