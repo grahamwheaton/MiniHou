@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (4, 2, 0),
     "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
