@@ -6,6 +6,7 @@ Inter-process link server, binary streaming protocol, embedded HTTP REST API, an
 - `rust/crates/minihou-app/src/link_protocol.rs`: Binary message framing, array encoding, and geometry synchronization.
 - `rust/crates/minihou-app/src/link_instances.rs`: Shared memory and socket instance bridge management.
 - `rust/crates/minihou-app/src/http_api.rs`: Embedded HTTP server, REST endpoints, and MCP command routing.
+- `rust/crates/minihou-app/src/subnet_edit.rs`: subnet grouping/boundary edits, shared by the editor and the MCP `subnet`/`ungroup` ops (lives in the lib so `http_ops` can call it).
 - `tools/setup_mcp.py`: AI assistant MCP registration utility configuring `.mcp.json`.
 
 ## Key functions or types

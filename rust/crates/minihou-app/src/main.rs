@@ -1,5 +1,5 @@
 mod picking;
-mod subnet_edit;
+use minihou_app::subnet_edit;
 mod element_select;
 mod element_pick_glue;
 use element_pick_glue::{point_pickable, active_range, navigation_point, loop_cut_has_marks, loop_cut_selection, selection_exists_on_scene, selection_in_range, pick_displayed, pick_displayed_culled, pick_displayed_behind, keep_extrude_selection, pick_displayed_wire, wire_selection};

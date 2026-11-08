@@ -401,3 +401,21 @@ fn remote_edits_and_graph_fields_cannot_enable_python() {
     assert!(response.error.unwrap_or_default().contains(DISABLED_MESSAGE));
     assert!(!gate.allowed() && gate.pending().is_empty());
 }
+
+#[test]
+fn ops_group_nodes_into_a_subnet_and_ungroup_again() {
+    let g = json!({"display":"out","nodes":{
+        "box1":{"type":"box"},
+        "xf":{"type":"transform","inputs":{"geo":"box1"},"params":{"translate":[0,2,0]}},
+        "out":{"type":"output","inputs":{"geo":"xf"}}}});
+    let (grouped, results) = http_ops::apply_ops(&g, &json!([{"op":"subnet","ids":["xf"]}])).unwrap();
+    let id = results[0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(grouped["nodes"][&id]["type"], "subnet");
+    assert!(grouped["nodes"].get("xf").is_none());
+    assert!(grouped["nodes"][&id]["inner"]["nodes"].get("xf").is_some());
+    let (back, results) = http_ops::apply_ops(&grouped, &json!([{"op":"ungroup","id":id}])).unwrap();
+    assert_eq!(results[0]["ids"], json!(["xf"]));
+    assert!(back["nodes"].get("xf").is_some());
+    assert!(http_ops::apply_ops(&g, &json!([{"op":"subnet","ids":["nope"]}])).is_err());
+    assert!(http_ops::apply_ops(&g, &json!([{"op":"ungroup","id":"box1"}])).is_err());
+}

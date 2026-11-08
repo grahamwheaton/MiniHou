@@ -10,6 +10,7 @@ pub mod http_geometry;
 pub mod transform_math;
 pub mod noodle_hit;
 pub mod graph_edit;
+pub mod subnet_edit;
 pub mod modifier_inputs;
 pub mod object_names;
 pub mod input_define;

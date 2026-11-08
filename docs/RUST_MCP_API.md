@@ -148,6 +148,8 @@ Blender link then publishes the document, exposed interface and cook result.
 | `box_add` | `around:[ids]` or `pos`+`size`, `id?`, `title?`, `color?` | `{id}`; network box |
 | `box_set` | `id`, `title?`, `color?`, `pos?`, `size?`, `collapsed?`, `locked?`, `note?`, `text?` | `{}` |
 | `box_remove` | `id:str|[str]` | `{}` |
+| `subnet` | `ids:[str]` (existing nodes) | `{id}`; groups them into a new subnet node, reconnecting what read them (same as Group in the editor) |
+| `ungroup` | `id:str` (a subnet node) | `{ids:[str]}`; the subnet's inner nodes move back to the outer graph (same as Ungroup in the editor) |
 | `paint_assign` | `id`, `indices?`, `value?`/`values?`/`erase?`, `clear?`, `default?` | Rust edits the Python-compatible `mhp1:` payload and returns `{edited:true,bytes:int}`. |
 
 The MCP edit schema lists 18 op names; its prose also documents `paint_assign`,
