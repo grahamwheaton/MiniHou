@@ -166,12 +166,15 @@ pub fn place_connected(ctx: &egui::Context, path: &Path, node: &str, pos: [f32; 
 pub fn begin_layout(ctx: &egui::Context, file: &Path, doc: &serde_json::Value,
     root_selected: &BTreeSet<String>, kind: LayoutKind) {
     let id = state_id(file);
+    // Read the pointer before taking the data lock: egui's context lock is not re-entrant, and `input`
+    // needs it too, so asking for it inside `data_mut` waits on itself and hangs the whole UI.
+    let hover = ctx.input(|i| i.pointer.hover_pos());
     ctx.data_mut(|d| {
         let mut state = d.get_persisted::<State>(id).unwrap_or_default();
         let scoped = scope_doc(doc, &state.subnet_path);
         let value = scoped.as_ref().unwrap_or(doc);
         let selected = if scoped.is_some() { &state.inner_selected_set } else { root_selected };
-        if let (Ok(graph), Some(anchor)) = (minihou_core::Graph::from_value(value), ctx.input(|i| i.pointer.hover_pos())) {
+        if let (Ok(graph), Some(anchor)) = (minihou_core::Graph::from_value(value), hover) {
             let positions = positions_for(&state, &graph, value);
             let nodes: Vec<_> = positions.iter().filter(|(id, _)| selected.contains(id)).cloned().collect();
             if !nodes.is_empty() {
@@ -358,5 +361,7 @@ fn reset_scope(state: &mut State) {
 mod subnet_scope_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod layout_lock_tests;
 #[cfg(test)]
 mod noodle_selection_tests;
