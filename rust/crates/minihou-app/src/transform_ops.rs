@@ -62,6 +62,10 @@ impl App {
         } else {
             value["nodes"][&self.display]["inputs"]["geo"].as_str().unwrap_or(&self.display).to_owned()
         };
+        // A transform selected upstream of the displayed node is the one being moved, not a new node after the display.
+        let source = if group.is_empty() && self.selected != source
+            && before_doc.value()["nodes"][&self.selected]["type"] == "transform"
+            && feeds_node(before_doc.value(), &self.selected, &source) { self.selected.clone() } else { source };
         let resolved_pivot = pivot.unwrap_or_else(|| {
             if self.editor_state.pivot == ui::Pivot::Cursor {
                 self.editor_state.cursor
