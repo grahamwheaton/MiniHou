@@ -17,7 +17,7 @@ import uuid
 import bpy
 from bpy.app.handlers import persistent
 
-from . import embed, mesh_reader, mesh_writer, proxy, scene_objects
+from . import embed, mesh_reader, mesh_writer, proxy, scale_space, scene_objects
 from .protocol import GeoUpdate, Mirror, instance_payload
 
 KEY = "minihou_modifier_id"
@@ -689,6 +689,7 @@ def read_prefix(obj, mod, *, with_materials=False):
         mesh = evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
         try:
             arrays, _ = mesh_reader._read_mesh(temp, mesh)
+            scale_space.scale_arrays(arrays, scale_space.world_scale(obj))   # MiniHou sees the scene-sized geometry
             materials = tuple(material.original if material is not None else None
                               for material in mesh.materials)
         finally:
@@ -875,6 +876,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     objects = _instance_objects(obj, mod, names)
                     mirror = Mirror()
                     mirror.apply(update)
+                    scale_space.unscale_arrays(mirror.arrays, scale_space.world_scale(obj))   # back to object space
                     cache = _cache(mod)
                     # Native upstream modifiers may add/reorder slots; indices refer to that prefix.
                     # Establish slots before assigning polygon material indices.

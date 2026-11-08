@@ -16,7 +16,7 @@ import bpy
 import numpy as np
 from bpy.app.handlers import persistent
 
-from . import embed, modifiers, proxy, mesh_reader, mesh_writer, scene_objects
+from . import embed, modifiers, proxy, mesh_reader, mesh_writer, scale_space, scene_objects
 from .protocol import GeoUpdate, Mirror, instance_payload
 
 KEY = "minihou_gn_id"
@@ -700,6 +700,7 @@ def _probe(obj, mod, path, input_name="Geometry"):
         mesh = evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=dg)
         try:
             arrays, info = mesh_reader._read_mesh(temp, mesh)
+            scale_space.scale_arrays(arrays, scale_space.world_scale(obj))   # MiniHou sees the scene-sized geometry
             materials = tuple(m.original if m else None for m in mesh.materials)
         finally:
             evaluated.to_mesh_clear()
@@ -787,6 +788,7 @@ def _cook_tree(obj, mod, host, port, force):
             objects = [bindings.get(name[1:]) for name in names]
             mirror = Mirror()
             mirror.apply(update)
+            scale_space.unscale_arrays(mirror.arrays, scale_space.world_scale(obj))   # back to object space
             cache = _cache(tree)
             # Publish only a fully constructed mesh, keeping last valid output on failure.
             mesh = bpy.data.meshes.new("MiniHou GN cooked")
