@@ -36,9 +36,9 @@ pub(super) fn layout_ordered(
     let mut queue: VecDeque<_> = roots.iter().copied().collect();
     let mut depth = vec![0usize; graph.nodes.len()];
     let mut x = vec![96.0; graph.nodes.len()];
-    // Three card widths rounded up to an even number of grid cells: >= two
-    // widths of clear gap, and the midpoint of two adjacent columns is on-grid.
-    let pitch = (super::CARD.x * 3.0 / 64.0).ceil() * 64.0;
+    // 1.5 card widths rounded up to an even number of grid cells: a clear gap of half a card or more, and the
+    // midpoint of two adjacent columns is on-grid.
+    let pitch = (super::CARD.x * 1.5 / 64.0).ceil() * 64.0;
     for (column, &root) in roots.iter().enumerate() { x[root] += column as f32 * pitch; }
     while let Some(source) = queue.pop_front() {
         for &target in &children[source] {
@@ -279,7 +279,7 @@ mod tests {
         });
         let at = |id| p.iter().find(|(n, _)| n == id).unwrap().1;
         assert_eq!(at("grid").y, at("torus").y);
-        assert!(at("grid").x - at("torus").x - super::super::CARD.x >= 2.0 * super::super::CARD.x);
+        assert!(at("grid").x - at("torus").x - super::super::CARD.x >= 0.5 * super::super::CARD.x);
         for chain in [&["grid", "noise", "transform", "normal", "output"][..], &["torus", "torus_transform"][..]] {
             for (row, id) in chain.iter().enumerate() {
                 assert_eq!(at(id).x, at(chain[0]).x);
