@@ -37,4 +37,19 @@ fn main() {
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=../minihou-core/src");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=assets/app_icon.ico");
+    embed_exe_icon();
 }
+
+/// The icon of the exe file itself (Explorer, a pinned taskbar shortcut). The running window's icon comes from
+/// assets/app_icon.png in window_setup.rs. A missing resource compiler only costs the file icon, never the build.
+#[cfg(windows)]
+fn embed_exe_icon() {
+    let mut resource = winresource::WindowsResource::new();
+    resource.set_icon("assets/app_icon.ico");
+    if let Err(e) = resource.compile() {
+        println!("cargo:warning=could not embed the exe icon: {e}");
+    }
+}
+#[cfg(not(windows))]
+fn embed_exe_icon() {}
