@@ -21,6 +21,8 @@ pub const OPS: &[&str] = &[
     "replace",
     "layout",
     "loop",
+    "subnet",
+    "ungroup",
     "box_add",
     "box_set",
     "box_remove",

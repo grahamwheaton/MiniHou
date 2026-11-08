@@ -407,6 +407,18 @@ fn apply_one(g: &mut Value, op: &Value, kind: &str) -> Result<Value> {
             }
             Ok(json!({"begin":begin,"body":body,"end":end,"id":end}))
         }
+        "subnet" => {
+            let members = ids(&op["ids"])?;
+            let (next, id) = crate::subnet_edit::group(g, &members).ok_or("subnet needs one or more existing node ids")?;
+            *g = next;
+            Ok(json!({"id":id}))
+        }
+        "ungroup" => {
+            let id = string(op, "id")?;
+            let (next, ids) = crate::subnet_edit::ungroup(g, &id).ok_or("ungroup needs the id of a subnet node")?;
+            *g = next;
+            Ok(json!({"ids":ids}))
+        }
         "box_add" | "box_set" | "box_remove" => {
             if !g["boxes"].is_array() {
                 g["boxes"] = json!([]);

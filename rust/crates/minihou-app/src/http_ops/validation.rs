@@ -223,13 +223,15 @@ pub fn validate(g: &Value) -> Result<()> {
         }
         if let Some(ins) = n.get("inputs") {
             for (port, v) in object(ins)? {
-                let i =
-                    s.inputs.iter().find(|i| i.name == port).ok_or_else(|| {
+                let r = refs(v)?;
+                // A subnet's inputs (in0, in1, ...) are defined by its boundary nodes, not by its spec.
+                if s.name != "subnet" {
+                    let i = s.inputs.iter().find(|i| i.name == port).ok_or_else(|| {
                         format!("node '{id}': '{}' has no input '{port}'", s.name)
                     })?;
-                let r = refs(v)?;
-                if !i.multi && r.len() > 1 {
-                    return Err(format!("input '{port}' takes one connection").into());
+                    if !i.multi && r.len() > 1 {
+                        return Err(format!("input '{port}' takes one connection").into());
+                    }
                 }
                 for src in r {
                     node(g, &src)?;

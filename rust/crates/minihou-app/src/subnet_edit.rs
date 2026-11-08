@@ -277,7 +277,7 @@ pub fn group(value: &Value, ids: &[String]) -> Option<(Value, String)> {
     let nodes = value.get("nodes")?.as_object()?;
     let sel: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
     if sel.is_empty() || sel.iter().any(|id| !nodes.contains_key(*id)) { return None; }
-    let displayed = minihou_app::display_nodes(value);
+    let displayed = crate::display_nodes(value);
     // Preserve each distinct outward endpoint, including native secondary outputs.
     let mut outs: Vec<Value> = Vec::new();
     for (_, nd) in nodes.iter().filter(|(id, _)| !sel.contains(id.as_str())) {
@@ -410,7 +410,7 @@ pub fn ungroup(value: &Value, id: &str) -> Option<(Value, Vec<String>)> {
             }
         }
     }
-    let shown: Vec<String> = minihou_app::display_nodes(value).iter().map(|d| if d == id {
+    let shown: Vec<String> = crate::display_nodes(value).iter().map(|d| if d == id {
         out.as_str().or_else(|| out["node"].as_str()).unwrap_or_default().to_owned()
     } else { d.clone() }).collect();
     if !shown.is_empty() { next["display"] = if shown.len() == 1 { json!(shown[0]) } else { json!(shown) }; }
@@ -453,11 +453,11 @@ mod tests {
         let graph = minihou_core::Graph::from_value(&v).unwrap();
         assert_eq!(graph.cook(None).unwrap().npoints, 0);
         assert_eq!(minihou_core::session::Session::new(graph).cook(None).unwrap().npoints, 0);
-        let doc = minihou_app::Document::parse(start.to_string()).unwrap();
+        let doc = crate::Document::parse(start.to_string()).unwrap();
         let mut session = doc.session().unwrap();
         let mut target = String::new();
-        let response = minihou_app::cook_batch(&mut session, &mut target,
-            vec![minihou_app::CookRequest { revision: 1, edit: minihou_app::Edit::Replace(v) }], |_| ());
+        let response = crate::cook_batch(&mut session, &mut target,
+            vec![crate::CookRequest { revision: 1, edit: crate::Edit::Replace(v) }], |_| ());
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(response.geometry.unwrap().npoints, 0);
     }
