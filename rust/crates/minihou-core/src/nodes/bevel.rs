@@ -29,7 +29,7 @@ pub const POLYBEVEL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: N
             optional: true,
         },
     ],
-    params: crate::params!("distance":0.1;"divisions":1;"shape":"round";"convexity":1.;"limit_overlap":true;"exclude_edges":"";"min_angle":30.;"group":"";"group_type":"points";"edges":"";"output_group":"bevel";"outgrp_pointfilletpolys":false;"outgrp_pointfilletpolys_name":"pointfilletpolys";"outgrp_pointfilletedges":false;"outgrp_pointfilletedges_name":"pointfilletedges";"outgrp_edgefilletpolys":false;"outgrp_edgefilletpolys_name":"edgefilletpolys";"outgrp_offsetedges":false;"outgrp_offsetedges_name":"offsetedges";"outgrp_offsetpoints":false;"outgrp_offsetpoints_name":"offsetpoints";"outgrp_mergedpoints":false;"outgrp_mergedpoints_name":"mergedpoints"),
+    params: crate::params!("distance":0.1;"divisions":1;"shape":"round";"convexity":1.;"profile_shape":0.5;"limit_overlap":true;"exclude_edges":"";"min_angle":30.;"group":"";"group_type":"points";"edges":"";"output_group":"bevel";"outgrp_pointfilletpolys":false;"outgrp_pointfilletpolys_name":"pointfilletpolys";"outgrp_pointfilletedges":false;"outgrp_pointfilletedges_name":"pointfilletedges";"outgrp_edgefilletpolys":false;"outgrp_edgefilletpolys_name":"edgefilletpolys";"outgrp_offsetedges":false;"outgrp_offsetedges_name":"offsetedges";"outgrp_offsetpoints":false;"outgrp_offsetpoints_name":"offsetpoints";"outgrp_mergedpoints":false;"outgrp_mergedpoints_name":"mergedpoints"),
     cook: bevel,
 };
 fn u(v: [f64; 3]) -> [f64; 3] {
@@ -548,7 +548,40 @@ struct Refiner<'a> {
     count: usize,
     shape: &'a str,
     convexity: f64,
+    /// Blender-style profile shape: 0.5 is the circular round-over, 1 a square corner, 0.25 a straight chamfer.
+    profile_shape: f64,
     profile: Option<&'a [[f64; 2]]>,
+}
+/// Interior points of Blender's bevel profile in unit-square coordinates: a superellipse with exponent
+/// r = -2 ln 2 / ln(profile), so 0.5 is a circle (r = 2), 0.25 a straight line (r = 1) and 1 a square corner.
+/// The `count - 1` points are evenly spaced along the curve, like Blender's even chord spacing.
+fn superellipse_samples(profile: f64, count: usize) -> Vec<[f64; 2]> {
+    // The two extremes are exactly two straight legs: a square corner and a concave notch.
+    let legs: Option<Vec<[f64; 2]>> = if profile >= 0.9999 { Some(vec![[1., 0.], [1., 1.], [0., 1.]]) }
+        else if profile <= 1e-4 { Some(vec![[1., 0.], [0., 0.], [0., 1.]]) } else { None };
+    let curve: Vec<[f64; 2]> = legs.unwrap_or_else(|| {
+        let exp = 2. / (-2. * std::f64::consts::LN_2 / profile.ln());
+        const N: usize = 4096;
+        (0..=N).map(|i| {
+            let th = std::f64::consts::FRAC_PI_2 * i as f64 / N as f64;
+            let (c, s) = (th.cos(), th.sin());
+            [if i == N { 0. } else { c.powf(exp) }, if i == 0 { 0. } else { s.powf(exp) }]
+        }).collect()
+    });
+    let mut along = vec![0.; curve.len()];
+    for i in 1..curve.len() {
+        along[i] = along[i - 1] + ((curve[i][0] - curve[i - 1][0]).powi(2) + (curve[i][1] - curve[i - 1][1]).powi(2)).sqrt();
+    }
+    let last = curve.len() - 1;
+    let total = along[last].max(1e-12);
+    let mut at = 0;
+    (1..count).map(|j| {
+        let target = total * j as f64 / count as f64;
+        while at + 1 < last && along[at + 1] < target { at += 1; }
+        let span = (along[at + 1] - along[at]).max(1e-12);
+        let f = ((target - along[at]) / span).clamp(0., 1.);
+        [curve[at][0] + (curve[at + 1][0] - curve[at][0]) * f, curve[at][1] + (curve[at + 1][1] - curve[at][1]) * f]
+    }).collect()
 }
 fn pair(a: usize, b: usize) -> (usize, usize) {
     (a.min(b), a.max(b))
@@ -581,6 +614,10 @@ impl Refiner<'_> {
         let x = u(sub(left, control));
         let y = u(sub(right, control));
         let weight = ((1. - dot(x, y).clamp(-1., 1.)) / 2.).max(0.).sqrt();
+        let blender_profile = self.profile.is_none() && self.shape == "round" && (self.profile_shape - 0.5).abs() > 1e-9;
+        let samples = if blender_profile { superellipse_samples(self.profile_shape, self.count) } else { Vec::new() };
+        let (e1, e2) = (sub(left, control), sub(right, control));
+        let centre = add(control, add(e1, e2));
         let mut out = vec![a];
         for j in 1..self.count {
             let t = j as f64 / self.count as f64;
@@ -607,6 +644,12 @@ impl Refiner<'_> {
                 )
             } else if self.shape == "flat" {
                 linear
+            } else if blender_profile {
+                // The profile curve lies in the parallelogram spanned by the two legs, starting on `left`
+                // and ending on `right`; (c, s) are the unit-square coordinates of the superellipse sample.
+                let [c, s] = samples[j - 1];
+                let curve = sub(centre, add(mul(e2, c), mul(e1, s)));
+                add(linear, mul(sub(curve, linear), self.convexity))
             } else {
                 add(linear, mul(sub(arc, linear), self.convexity))
             };
@@ -643,7 +686,7 @@ impl Refiner<'_> {
             .iter()
             .flat_map(|q| q[..q.len() - 1].iter().copied())
             .collect();
-        let ws = if self.shape == "flat" {
+        let ws = if self.shape == "flat" || (self.profile_shape - 0.5).abs() > 1e-9 {
             0.
         } else {
             self.convexity
@@ -822,6 +865,7 @@ fn segments(
         count,
         shape,
         convexity,
+        profile_shape: p.f("profile_shape").unwrap_or(0.5).clamp(0., 1.),
         profile,
     };
     let mut refined = Vec::new();
@@ -984,5 +1028,50 @@ mod tests {
             out.point["group_offsetpoints"].data,
             AttrData::I32(vec![0; g.npoints])
         );
+    }
+
+    /// A 2x2x2 cube with point i at (x, y, z) = (bit0, bit1, bit2) of i, mapped to -1/+1.
+    fn blender_cube() -> Geometry {
+        let pts: Vec<f32> = (0..8usize).flat_map(|i| [(i & 1) as f32 * 2. - 1., ((i >> 1) & 1) as f32 * 2. - 1., ((i >> 2) & 1) as f32 * 2. - 1.]).collect();
+        let faces: [[i32; 4]; 6] = [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]];
+        let vp: Vec<i32> = faces.iter().flatten().copied().collect();
+        Geometry::from_arrays(pts, vp, vec![0, 4, 8, 12, 16, 20, 24], None).unwrap()
+    }
+    /// The points above z = 0.5 after a 0.2 / 2 division bevel of the four top edges, rounded to 4 places.
+    fn top_points(profile_shape: f64) -> Vec<[f64; 3]> {
+        let p = Params::resolve(POLYBEVEL.params, json!({"distance":0.2,"divisions":2,"limit_overlap":false,
+            "edges":"4-5 5-7 6-7 4-6","profile_shape":profile_shape}).as_object()).unwrap();
+        let out = bevel(&[vec![Arc::new(blender_cube())], vec![]], &p).unwrap();
+        let mut pts: Vec<[f64; 3]> = out.p().chunks_exact(3).map(|c| [c[0], c[1], c[2]].map(|v| (v as f64 * 1e4).round() / 1e4))
+            .filter(|c| c[2] > 0.5).collect();
+        pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        pts.dedup();
+        pts
+    }
+    fn assert_points(got: Vec<[f64; 3]>, mut want: Vec<[f64; 3]>) {
+        want.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(got, want);
+    }
+    /// Reference points from Blender 5.2: the Bevel modifier (Offset, 0.2, 2 segments, weighted top edges) on the
+    /// default 2 m cube. Profile 0.5 is Blender's circular profile, 1.0 keeps a square corner.
+    #[test]
+    fn profile_shape_matches_blender_at_one_half_and_one() {
+        let corners = [(-1., -1.), (-1., 1.), (1., -1.), (1., 1.)];
+        let mut round = Vec::new();
+        let mut square = Vec::new();
+        for (x, y) in corners {
+            round.extend([[x, y, 0.8], [x * 0.9414, y * 0.9414, 0.9414], [x * 0.8, y * 0.8, 1.]]);
+            square.extend([[x, y, 0.8], [x, y, 1.], [x * 0.8, y * 0.8, 1.]]);
+        }
+        assert_points(top_points(0.5), round);
+        assert_points(top_points(1.), square);
+    }
+    #[test]
+    fn profile_shape_quarter_is_a_straight_chamfer() {
+        let mut chamfer = Vec::new();
+        for (x, y) in [(-1., -1.), (-1., 1.), (1., -1.), (1., 1.)] {
+            chamfer.extend([[x, y, 0.8], [x * 0.9, y * 0.9, 0.9], [x * 0.8, y * 0.8, 1.]]);
+        }
+        assert_points(top_points(0.25), chamfer);
     }
 }

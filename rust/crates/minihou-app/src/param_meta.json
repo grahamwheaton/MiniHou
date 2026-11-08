@@ -6665,6 +6665,13 @@
   }
  },
  "polybevel": {
+  "profile_shape": {
+   "default": 0.5,
+   "doc": "Shape of the bevel profile, as in Blender: 0.5 is a circular round-over, 1 keeps a square corner, 0.25 is a straight chamfer and 0 a concave notch.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
   "convexity": {
    "default": 1.0,
    "doc": "Blend from a flat profile (0) to the round profile (1).",
