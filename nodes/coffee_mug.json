@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "doc": "Adjustable coffee mug",
+  "nodes": {
+    "wall": {"type":"tube","params":{"radius_bottom":0.55,"radius_top":0.58,"height":1.0,"center":[0,0,0.5],"columns":48,"rows":8,"caps":false}},
+    "base": {"type":"tube","params":{"radius_bottom":0.55,"radius_top":0.55,"height":0.1,"center":[0,0,0.05],"columns":48,"caps":true}},
+    "lip": {"type":"torus","params":{"radius":0.55,"thickness":0.045,"center":[0,0,1],"columns":48,"rows":8}},
+    "handle": {"type":"torus","params":{"radius":0.35,"thickness":0.09,"center":[0.78,0,0.52],"rotate":[90,0,0],"columns":32,"rows":12}},
+    "parts": {"type":"merge","inputs":{"geos":["wall","base","lip","handle"]}},
+    "output": {"type":"output","inputs":{"geo":"parts"}}
+  },
+  "display": "output",
+  "exposed": [
+    {"node":"wall","param":"height","name":"Mug Height"},
+    {"node":"wall","param":"radius_top","name":"Top Radius"},
+    {"node":"wall","param":"radius_bottom","name":"Bottom Radius"},
+    {"node":"handle","param":"radius","name":"Handle Radius"},
+    {"node":"handle","param":"thickness","name":"Handle Thickness"}
+  ]
+}
