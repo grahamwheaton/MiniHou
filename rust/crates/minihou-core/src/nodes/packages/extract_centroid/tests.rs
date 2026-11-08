@@ -156,3 +156,15 @@ fn test_extract_centroid_parameter_order_and_defaults() {
     let out = run(cube, json!({}));
     assert_eq!(out.npoints, 1);
 }
+
+#[test]
+fn points_edges_faces_object_domains() {
+    let cube = unit_cube();
+    let n = cube.npoints;
+    assert_eq!(run(cube.clone(), json!({"domain": "points"})).npoints, n);
+    assert_eq!(run(cube.clone(), json!({"domain": "edges"})).npoints, 12);
+    assert_eq!(run(cube.clone(), json!({"domain": "faces"})).npoints, 6);
+    let o = run(cube, json!({"domain": "object"}));
+    assert_eq!(o.npoints, 1);
+    assert!(o.p().iter().all(|v| v.abs() < 1e-5));
+}

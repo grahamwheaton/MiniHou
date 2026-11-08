@@ -5,13 +5,14 @@
     "kind": "str"
   },
   "domain": {
-    "default": "detail",
-    "doc": "Calculate centroid for whole geometry (detail), per piece (pieces), or per primitive (primitives)",
+    "default": "object",
+    "doc": "Centroid of each point, each edge (its midpoint), each face, or each connected object (the whole geometry when it is one object). Edges always output points",
     "kind": "enum",
     "options": [
-      "detail",
-      "pieces",
-      "primitives"
+      "points",
+      "edges",
+      "faces",
+      "object"
     ]
   },
   "method": {
