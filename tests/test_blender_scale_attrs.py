@@ -118,6 +118,49 @@ class ScaleAndAttributeTests(unittest.TestCase):
         _, got = evaluated(obj)
         self.assertEqual(got, {p: round(v, 4) for p, v in want.items()})
 
+    def cube_with_weights(self, scale=(1, 1, 1)):
+        mesh = bpy.data.meshes.new("Cube")
+        bpy.context.scene.collection.objects.link(bpy.data.objects.new("Cube", mesh))
+        obj = bpy.data.objects["Cube"]
+        bpy.ops.object.select_all(action="DESELECT")
+        bm_pts = [(x, y, z) for z in (-1, 1) for y in (-1, 1) for x in (-1, 1)]
+        faces = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+        mesh.from_pydata(bm_pts, [], faces)
+        obj.scale = scale
+        a = mesh.attributes.new("bevel_weight_edge", "FLOAT", "EDGE")
+        a.data.foreach_set("value", [1.0] * len(mesh.edges))           # every edge weighted
+        return obj
+
+    def bevel_after(self, obj):
+        bev = obj.modifiers.new("Bevel", "BEVEL")
+        bev.limit_method = "WEIGHT"
+        bev.width = 0.1
+        bev.segments = 1
+        bpy.context.view_layer.update()
+        return len(evaluated(obj)[0])
+
+    def test_a_bevel_after_minihou_still_sees_the_weights(self):
+        plain = self.cube_with_weights(scale=(15.421, 15.421, 1))
+        before = self.bevel_after(plain)                                  # Blender alone: all edges bevel
+        self.assertGreater(before, 8)
+        bpy.data.objects.remove(plain)
+        obj = self.cube_with_weights(scale=(15.421, 15.421, 1))
+        mod = self.modifier(obj, Scale=1.0, Translate=(0, 0, 0))
+        obj.modifiers.move(len(obj.modifiers) - 1, 0) if False else None
+        after = self.bevel_after(obj)
+        self.assertEqual(after, before, "the weights did not reach the Bevel modifier after MiniHou")
+
+    def test_weights_survive_a_second_cook_after_a_parameter_change(self):
+        obj = self.cube_with_weights(scale=(3, 3, 1))
+        mod = self.modifier(obj, Scale=1.0, Translate=(0, 0, 0))
+        self.proxy.write_values(mod, mod.node_group, self.m.parameters(mod), {"Scale": 2.0})
+        self.m.pump(port=self.engine.port)
+        self.assertEqual(self.m.last_error(), "")
+        bpy.context.view_layer.update()
+        co, weights = evaluated(obj)
+        self.assertEqual(len(weights), 12)
+        self.assertTrue(all(w == 1.0 for w in weights.values()), weights)
+
 
 if __name__ == "__main__":
     unittest.main(argv=["x"], exit=bpy is None)
