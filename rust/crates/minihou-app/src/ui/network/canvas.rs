@@ -487,7 +487,8 @@ pub(super) fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, sta
         }
     }
     canvas_menu(ctx, id, state, v, out, r, &positions);
-    p.text(pos2(r.left() + 10.0, r.bottom() - 8.0), Align2::LEFT_BOTTOM, "Tab add node · Home frame all · Del delete", FontId::proportional(11.0), v.theme.faint);
+    p.text(pos2(r.left() + 10.0, r.bottom() - 26.0), Align2::LEFT_BOTTOM, "Tab add node · Home frame all · Del delete", FontId::proportional(11.0), v.theme.faint);
+    crate::ui::status::cook_line(&p, pos2(r.left() + 16.0, r.bottom() - 12.0), v);
 }
 
 fn grid(p: &egui::Painter, r: Rect, state: &State, color: Color32) {

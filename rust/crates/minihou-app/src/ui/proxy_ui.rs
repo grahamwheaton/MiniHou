@@ -24,7 +24,8 @@ pub fn menu(ui: &mut egui::Ui, v: &View, out: &mut Actions, compact: bool) {
     let label = if p.clustered { cluster_label.to_owned() } else { label };
     ui.scope(|ui| {
         ui.style_mut().spacing.interact_size.y = 26.;
-        ui.menu_button(RichText::new(label).size(12.).color(v.theme.text), |ui| {
+        // MenuButton, not ui.menu_button: inside a popup that call becomes a sub-menu button and appends an arrow glyph the UI font lacks.
+        egui::containers::menu::MenuButton::new(RichText::new(label).size(12.).color(v.theme.text)).ui(ui, |ui| {
             ui.set_min_width(180.);
             if ui.selectable_label(p.clustered, "Clustered LOD").clicked() {
                 out.push(UiAction::Editor(EditorChange::ProxyClustered(true)));
