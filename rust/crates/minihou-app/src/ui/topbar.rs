@@ -59,8 +59,6 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             let (logo, _) = ui.allocate_exact_size(Vec2::splat(20.), Sense::hover());
             ui.painter().rect_filled(logo.shrink(1.), 4., v.theme.accent);
             path(ui.painter(), logo.min, &[&[(5., 14.), (5., 6.), (10., 11.), (15., 6.), (15., 14.)]], Color32::WHITE, 2.);
-            let (name, _) = ui.allocate_exact_size(Vec2::new(55., 20.), Sense::hover());
-            ui.painter().text(name.left_center(), Align2::LEFT_CENTER, "MiniHou", FontId::proportional(13.), v.theme.text);
             separator(ui, v);
             ui.menu_button("File", |ui| {
                 for (label, action) in file_menu_entries() {
@@ -70,6 +68,11 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                 if ui.button("Export USD…").clicked() { out.push(UiAction::Command("export_usd".into())); ui.close(); }
             });
             ui.menu_button("Edit", |ui| {
+                if ui.add_enabled(v.can_undo, egui::Button::new("Undo")).clicked() { out.push(UiAction::Undo); ui.close(); }
+                if ui.add_enabled(v.can_redo, egui::Button::new("Redo")).clicked() { out.push(UiAction::Redo); ui.close(); }
+                let repeat_tip = v.repeat_label.unwrap_or("Nothing to repeat (Shift+R)");
+                if ui.add_enabled(v.repeat_label.is_some(), egui::Button::new("Repeat")).on_hover_text(repeat_tip).clicked() { out.push(UiAction::RepeatLast); ui.close(); }
+                ui.separator();
                 if ui.button("Clear all").clicked() { out.push(UiAction::ClearMeasurements); ui.close(); }
             });
             ui.menu_button("Preferences", |ui| {
@@ -78,11 +81,6 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                     if ui.button(label).clicked() { out.push(action); ui.close(); }
                 }
             });
-            separator(ui, v);
-            if button(ui, "Undo", "undo", v.can_undo, false, v, None) { out.push(UiAction::Undo); }
-            if button(ui, "Redo", "redo", v.can_redo, false, v, None) { out.push(UiAction::Redo); }
-            let repeat_tip = v.repeat_label.unwrap_or("Nothing to repeat (Shift+R)");
-            if button(ui, "Repeat", "redo", v.repeat_label.is_some(), false, v, Some(repeat_tip)) { out.push(UiAction::RepeatLast); }
             let filename = v.path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
             let trailing = 12. * filename.len() as f32 * 0.61 + if v.dirty { 18. } else { 0. };
             ui.add_space((ui.available_width() - trailing).max(0.));
@@ -140,10 +138,10 @@ mod tests {
             frame(vec![egui::Event::PointerMoved(p), egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }])
         };
         frame(vec![]);
-        click(Pos2::new(170., 27.));
+        click(Pos2::new(107., 27.));
         // Next frame to let popup layout
-        frame(vec![egui::Event::PointerMoved(Pos2::new(185., 53.))]);
-        let out = click(Pos2::new(185., 53.));
+        frame(vec![egui::Event::PointerMoved(Pos2::new(125., 127.))]);
+        let out = click(Pos2::new(125., 127.));
         assert!(out.0.iter().any(|a| matches!(a, UiAction::ClearMeasurements)));
     }
 }

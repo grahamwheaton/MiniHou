@@ -111,6 +111,7 @@ fn overlay_contents(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) 
     let prop_main = Rect::from_min_max(h.prop.min, Pos2::new(h.prop.right() - 16., h.prop.bottom()));
     if button_text(ui, th, prop_main, "vp_prop_toggle", ed.proportional.enabled, "Toggle proportional editing (O)", Icon::Prop, (None, false)) { out.push(UiAction::Editor(EditorChange::ProportionalEnabled(!ed.proportional.enabled))); }
     if caret_button(ui, th, h.prop, "vp_prop_menu", st.popover == Some(Popover::Proportional)) { st.popover = toggle_popover(st.popover, Popover::Proportional); }
+    painter.rect(h.proxy, 5., th.panel2, stroke, StrokeKind::Inside);
     ui.scope_builder(egui::UiBuilder::new().max_rect(h.proxy), |ui| {
         ui.set_clip_rect(h.proxy);
         super::proxy_ui::menu(ui, v, out, h.proxy.width() < 80.);
