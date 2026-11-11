@@ -23,9 +23,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 NAME = "MiniHou"
+# Inputs the packed app cannot run without. Checked before PyInstaller so a missing folder fails with its name, not a traceback.
+REQUIRED_INPUTS = ["minihou/assets/minihou.ico", "minihou/web/static/index.html", "minihou/web/static/editor.js",
+                   "blender_addon/minihou_link", "examples/graphs", "nodes"]
+
+
+def check_inputs() -> None:
+    missing = [p for p in REQUIRED_INPUTS if not (ROOT / p).exists()]
+    if missing:
+        raise SystemExit("build aborted, missing from the checkout: " + ", ".join(missing))
 
 
 def build(with_accel: bool, destination: Path = DIST) -> Path:
+    check_inputs()
     sep = os.pathsep
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed", "--name", NAME,
            "--distpath", str(destination), "--workpath", str(ROOT / "build" / "pyinstaller"), "--specpath", str(ROOT / "build"),
