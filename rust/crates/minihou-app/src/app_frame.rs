@@ -159,6 +159,11 @@ impl eframe::App for App {
                 let shelf = egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
                 ui::dock::shelf_lock_button(ctx, shelf.response.rect, true, &mut out);
             }
+            ui::key_hints::set(ctx, match (&self.modal, &self.model_modal) {
+                (Some(modal), _) => ui::key_hints::Context::Transform(modal.kind),
+                (None, Some(_)) => ui::key_hints::Context::Modelling,
+                _ => ui::key_hints::Context::Idle,
+            });
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             ui::network::set_physics_snappiness(ctx, self.prefs.node_physics_snappiness);
             if let Some(targets) = self.subnet_pending_selection.take() {

@@ -18,6 +18,7 @@ pub mod proxy_ui;
 pub mod selection_region;
 pub mod shelf;
 pub mod status;
+pub mod key_hints;
 pub mod sketch;
 pub mod mesh_cut;
 pub mod theme;

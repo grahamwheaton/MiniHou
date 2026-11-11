@@ -21,18 +21,16 @@ fn span(p: &egui::Painter, x: &mut f32, y: f32, text: &str, mono: bool, color: C
 
 fn blender_cap_text(cap: u32) -> Option<String> { (cap > 0).then(|| format!("Blender cap: {cap} tris")) }
 
-pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
-    let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(bar, 0., v.theme.panel2);
-    p.line_segment([bar.left_top() + Vec2::new(0., 0.5), bar.right_top() + Vec2::new(0., 0.5)], Stroke::new(1.0_f32, v.theme.stroke));
-    let y = bar.center().y;
+/// The cook dot and message ("Cooked: box1 in 0 ms", errors, waiting), drawn left-aligned from `origin`
+/// (the dot's centre is at `origin`). It lives in the Network panel footer.
+pub fn cook_line(p: &egui::Painter, origin: Pos2, v: &View) {
+    let y = origin.y;
     let (dot_color, state) = if v.cooking.cooking() { (v.theme.accent, 1) }
         else if v.cooking.error.is_some() { (v.theme.err, 2) }
         else if !v.cooking.stats.waiting.is_empty() { (v.theme.warn, 3) }
         else { (v.theme.ok, 0) };
-    p.circle_filled(Pos2::new(bar.left() + 13.5, y), 3.5, dot_color);
-    let mut x = bar.left() + 28.;
+    p.circle_filled(origin, 3.5, dot_color);
+    let mut x = origin.x + 14.5;
     match state {
         1 => span(p, &mut x, y, "Cooking...", false, v.theme.text),
         2 => {
@@ -62,12 +60,41 @@ pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
         x += 14.;
         span(p, &mut x, y, &cap, true, v.theme.dim);
     }
+}
+
+/// One key cap and its label per hint, left to right, stopping before `limit`.
+fn draw_hints(p: &egui::Painter, left: f32, limit: f32, y: f32, v: &View, hints: &[super::key_hints::Hint]) {
+    let mut x = left;
+    for hint in hints {
+        let caps: Vec<_> = hint.keys.iter().map(|k| p.layout_no_wrap((*k).to_owned(), FontId::proportional(11.), v.theme.text)).collect();
+        let width: f32 = caps.iter().map(|cap| cap.size().x.max(8.) + 10. + 3.).sum();
+        let label = p.layout_no_wrap(hint.label.to_owned(), FontId::proportional(12.), v.theme.dim);
+        if x + width + label.size().x > limit { break; }
+        for cap in caps {
+            let w = cap.size().x.max(8.) + 10.;
+            let rect = Rect::from_min_size(Pos2::new(x, y - 9.), Vec2::new(w, 18.));
+            p.rect_stroke(rect, 4., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside);
+            p.galley(Pos2::new(rect.center().x - cap.size().x / 2., y - cap.size().y / 2.), cap, v.theme.text);
+            x += w + 3.;
+        }
+        p.galley(Pos2::new(x + 2., y - label.size().y / 2.), label.clone(), v.theme.dim);
+        x += label.size().x + 18.;
+    }
+}
+
+pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
+    let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(bar, 0., v.theme.panel2);
+    p.line_segment([bar.left_top() + Vec2::new(0., 0.5), bar.right_top() + Vec2::new(0., 0.5)], Stroke::new(1.0_f32, v.theme.stroke));
+    let y = bar.center().y;
     let right = bar.right() - 10.;
     let file_width = if v.file_status.is_empty() { 0. } else { p.layout_no_wrap(v.file_status.to_owned(), FontId::proportional(12.), v.theme.dim).size().x + 14. };
     let label = build_label();
     let text_width = p.layout_no_wrap(label.clone(), FontId::proportional(11.), v.theme.dim).size().x;
     let chip_width = text_width + 32.;
     let chip = Rect::from_center_size(Pos2::new(right - file_width - chip_width / 2., y), Vec2::new(chip_width, 18.));
+    draw_hints(p, bar.left() + 10., chip.left() - 12., y, v, &super::key_hints::hints(super::key_hints::current(ui.ctx())));
     p.rect_stroke(chip, 9., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside);
     p.circle_filled(Pos2::new(chip.left() + 11., y), 3.5, v.theme.ok);
     p.text(Pos2::new(chip.left() + 21., y), Align2::LEFT_CENTER, label, FontId::proportional(11.), v.theme.dim);
