@@ -36,6 +36,12 @@ _source_digests = {}
 _endpoint = None
 _owners = {}
 _digests = {}
+# Evaluated geometry in front of each instance, from its last read. Reading it copies the object, links the copy into
+# the scene and evaluates it, which tags the scene as changed and restarts a Cycles render, so an idle tick reuses it
+# until Blender reports a change that is not ours.
+_prefix_reads = {}          # instance id -> (arrays, materials, scene_changes when read)
+_scene_changes = 0          # bumped for every update Blender reports that is not the add-on's own
+_own_edit = False
 _failures = {}
 _registered = False
 _rendering = False
@@ -656,6 +662,45 @@ def _check_prefix_dependencies(obj, preceding):
                         check_target(proxy.get_input(modifier, item.identifier))
 
 
+def _is_internal(update_id):
+    """Datablocks the add-on itself creates and rewrites while it works; their updates are not user edits."""
+    name = getattr(update_id, "name", "")
+    kind = type(update_id).__name__
+    if kind == "Object":
+        return name.startswith("__MiniHou_prefix__") or CACHE in update_id
+    if kind == "GeometryNodeTree":
+        return name.startswith("__MiniHou_prefix_realize__")
+    return kind == "Collection" and name == "MiniHou Modifier Caches"
+
+
+@persistent
+def _note_changes(_scene, depsgraph):
+    """Remember that something other than the add-on's own work changed, so the next tick re-reads the prefix."""
+    global _scene_changes
+    if not _own_edit and any(not _is_internal(update.id) for update in depsgraph.updates):
+        _scene_changes += 1
+
+
+def _prefix(obj, mod, ident, force):
+    """(arrays, materials) in front of ``mod``: the cached read while nothing changed, else a fresh one."""
+    global _scene_changes, _own_edit
+    if _note_changes not in bpy.app.handlers.depsgraph_update_post:     # also when pump() is driven without register()
+        bpy.app.handlers.depsgraph_update_post.append(_note_changes)
+        _scene_changes += 1
+    bpy.context.view_layer.update()          # lets pending edits reach _note_changes first; does nothing when none are pending
+    cached = _prefix_reads.get(ident)
+    if cached is not None and not force and cached[2] == _scene_changes:
+        return cached[:2]
+    _own_edit = True
+    try:
+        read = read_prefix(obj, mod, with_materials=True)
+        bpy.context.view_layer.update()      # removing the copy tags the scene again; flush that while muted too
+    finally:
+        _own_edit = False
+    _prefix_reads[ident] = (*read, _scene_changes)
+    return read
+
+
 def read_prefix(obj, mod, *, with_materials=False):
     """Read evaluated geometry immediately BEFORE mod without toggling the real object's stack."""
     index = list(obj.modifiers).index(mod)
@@ -830,7 +875,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     # A changed graph may no longer instance anything, so its old binding
                     # must not prevent cooking and validating the new output.
                     _disconnect_unsafe_sources(obj, mod)
-                    arrays, materials = read_prefix(obj, mod, with_materials=True)
+                    arrays, materials = _prefix(obj, mod, instance_id(mod), force)
                     materials = list(materials)
                     values = proxy.read_values(mod, ng, parameters(mod))
                     source_token = ""
@@ -1016,6 +1061,7 @@ def _frame_post(scene, _depsgraph=None):
 
 @persistent
 def _load_post(_dummy):
+    _prefix_reads.clear()
     _render_done(None)
     _owners.clear()
     disconnect()
@@ -1031,6 +1077,8 @@ def register():
             handlers.append(callback)
     if _load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_load_post)
+    if _note_changes not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_note_changes)
     if _frame_post not in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.append(_frame_post)
     if not bpy.app.timers.is_registered(_timer):
